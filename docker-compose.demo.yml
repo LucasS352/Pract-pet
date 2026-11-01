@@ -1,0 +1,91 @@
+# ================================================================
+# docker-compose.demo.yml
+# Stack isolada para o ambiente de demonstração (Servidor Smartek)
+# Uso: docker compose -f docker-compose.demo.yml up -d
+# ================================================================
+# Apenas 3 containers: MySQL + Backend + Frontend
+# Sem NFC-e service e sem Integrations Hub (não necessários para demo)
+# ================================================================
+
+services:
+  # ─── MySQL Database (Demo) ──────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: demo_mysql
+    restart: unless-stopped
+    command: --innodb-redo-log-capacity=268435456
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-7bar@2025}
+      MYSQL_DATABASE: demo_adega
+    ports:
+      - "3309:3306"
+    volumes:
+      - demo_mysql_data:/var/lib/mysql
+      - ./mysql/demo-init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+      - ./mysql/demo-seed.sql:/docker-entrypoint-initdb.d/02-seed.sql:ro
+    networks:
+      - demo_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-7bar@2025}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Backend (NestJS - Demo Mode) ──────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: demo_backend
+    restart: unless-stopped
+    ports:
+      - "3524:3520"
+    environment:
+      PORT: 3520
+      APP_MODE: demo
+      DATABASE_URL_HEART: mysql://root:7bar%402025@mysql:3306/heart
+      DATABASE_URL_TENANT: mysql://root:7bar%402025@mysql:3306/demo_adega
+      JWT_SECRET: ${JWT_SECRET:-demo_jwt_secret_2025}
+      SETUP_PIN: ${SETUP_PIN:-teltech352}
+      # NFC-e desabilitado na demo
+      NFCE_SERVICE_URL: ""
+      TZ: America/Sao_Paulo
+    volumes:
+      - demo_uploads_data:/app/uploads
+      - ./mysql/demo-seed.sql:/app/demo-seed.sql:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - demo_network
+
+  # ─── Frontend (Vite/React PWA - Demo Mode) ─────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_APP_MODE: demo
+    container_name: demo_frontend
+    restart: unless-stopped
+    ports:
+      - "3525:3521"
+    environment:
+      PORT: 3521
+    depends_on:
+      - backend
+    volumes:
+      - demo_uploads_data:/usr/share/nginx/html/uploads:ro
+    networks:
+      - demo_network
+
+volumes:
+  demo_mysql_data:
+    name: demo_mysql_data
+  demo_uploads_data:
+    name: demo_uploads_data
+
+networks:
+  demo_network:
+    name: demo_network
+    driver: bridge

@@ -1,0 +1,581 @@
+// ============================================================
+//  TENANT SCHEMA — Banco por empresa (multi-tenant)
+//  Cada tenant tem seu próprio banco com esta estrutura
+// ============================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL_TENANT")
+}
+
+// ------------------------------------------------------------
+//  GrupoTributacao — regras fiscais por grupo de produtos
+//  Baseado na estrutura GRUPO_TRIBUTACAO + TRIBUTACAO do Packon
+// ------------------------------------------------------------
+model GrupoTributacao {
+  id    String @id @default(uuid())
+  nome  String // ex: "TRIBUTADOS - Consumidor Final SP"
+  ativo Boolean @default(true)
+
+  // ICMS — Simples Nacional
+  csosn     String? // 102=SN s/ crédito, 400=Isento ST, 500=ST recolhido
+  // ICMS — Regime Normal
+  cstIcms   String? // 00=Tributado, 10=Com ST, 20=Red BC, 60=ST retido...
+  cfop      String  // 5102=Venda interna, 6108=Venda outra UF
+  aliqIcms  Decimal @default(0) @db.Decimal(5, 2)
+
+  // Redução de base de cálculo ICMS (quando aplicável)
+  redBcIcms Decimal @default(0) @db.Decimal(5, 2)
+
+  // PIS
+  cstPis    String  @default("99") // 99=SN, 01=Tributado, 07=Isento...
+  aliqPis   Decimal @default(0)    @db.Decimal(5, 2)
+
+  // COFINS
+  cstCofins String  @default("99")
+  aliqCofins Decimal @default(0)   @db.Decimal(5, 2)
+
+  // IPI (opcional — bebidas podem ter)
+  cstIpi    String?
+  aliqIpi   Decimal @default(0) @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products  Product[]
+  categories Category[]
+
+  @@map("grupo_tributacao")
+}
+
+// ------------------------------------------------------------
+//  Category — categorias de produto
+// ------------------------------------------------------------
+model Category {
+  id                 String           @id @default(uuid())
+  name               String           @unique
+  grupoTributacaoId  String?
+  grupoTributacao    GrupoTributacao? @relation(fields: [grupoTributacaoId], references: [id], onDelete: SetNull)
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  products  Product[]
+
+  @@map("categories")
+}
+
+// ------------------------------------------------------------
+//  Product — cadastro completo com campos fiscais
+//  Espelhado nos campos PRO_* do Packon identificados no Firebird
+// ------------------------------------------------------------
+model Product {
+  id                  String           @id @default(uuid())
+  categoryId          String
+  category            Category         @relation(fields: [categoryId], references: [id])
+  grupoTributacaoId   String?
+  grupoTributacao     GrupoTributacao? @relation(fields: [grupoTributacaoId], references: [id])
+
+  // Dados básicos
+  name      String
+  shortCode String?  @unique // código interno curto
+  barcode   String?  @unique // EAN-13 / GTIN
+  unit      String   @default("UN") // UN, KG, LT, CX, DZ, PCT...
+  active    Boolean  @default(true)
+  imageUrl  String?  @db.Text // URL da imagem do produto
+
+  // Preços
+  priceCost Decimal  @db.Decimal(10, 4) // custo
+  priceSell Decimal  @db.Decimal(10, 4) // preço de venda
+
+  // Estoque e Vendas
+  stock     Decimal  @default(0) @db.Decimal(10, 3) // Decimal para fracionados
+  salesCount Int     @default(0) // Contador de vendas para ranking no PDV
+
+  // Campos Fiscais (NCM, CEST vindos do Packon PRO_NCM / PRO_CEST)
+  ncm     String? // 8 dígitos — obrigatório para NFC-e
+  cest    String? // 7 dígitos — quando há ST
+  origem  Int     @default(0)
+  // 0=Nacional, 1=Estrangeiro import direta, 2=Estrangeiro adquirido no mercado interno
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  isComposite    Boolean  @default(false)
+  volumeUnit     String?  // ML, UN
+  volumeCapacity Decimal? @db.Decimal(10, 3)
+
+  saleItems           SaleItem[]
+  inventoryLogs       InventoryLog[]
+  modifierGroups      ProductModifierGroup[]  @relation("ProductModifiers")
+  modifierOptionsUsed ProductModifierOption[] @relation("ComponentProduct")
+  saleItemModifiers   SaleItemModifier[]      @relation("ComponentProduct")
+  lots                StockLot[]
+
+  supplierProducts    SupplierProduct[]
+  purchaseOrderItems  PurchaseOrderItem[]
+
+  @@map("products")
+}
+
+// ------------------------------------------------------------
+//  Customer — consumidor (destinatário da NFC-e)
+// ------------------------------------------------------------
+model Customer {
+  id        String  @id @default(uuid())
+  name      String
+  phone     String  @unique
+  cpfCnpj   String? // CPF ou CNPJ (identificação na NFC-e)
+  address   String?
+  reference String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales Sale[]
+
+  @@map("customers")
+}
+
+// ------------------------------------------------------------
+//  Operator — colaboradores da empresa
+// ------------------------------------------------------------
+model Operator {
+  id        String   @id @default(uuid())
+  name      String
+  pin       String   // PIN hasheado do operador (ex: Julio)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales         Sale[]
+  cashRegisters CashRegister[]
+  consumptions  OperatorConsumption[] @relation("OperatorConsumptions")
+
+  @@map("operators")
+}
+
+// ------------------------------------------------------------
+//  OperatorConsumption — consumo de colaboradores (comandas)
+// ------------------------------------------------------------
+model OperatorConsumption {
+  id         String    @id @default(uuid())
+  operatorId String
+  operator   Operator  @relation("OperatorConsumptions", fields: [operatorId], references: [id], onDelete: Cascade)
+  saleId     String    @unique
+  sale       Sale      @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  settled    Boolean   @default(false)
+  settledAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@map("operator_consumptions")
+}
+
+// ------------------------------------------------------------
+//  Sale — cabeçalho da venda + dados NFC-e
+// ------------------------------------------------------------
+model Sale {
+  id             String        @id @default(uuid())
+  customerId     String?
+  customer       Customer?     @relation(fields: [customerId], references: [id])
+  operatorId     String?       // ID do colaborador
+  operator       Operator?     @relation(fields: [operatorId], references: [id])
+  cashRegisterId String?
+  cashRegister   CashRegister? @relation(fields: [cashRegisterId], references: [id])
+
+  // Valores
+  subtotal Decimal @default(0) @db.Decimal(10, 2)
+  discount Decimal @default(0) @db.Decimal(10, 2)
+  total    Decimal @db.Decimal(10, 2)
+
+  // Status da venda
+  status String @default("completed") // completed, cancelled
+  source String @default("pdv") // pdv, ifood, rappi, goomer...
+
+  // NFC-e — dados de emissão
+  emitirNfce Boolean @default(false)  // o operador escolheu emitir?
+  nfceStatus String? // pendente, autorizada, rejeitada, cancelada, nao_emitida
+
+  // Dados retornados pelo microsserviço PHP após autorização
+  nfceNumero      Int?    // número sequencial da nota
+  nfceSerie       Int?    // série
+  nfceChave       String? @unique // chave de acesso 44 dígitos
+  nfceProtocolo   String? // número do protocolo SEFAZ
+  nfceAutorizadaEm DateTime?
+
+  // Armazenamento do resultado
+  nfceXml    String? @db.LongText // XML completo autorizado
+  nfceQrcode String? @db.Text     // URL do QR Code
+
+  // Erro (quando rejeitada)
+  nfceCodRejeicao    String?
+  nfceMotivoRejeicao String? @db.Text // Mensagens SEFAZ podem ser longas
+
+  // CPF do consumidor informado na emissão (opcional)
+  consumidorCpf  String?
+  consumidorNome String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  cancelReason        String?       @db.Text
+  cancelledAt         DateTime?
+
+  items               SaleItem[]
+  payments            Payment[]
+  operatorConsumption OperatorConsumption?
+
+  @@index([createdAt])
+  @@map("sales")
+}
+
+// ------------------------------------------------------------
+//  SaleItem — itens da venda com SNAPSHOT fiscal imutável
+//  Os tributos são congelados no momento da venda
+//  (conformidade fiscal — nota não pode ser recalculada)
+// ------------------------------------------------------------
+model SaleItem {
+  id        String  @id @default(uuid())
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  // Snapshot do produto no momento da venda
+  productName String  @default("") // nome no momento da venda
+  unit        String  @default("UN")
+  quantity    Decimal @db.Decimal(10, 3)
+  priceUnit   Decimal @db.Decimal(10, 4)
+  discount    Decimal @default(0) @db.Decimal(10, 2)
+  subtotal    Decimal @db.Decimal(10, 2)
+
+  // Snapshot fiscal (congelado — NÃO alterar após criação)
+  ncm        String? // NCM do produto na hora da venda
+  cest       String? // CEST
+  cfop       String? // CFOP aplicado
+  origem     Int     @default(0)
+
+  // ICMS (Simples Nacional ou Regime Normal — apenas um será preenchido)
+  csosn      String? // Simples Nacional: 102, 400, 500...
+  cstIcms    String? // Regime Normal: 00, 10, 20, 60...
+  aliqIcms   Decimal @default(0) @db.Decimal(5, 2)
+  valorIcms  Decimal @default(0) @db.Decimal(10, 2)
+
+  // PIS
+  cstPis     String  @default("99")
+  aliqPis    Decimal @default(0) @db.Decimal(5, 2)
+  valorPis   Decimal @default(0) @db.Decimal(10, 2)
+
+  // COFINS
+  cstCofins  String  @default("99")
+  aliqCofins Decimal @default(0) @db.Decimal(5, 2)
+  valorCofins Decimal @default(0) @db.Decimal(10, 2)
+
+  modifiers           SaleItemModifier[]
+  lotConsumptions     StockLotConsumption[]
+  priceCost           Decimal               @default(0) @db.Decimal(10, 4)
+  settled             Boolean               @default(false)
+  settledAt           DateTime?
+
+  @@map("sale_items")
+}
+
+// ------------------------------------------------------------
+//  Payment — formas de pagamento com código tPag SEFAZ
+// ------------------------------------------------------------
+model Payment {
+  id     String @id @default(uuid())
+  saleId String
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  // tPag — código oficial SEFAZ (Tab. 5.4)
+  // 01=Dinheiro, 03=Cartão Crédito, 04=Cartão Débito, 17=PIX, 99=Outros
+  tPag   String  @default("99")
+  method String // label amigável: cash, credit, debit, pix, other
+  value  Decimal @db.Decimal(10, 2)
+  troco  Decimal @default(0) @db.Decimal(10, 2)
+
+  @@map("payments")
+}
+
+// ------------------------------------------------------------
+//  CashRegister — abertura e fechamento de caixa
+// ------------------------------------------------------------
+model CashRegister {
+  id           String    @id @default(uuid())
+  operatorId   String?   // ID do colaborador
+  operator     Operator? @relation(fields: [operatorId], references: [id])
+  openingTime  DateTime  @default(now())
+  closingTime  DateTime?
+  openingValue Decimal   @default(0) @db.Decimal(10, 2)
+  closingValue Decimal?  @db.Decimal(10, 2)
+  status       String    @default("open") // open, closed
+
+  movements CashMovement[]
+  sales     Sale[]
+
+  @@index([status])
+  @@map("cash_registers")
+}
+
+// ------------------------------------------------------------
+//  CashMovement — suprimento e sangria
+// ------------------------------------------------------------
+model CashMovement {
+  id             String       @id @default(uuid())
+  cashRegisterId String
+  cashRegister   CashRegister @relation(fields: [cashRegisterId], references: [id])
+
+  type      String  // IN=suprimento, OUT=sangria
+  value     Decimal @db.Decimal(10, 2)
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("cash_movements")
+}
+
+// ------------------------------------------------------------
+//  InventoryLog — histórico de movimentações de estoque
+// ------------------------------------------------------------
+model InventoryLog {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  type      String  // IN=entrada, OUT=ajuste saída, SALE=venda PDV
+  quantity  Decimal @db.Decimal(10, 3)
+  costPrice Decimal? @db.Decimal(10, 4)
+  reason    String?
+
+  createdAt DateTime @default(now())
+
+  @@map("inventory_logs")
+}
+
+// ------------------------------------------------------------
+//  NumeracaoNfce — controle sequencial de numeração por série
+//  Garante sequência sem gaps (exigência SEFAZ)
+// ------------------------------------------------------------
+model NumeracaoNfce {
+  id     String  @id @default(uuid())
+  serie  Int
+  ultimo Int     @default(0) // último número emitido
+
+  @@unique([serie])
+  @@map("numeracao_nfce")
+}
+
+// ------------------------------------------------------------
+//  TenantSettings — configurações globais do tenant
+//  Tabela de linha única (singleton), gerenciada via upsert
+// ------------------------------------------------------------
+model TenantSettings {
+  id                 String  @id @default("singleton")
+  /// Permite que o PDV finalize vendas mesmo com estoque zerado ou negativo
+  allowNegativeStock Boolean @default(false)
+  /// PIN numérico (hasheado) para autorizar descontos no PDV
+  discountPin        String? 
+
+  @@map("tenant_settings")
+}
+
+// ------------------------------------------------------------
+//  ProductModifierGroup — grupos de adicionais (ex: "Escolha o Gelo")
+// ------------------------------------------------------------
+model ProductModifierGroup {
+  id          String                  @id @default(uuid())
+  productId   String
+  product     Product                 @relation("ProductModifiers", fields: [productId], references: [id], onDelete: Cascade)
+  name        String                  // ex: "Escolha o Energético"
+  minSelected Int                     @default(1)
+  maxSelected Int                     @default(1)
+  options     ProductModifierOption[]
+
+  @@map("product_modifier_groups")
+}
+
+// ------------------------------------------------------------
+//  ProductModifierOption — opções de adicionais vinculadas a produtos reais
+// ------------------------------------------------------------
+model ProductModifierOption {
+  id                 String               @id @default(uuid())
+  groupId            String
+  group              ProductModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name               String               // ex: "TNT"
+  componentProductId String
+  componentProduct   Product              @relation("ComponentProduct", fields: [componentProductId], references: [id], onDelete: Restrict)
+  quantity           Decimal              @db.Decimal(10, 3) // ex: 100.000 para ML, 1.000 para UN
+  priceAdjustment    Decimal              @default(0) @db.Decimal(10, 2)
+
+  @@map("product_modifier_options")
+}
+
+// ------------------------------------------------------------
+//  SaleItemModifier — persistência das opções escolhidas na venda
+// ------------------------------------------------------------
+model SaleItemModifier {
+  id                 String   @id @default(uuid())
+  saleItemId         String
+  saleItem           SaleItem @relation(fields: [saleItemId], references: [id], onDelete: Cascade)
+  componentProductId String
+  componentProduct   Product  @relation("ComponentProduct", fields: [componentProductId], references: [id])
+  name               String   // ex: "TNT"
+  quantity           Decimal  @db.Decimal(10, 3)
+  priceAdjustment    Decimal  @db.Decimal(10, 2)
+
+  @@map("sale_item_modifiers")
+}
+
+// ------------------------------------------------------------
+//  StockLot — lotes de estoque para custeio PEPS/FIFO
+// ------------------------------------------------------------
+model StockLot {
+  id           String                @id @default(uuid())
+  productId    String
+  product      Product               @relation(fields: [productId], references: [id], onDelete: Cascade)
+  costPrice    Decimal               @db.Decimal(10, 4) // Custo de aquisição unitário
+  quantity     Decimal               @db.Decimal(10, 3) // Quantidade comprada originalmente
+  remaining    Decimal               @db.Decimal(10, 3) // Quantidade restante no lote
+  createdAt    DateTime              @default(now())
+  updatedAt    DateTime              @updatedAt
+  consumptions StockLotConsumption[]
+
+  @@map("stock_lots")
+}
+
+// ------------------------------------------------------------
+//  StockLotConsumption — consumo detalhado de cada lote
+// ------------------------------------------------------------
+model StockLotConsumption {
+  id         String   @id @default(uuid())
+  saleItemId String
+  saleItem   SaleItem @relation(fields: [saleItemId], references: [id], onDelete: Cascade)
+  lotId      String
+  lot        StockLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  quantity   Decimal  @db.Decimal(10, 3)
+
+  @@map("stock_lot_consumptions")
+}
+
+// ------------------------------------------------------------
+//  Supplier — fornecedores
+// ------------------------------------------------------------
+model Supplier {
+  id        String   @id @default(uuid())
+  name      String
+  whatsapp  String?
+  cnpjCpf   String?
+  email     String?
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products       SupplierProduct[]
+  purchaseOrders PurchaseOrder[]
+  payables       Payable[]
+
+  @@map("suppliers")
+}
+
+// ------------------------------------------------------------
+//  Image — armazenamento de fotos no banco
+// ------------------------------------------------------------
+// ------------------------------------------------------------
+//  SupplierProduct — produtos fornecidos pelo fornecedor
+// ------------------------------------------------------------
+model SupplierProduct {
+  id         String   @id @default(uuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // Preço estimado que o fornecedor cobra
+  expectedCost  Decimal? @db.Decimal(10, 4)
+
+  @@unique([supplierId, productId])
+  @@map("supplier_products")
+}
+
+// ------------------------------------------------------------
+//  Packaging — Tipos de Embalagem (Fardo, Caixa, etc.)
+// ------------------------------------------------------------
+model Packaging {
+  id         String   @id @default(uuid())
+  name       String
+  multiplier Int
+  createdAt  DateTime @default(now())
+
+  @@map("packagings")
+}
+
+// ------------------------------------------------------------
+//  PurchaseOrder — pedido de compra
+// ------------------------------------------------------------
+model PurchaseOrder {
+  id         String   @id @default(uuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+  
+  status     String   @default("DRAFT") // DRAFT, SENT, COMPLETED, CANCELLED
+  
+  totalEstimated Decimal @default(0) @db.Decimal(10, 2)
+  totalReal      Decimal @default(0) @db.Decimal(10, 2)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  receivedAt DateTime?
+
+  items      PurchaseOrderItem[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String   @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product  @relation(fields: [productId], references: [id])
+
+  quantity        Decimal @db.Decimal(10, 3)
+  unitMultiplier  Int     @default(1)
+  unitName        String  @default("UN")
+
+  expectedCost    Decimal @db.Decimal(10, 4)
+  realCost        Decimal? @db.Decimal(10, 4) // Preenchido no recebimento
+
+  @@map("purchase_order_items")
+}
+
+// ------------------------------------------------------------
+//  Payable — Contas a pagar (Fixas e Variáveis)
+// ------------------------------------------------------------
+model Payable {
+  id          String   @id @default(uuid())
+  description String
+  amount      Decimal  @db.Decimal(10, 2)
+  dueDate     DateTime
+  status      String   @default("PENDING") // PENDING, PAID, CANCELLED
+  type        String   @default("VARIABLE") // FIXED, VARIABLE
+  isRecurring Boolean  @default(false)
+  category    String?  // agua, luz, internet, aluguel, funcionario, boleto, impostos...
+  
+  supplierId  String?
+  supplier    Supplier? @relation(fields: [supplierId], references: [id])
+  
+  paidAt      DateTime?
+  notes       String?  @db.Text
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([status, dueDate])
+  @@map("payables")
+}

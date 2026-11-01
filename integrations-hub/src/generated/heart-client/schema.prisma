@@ -1,0 +1,153 @@
+// ============================================================
+//  HEART SCHEMA — Banco mestre multi-tenant
+//  Gerencia tenants (empresas) e usuários globais
+// ============================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../src/generated/heart-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL_HEART")
+}
+
+// ------------------------------------------------------------
+//  Tenant — dados completos da empresa emitente (NFC-e)
+// ------------------------------------------------------------
+model Tenant {
+  id           String  @id @default(uuid())
+  databaseName String  @unique @map("database_name")
+  databaseUrl  String  @map("database_url")
+  name         String  @default("") // nome legado (mantém compatibilidade)
+  status       String  @default("active") // active, suspended, inactive
+  logoUrl      String?
+  modulos      Json?   @default("{\"nfce\": true, \"estoque\": true, \"dashboardMobile\": true}")
+
+  // Identificação
+  razaoSocial  String?
+  nomeFantasia String?
+  cnpj         String? @unique
+  ie           String? // Inscrição Estadual
+  im           String? // Inscrição Municipal
+  crt          Int     @default(1) // 1=Simples Nacional, 2=SN Excesso, 3=Regime Normal
+
+  // Endereço
+  logradouro    String?
+  numero        String?
+  complemento   String?
+  bairro        String?
+  municipio     String?
+  codMunicipio  String? // Código IBGE (7 dígitos) ex: "3506003" para Bauru-SP
+  uf            String?
+  cep           String?
+  telefone      String?
+  emailContador String?
+
+  // NFC-e — configurações de emissão
+  nfceAtivo    Boolean @default(false) // habilita emissão NFC-e
+  nfceAutoSync Boolean @default(true) // habilita o CRON de retentativa para este tenant
+  nfceSerie    Int     @default(1) // série (ex: 1)
+  nfceAmbiente Int     @default(2) // 1=Produção, 2=Homologação
+  nfceCsc      String? // Código de Segurança do Contribuinte (SEFAZ)
+  nfceIdCsc    String? // ID do CSC
+
+  // Certificado Digital A1
+  certPfx      Bytes? // .pfx armazenado como BLOB
+  certSenha    String? // senha do certificado
+  certValidade DateTime? // data de vencimento
+
+  // Integração Cosmos (Bluesoft) — lookup de EAN brasileiro
+  cosmosApiKey String? // Token da API Cosmos do cliente para lookup de EAN
+
+  // Mensalidades
+  mensalidadeValor      Decimal?  @default(0.00) @map("mensalidade_valor") @db.Decimal(10, 2)
+  mensalidadeVencimento DateTime? @map("mensalidade_vencimento")
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  termsAcceptedAt DateTime? @map("terms_accepted_at")
+
+  users              User[]
+  tenantIntegrations TenantIntegration[]
+
+  @@map("tenants")
+}
+
+// ------------------------------------------------------------
+//  User — usuários vinculados ao tenant
+// ------------------------------------------------------------
+model User {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name     String
+  email    String  @unique
+  password String
+  role     String  @default("operator") // admin, manager, operator
+  pin      String? // PIN de 4-6 dígitos para troca rápida no PDV
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// ------------------------------------------------------------
+//  MasterProduct — dicionário global de produtos por EAN
+//  Compartilhado entre todos os tenants (banco heart)
+//  Usado para auto-preenchimento ao bipar código de barras
+// ------------------------------------------------------------
+model MasterProduct {
+  id       String  @id @default(uuid())
+  ean      String  @unique // EAN-13 (13 dígitos)
+  name     String // Nome comercial padronizado (PT-BR)
+  brand    String? // Marca (ex: Heineken, Ambev)
+  ncm      String? // NCM 8 dígitos — obrigatório NFC-e
+  cest     String? // CEST 7 dígitos — quando há ST
+  unit     String  @default("UN") // UN, LT, FD, CX, KG
+  imageUrl String? @db.Text // URL da foto do produto
+  category String? // Categoria OFF (ex: en:beers)
+  source   String  @default("openfoodfacts") // rastreabilidade da origem
+
+  createdAt DateTime @default(now())
+
+  @@index([ean])
+  @@map("master_products")
+}
+
+// ------------------------------------------------------------
+//  Image — armazenamento global de fotos no banco heart
+// ------------------------------------------------------------
+model Image {
+  id        String   @id @default(uuid())
+  data      Bytes    @db.LongBlob
+  mimeType  String
+  createdAt DateTime @default(now())
+
+  @@map("images")
+}
+
+// ------------------------------------------------------------
+//  TenantIntegration — central de integrações (App Store)
+// ------------------------------------------------------------
+model TenantIntegration {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  provider    String // ex: "ifood", "goomer", "whatsapp"
+  status      String @default("active") // active, paused, disconnected
+  credentials Json // Tokens OAuth (accessToken, refreshToken, merchantId)
+  settings    Json // Configurações (autoAceitarPedido, imprimirAutomatico)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, provider])
+  @@map("tenant_integrations")
+}

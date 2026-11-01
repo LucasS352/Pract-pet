@@ -1,0 +1,107 @@
+{
+  "runId": "LOAD-1789575753066",
+  "mode": "API real; sem emissão fiscal; cozinha acelerada; produtos simples",
+  "waiters": 8,
+  "cashiers": 4,
+  "kitchens": 1,
+  "backlog": true,
+  "actionMs": 500,
+  "productsPerOrder": 3,
+  "elapsedSeconds": 70.93755112000001,
+  "planned": 300,
+  "created": 300,
+  "closed": 0,
+  "failures": [
+    "PATCH /v1/kds/status: HTTP 500",
+    "Execução interrompida ou prazo excedido; há comandas não concluídas."
+  ],
+  "slowEndpoints": [
+    "GET /v1/comandas?status=open",
+    "GET /v1/kds/tickets",
+    "PATCH /v1/kds/status"
+  ],
+  "endpoints": {
+    "GET /tenants/me": {
+      "requests": 13,
+      "errors": 0,
+      "p50Ms": 18.601715000000013,
+      "p95Ms": 222.32055099999997,
+      "p99Ms": 222.32055099999997,
+      "maxMs": 222.32055099999997,
+      "bytes": 14534
+    },
+    "GET /v1/kds/config": {
+      "requests": 1,
+      "errors": 0,
+      "p50Ms": 11.114781999999991,
+      "p95Ms": 11.114781999999991,
+      "p99Ms": 11.114781999999991,
+      "maxMs": 11.114781999999991,
+      "bytes": 16
+    },
+    "GET /products?inventory-snapshot": {
+      "requests": 1,
+      "errors": 0,
+      "p50Ms": 586.072909,
+      "p95Ms": 586.072909,
+      "p99Ms": 586.072909,
+      "maxMs": 586.072909,
+      "bytes": 616216
+    },
+    "GET /cash-registers/current": {
+      "requests": 4,
+      "errors": 0,
+      "p50Ms": 9.967008000000078,
+      "p95Ms": 18.15284799999995,
+      "p99Ms": 18.15284799999995,
+      "maxMs": 18.15284799999995,
+      "bytes": 1292
+    },
+    "POST /v1/comandas": {
+      "requests": 300,
+      "errors": 0,
+      "p50Ms": 28.444351000005554,
+      "p95Ms": 136.31202400000075,
+      "p99Ms": 473.8705259999999,
+      "maxMs": 482.98150499999997,
+      "bytes": 132192
+    },
+    "POST /v1/comandas/:id/items": {
+      "requests": 300,
+      "errors": 0,
+      "p50Ms": 671.8593639999999,
+      "p95Ms": 1449.1587479999998,
+      "p99Ms": 1822.9379069999995,
+      "maxMs": 1870.3980080000001,
+      "bytes": 1214592
+    },
+    "GET /v1/comandas?status=open": {
+      "requests": 24,
+      "errors": 0,
+      "p50Ms": 6401.524018000004,
+      "p95Ms": 9667.703774000001,
+      "p99Ms": 9938.051258,
+      "maxMs": 9938.051258,
+      "bytes": 18645432
+    },
+    "GET /v1/kds/tickets": {
+      "requests": 26,
+      "errors": 0,
+      "p50Ms": 6101.941409999999,
+      "p95Ms": 8545.005703000003,
+      "p99Ms": 9137.363478,
+      "maxMs": 9137.363478,
+      "bytes": 18139202
+    },
+    "PATCH /v1/kds/status": {
+      "requests": 7,
+      "errors": 1,
+      "p50Ms": 641.3891710000025,
+      "p95Ms": 6453.7585340000005,
+      "p99Ms": 6453.7585340000005,
+      "maxMs": 6453.7585340000005,
+      "bytes": 142
+    }
+  },
+  "passed": false
+}

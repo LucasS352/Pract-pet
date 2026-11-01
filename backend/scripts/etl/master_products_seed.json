@@ -1,0 +1,5242 @@
+[
+  {
+    "ean": "7897395020101",
+    "name": "Itaipava 350",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896045506873",
+    "name": "CERVEJA HEINEKEN LAGER LATA 350ML",
+    "brand": "Heineken",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896045506590",
+    "name": "Heineken original",
+    "brand": "Heineken",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891149210503",
+    "name": "Cerveza Negra",
+    "brand": "Caracu",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991011723",
+    "name": "Cerveja Lager Budweiser",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891149103102",
+    "name": "Skol Pilsen",
+    "brand": "Skol",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991298407",
+    "name": "Cerveja Zero álcool Budweiser Lata 350ml",
+    "brand": "BUDWEISER",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896371000007",
+    "name": "Cerveja Therezopolis Gold",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891149010509",
+    "name": "Brahma Chopp",
+    "brand": "Brahma",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991303200",
+    "name": "Cerveja Puro Malte",
+    "brand": "Spaten-Franziskaner-Bräu GmbH",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896045506934",
+    "name": "Cerveja Amstel Puro Malte Lata 350ml",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896045506040",
+    "name": "Heineken Long Neck - Zero Álcool",
+    "brand": "Heineken",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896045505319",
+    "name": "Cerveja amstel puro malte lt 269ml",
+    "brand": "Amstel",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898367984377",
+    "name": "Unfiltered",
+    "brand": "Eisenbahn",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5707643200204",
+    "name": "Brooklyn east IPA",
+    "brand": "Brooklyn Brewery",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891149101900",
+    "name": "Cerveja Stella Artois",
+    "brand": "Stella Artois",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891149200504",
+    "name": "Skol",
+    "brand": "Skol",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896045523412",
+    "name": "Cerveza Heineken",
+    "brand": "Heineken",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898357410008",
+    "name": "Adelmo CasÃ©",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5000213000700",
+    "name": "Guinness",
+    "brand": "Guinness",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898367980010",
+    "name": "Eisenbahn Pilsen ln",
+    "brand": "Eisenbahn",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896045506095",
+    "name": "Cerveja Bavária Pilsen 350ml",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991006101",
+    "name": "Cerveja Pilsen",
+    "brand": "Bavaria",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898605251827",
+    "name": "Cerveja Puro Malte Ribeirão Lager - Lager com casca de Laranja",
+    "brand": "Colorado",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991014762",
+    "name": "Cerveja Budweiser",
+    "brand": "Budweiser",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991012096",
+    "name": "Budweiser",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898367983790",
+    "name": "Cerveja Pilsen Puro Malte",
+    "brand": "Eisenbahn",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896045506439",
+    "name": "Amstel Ultra Puro Malte",
+    "brand": "Amstel",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991298476",
+    "name": "Cerveja de Trigo Feita com Semente de Coentro & Casca de Laranja",
+    "brand": "Hoegaarden",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991301916",
+    "name": "CERV PATAGONIA LT 350ML, IPA, .",
+    "brand": "Patagonia",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898605253272",
+    "name": "Lager",
+    "brand": "Colorado",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891149108510",
+    "name": "Bohemian Pilsener",
+    "brand": "Patagonia",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891149104956",
+    "name": "Brahma zero álcool",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891149104932",
+    "name": "Cerveja Zero Álcool",
+    "brand": "Brahma",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991297479",
+    "name": "Spaten 330",
+    "brand": "Spaten",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891991304870",
+    "name": "PURE GOLD Cerveja Puro Malte",
+    "brand": "STELLA ARTOIS",
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898925943013",
+    "name": "CERVEJA COLORADO CAUIM 600ML",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897395060237",
+    "name": "CRYSTAL LT 437ML",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898235984157",
+    "name": "CERVEJA PARADISO LAGUNA WITBIER LT 473ML",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898235984140",
+    "name": "CERVEJA PARADISO GREEN COAST LT 473ML",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899923603138",
+    "name": "ROLETA RUSSA P. ALE 355ML",
+    "brand": null,
+    "ncm": "22030000",
+    "cest": "0300100",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0533070660107",
+    "name": "Jamel, cachaça adoçada",
+    "brand": "Jamel",
+    "ncm": null,
+    "cest": null,
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896050200124",
+    "name": "Cachaça",
+    "brand": "Velho Barreiro",
+    "ncm": null,
+    "cest": null,
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847022206",
+    "name": "Energy Ultra",
+    "brand": "Monster",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847033301",
+    "name": "Energético Mango Loco",
+    "brand": "Monster",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7892840808174",
+    "name": "Isotônico Sabor Morango E Maracujá Gatorade 500ml",
+    "brand": "GATORADE",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847033929",
+    "name": "Energético Monster Ultra Lata 473ml",
+    "brand": "Monster",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847034803",
+    "name": "Dragon Ice Tea",
+    "brand": "Monster Energy",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847022015",
+    "name": "Monster energy",
+    "brand": "Monster",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898938890076",
+    "name": "Monster Energy Zero Açúcar",
+    "brand": "Monster",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7892840808051",
+    "name": "Gatorade uva zero",
+    "brand": "Gatorade",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898080664389",
+    "name": "Baly Energy Drink Melancia Garrafa 2L",
+    "brand": "Baly Energy Drink",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898938890045",
+    "name": "Pipeline Punch Juice",
+    "brand": "Monster Energy",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847022305",
+    "name": "Monster energy absolutely zero",
+    "brand": "Monster Energy",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "9002490280901",
+    "name": "9002490280901",
+    "brand": null,
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898961176611",
+    "name": "Energy drink",
+    "brand": "Big boss",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7892840808013",
+    "name": "Isotônico Frutas Cítricas Gatorade Garrafa 500ml",
+    "brand": "GATORADE",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898950338020",
+    "name": "Refrigerante de Guaraná Orgânico",
+    "brand": "Wewi",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5060466518704",
+    "name": "Energy drink Passion punch",
+    "brand": "Burn",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "9002490214166",
+    "name": "Red Bull® Energy Drink",
+    "brand": "Red Bull",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847028406",
+    "name": "Monster Energy",
+    "brand": "Monster Energy",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "3016031088075",
+    "name": "Monster energético",
+    "brand": "Monster",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898647491540",
+    "name": "OAK Matcha (Energy Tea)",
+    "brand": null,
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847037033",
+    "name": "Monster Energy Ultra",
+    "brand": "Monster Energy",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "9002490264093",
+    "name": "The Cereja Edition",
+    "brand": "Redbull",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "1220000250147",
+    "name": "Khaotic Tropical Orange",
+    "brand": "Monster",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "1220000250000",
+    "name": "Ultra Paradise",
+    "brand": "Monster Energy",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897395001681",
+    "name": "Energy Juice Mango Summer",
+    "brand": "TNT Energy Drink",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897395031626",
+    "name": "Energético TNT Original",
+    "brand": "TNT Energy Drink",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898158492425",
+    "name": "Energético Birthday Cake",
+    "brand": "Roxx",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "1220000250031",
+    "name": "Energético Juice Monster Pacific Punch",
+    "brand": "MONSTER",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898377662050",
+    "name": "Energético Zero Açúcares Maçã Verde",
+    "brand": "TNT",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0070847038979",
+    "name": "Monster Energy Mango Loco",
+    "brand": "Monster Energy",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898942054099",
+    "name": "Energético",
+    "brand": "Furioso",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898225521751",
+    "name": "GO! Energy Now! Gel Guaraná com Açaí",
+    "brand": "Atlhetica Nutrition",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898938890090",
+    "name": "Energético Red Bull Morango e Pêssego Edition 250ml",
+    "brand": null,
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0798190273884",
+    "name": "SCORE RADICAL WHITE",
+    "brand": "SCORE",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "9002490290450",
+    "name": "The Maçã Edition Sugarfree",
+    "brand": "Red Bull",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896243500741",
+    "name": "Energético Start",
+    "brand": "Start",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "1220000250888",
+    "name": "Ultra Watermelon",
+    "brand": "Monster",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896315104563",
+    "name": "Energético",
+    "brand": "Bad Wolf",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896315104600",
+    "name": "Energético Maça Verde Zero Açúcares",
+    "brand": "Bad Wolf",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899465201700",
+    "name": "Energético Fire Citrus",
+    "brand": "Vulcano",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899465201717",
+    "name": "Ice Grape",
+    "brand": "Vulcano",
+    "ncm": "22021000",
+    "cest": "0300600",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7894900530001",
+    "name": "AGUA MIN CRYSTAL S/GAS 500ML",
+    "brand": "CRYSTAL",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7894900531008",
+    "name": "AGUA MIN CRYSTAL C/GAS 50OML",
+    "brand": "Coca-Cola",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0075720431151",
+    "name": "Natural Spring Water",
+    "brand": "Poland Spring",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7894900530032",
+    "name": "Crystal - sem gás",
+    "brand": "Coca-Cola Brasil",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896436100666",
+    "name": "Água mineral natural",
+    "brand": "Água da pedra",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896065880069",
+    "name": "Água Mineral Natural sem gás",
+    "brand": "Minalba",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "3700123302360",
+    "name": "Nestlé Pureza Vital Sem Gás 510ML",
+    "brand": "Nestlé",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7894900530056",
+    "name": "Água Mineral Natural Crystal sem Gás",
+    "brand": "Coca Cola Brasil",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896062801050",
+    "name": "Água Mineral São Lourenço Com Gás",
+    "brand": "São Lourenço",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896436100642",
+    "name": "Água Mineral com Gás",
+    "brand": "Água da Pedra",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898386200083",
+    "name": "Agua mineral",
+    "brand": null,
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898005516175",
+    "name": "Água mineral natural Ster Bom",
+    "brand": "Ster Bom",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896468700087",
+    "name": "Água Mineral Natural",
+    "brand": "Fonte da Ilha",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891025102113",
+    "name": "Bonafont Água Leve",
+    "brand": "Bonafont",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896062802354",
+    "name": "Água Mineral São Lourenço Sem Gás",
+    "brand": "São Lourenço",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896065870497",
+    "name": "Água Mineral Minalba Com Gás",
+    "brand": "Minalba",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896279000567",
+    "name": "Água Mineral Petrópolis Sem Gás",
+    "brand": "Petrópolis Paulista",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896279000574",
+    "name": "Água Mineral Natural Petrópolis Com Gás",
+    "brand": "Petrópolis Paulista",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896984205004",
+    "name": "Água Mineral Natural Passa Quatro Sem Gás",
+    "brand": "Passa Quatro",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891025110941",
+    "name": "Agua Bonafont 500 ml",
+    "brand": null,
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896513077300",
+    "name": "Água com gás Cristal da Terra",
+    "brand": "Cristal da Terra",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898906372023",
+    "name": "Água Mineral Natural",
+    "brand": null,
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0700083273888",
+    "name": "Agua mineral natural sin gas",
+    "brand": null,
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896451194541",
+    "name": "Agua",
+    "brand": "Cristalina",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896349600192",
+    "name": "Água Mineral Natural Sem Gás Fonte Timbu",
+    "brand": "Timbu",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898966655005",
+    "name": "Água Mineral Natural Classic Sem Gás",
+    "brand": "Santa Justina",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898944548015",
+    "name": "Água Mineral Natural",
+    "brand": "Cristal",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896385800372",
+    "name": "Água",
+    "brand": "Sarandi",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897123884036",
+    "name": "Agua mineral",
+    "brand": "Prata",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8002270136559",
+    "name": "S.PELLEGRINO - Agua mineral natural con gas carbónico añadido",
+    "brand": "Nestlé",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898972721008",
+    "name": "AGUA MINERAL NATURAL S/G MG",
+    "brand": "Leven",
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7894900531015",
+    "name": "Água Crystal C/Gás 1,5L",
+    "brand": null,
+    "ncm": "22011000",
+    "cest": "0300500",
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "3046920010603",
+    "name": "Chocolate meio amargo com framboesa",
+    "brand": "Lindt",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "3664346348997",
+    "name": "Terry's CHOCOLATE ORANGE",
+    "brand": "Terry's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008116632",
+    "name": "Garoto garotices 250g",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210999634",
+    "name": "MILKA Chocolate Milka Branco",
+    "brand": "MILKA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000336373",
+    "name": "Chocolate ao leite Alpino",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970402852",
+    "name": "Chocolate Branco Cookies N Creme Hersheys Pacote 77g",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896423456561",
+    "name": "Chocolate Mousse De Maracujá Snickers Pacote 42g",
+    "brand": "SNICKERS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970402814",
+    "name": "Chocolate Ao Leite Hersheys Pacote 82g",
+    "brand": "Hershey's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000460207",
+    "name": "Prestigio",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400964",
+    "name": "TABLETE SPECIAL DARK CRANB 85G HERSHEYS",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970402838",
+    "name": "Chocolate Meio Amargo 40 Cacau Hersheys Pacote 82g",
+    "brand": "Hershey's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000368572",
+    "name": "Chocolate Meio Amargo 40 Cacau Classic Pacote 80g",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7790407031013",
+    "name": "Chocolate Semiamargo",
+    "brand": "Aguila",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000092606",
+    "name": "Bombom Chocolate Recheio Leite Maltado Lollo Pacote 28g",
+    "brand": "LOLO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300988517",
+    "name": "Wafer Oreo Cobertura Chocolate Branco E Biscoito Lacta Bis Xtra",
+    "brand": "BIS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000107836",
+    "name": "Chocolate Ao Leite Aerado Suflair Pacote 50g",
+    "brand": "NESTLE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7791875000471",
+    "name": "Havannets Chocolate",
+    "brand": "Havanna",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891330012244",
+    "name": "TABLETE 1891 INTENSE 90G NEUGEBAUER",
+    "brand": "1871 Neugebauer",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000329856",
+    "name": "Chocolate Ao Leite Aerado Suflair Pacote 80g",
+    "brand": "SUFLAIR",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008121728",
+    "name": "Talento Avelãs",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5901588018867",
+    "name": "Dark Mild 50%",
+    "brand": "E.Wedel",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210674432",
+    "name": "Chocolate Meio Amargo 40 Cacau Lacta Amaro Pacote 80g",
+    "brand": "AMARGO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008124170",
+    "name": "Chocolate Ao Leite Com Castanha De Caju Garoto Pacote 80g",
+    "brand": "GAROTO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970401657",
+    "name": "TABLETE SPECIAL DARK 73 85G HERSHEY",
+    "brand": "Hershey’s",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400902",
+    "name": "TABLETE SPECIAL DARK TRAD 85G HERSHEYS",
+    "brand": "HERSHEY'S",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008124026",
+    "name": "Chocolate Meio Amargo Garoto Pacote 80g",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897077808300",
+    "name": "Chocolate em pó 50% cacau",
+    "brand": "Harald",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897173049171",
+    "name": "Panettone pavê de chocolate",
+    "brand": "Marilan",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896986244414",
+    "name": "Barra Dreams Mil Folhas",
+    "brand": "Cacau Show",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898934982683",
+    "name": "Chocolate com açúcar de coco",
+    "brand": "Only4",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008114003",
+    "name": "Bombom Garoto Garotices Caixa 250g",
+    "brand": "GAROTO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896003737394",
+    "name": "Biscoito de Chocolate Branco Teens MARILAN 80g",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896423402223",
+    "name": "M&M crispy",
+    "brand": "Masterfoods",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802225427579",
+    "name": "Rocklets Maní",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000369098",
+    "name": "Chocolate Ao Leite Classic Pacote 90g",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210575630",
+    "name": "Choc Lacta Laka Diamante Negro Pacote 80g",
+    "brand": "DIAMANTE NEGRO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210674395",
+    "name": "Chocolate Ao Leite Com Amendoim Lacta Shot Pacote 80g",
+    "brand": "MONDELEZ",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000277249",
+    "name": "Ovo De Páscoa Ao Leite",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000368992",
+    "name": "Chocolate Ao Leite E Branco Duo Classic Pacote 90g",
+    "brand": "NESTLE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008351026",
+    "name": "Chocolate meio amargo",
+    "brand": "GAROTO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970402821",
+    "name": "Chocolate Ao Leite Extracremoso Hersheys Pacote 82g",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970402883",
+    "name": "Chocolate Ao Leite Com Amendoim",
+    "brand": "Hershey's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400940",
+    "name": "TABLETE SPECIAL DARK LARANJ 85G HERSHEYS",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898142863910",
+    "name": "Brigadeiro",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891330019373",
+    "name": "Chocolate com amendoim Neugebauer 80 g",
+    "brand": "Neugebauer",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898142865891",
+    "name": "TABLETE SPECIAL CAST CAJU 60G ARCOR",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891330016426",
+    "name": "Chocolate tropical 1891",
+    "brand": "Neugebauer Co.",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000409640",
+    "name": "Choco Trio Prestígio",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896367100186",
+    "name": "Bombons trufados de chocolate ao leite",
+    "brand": "DeCacau Gramado",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896530722009",
+    "name": "Ovo de páscoa sabor chocolate ao leite",
+    "brand": "Dumdum",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970403828",
+    "name": "Hershey's Ovomaltine Black 75 g",
+    "brand": "Hershey's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898292888993",
+    "name": "Kisses chocolate ao leite",
+    "brand": "Hershey's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000107744",
+    "name": "Suflair",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7894321711478",
+    "name": "Toddy Original",
+    "brand": "Toddy",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896043013106",
+    "name": "Choco Soy Olvebra Crispies",
+    "brand": "Olvebra",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898024397090",
+    "name": "Kinder Ovo Star Wars edição especial de páscoa",
+    "brand": "Kinder",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898576130053",
+    "name": "Aquim Rio de Janeiro",
+    "brand": "Q chocolate",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898938940016",
+    "name": "Chocolate Orgânico 75%",
+    "brand": "Amma Todos os Santos",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898938940054",
+    "name": "Chocolate Orgânico 85%",
+    "brand": "Amma",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5900189009120",
+    "name": "Pistachio premium chocolates",
+    "brand": "Colian",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7791875000150",
+    "name": "Tableta 70% Cacao",
+    "brand": "Havanna",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898142861800",
+    "name": "Chocolate amargo 70%",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898142861787",
+    "name": "Chocolate amargo 53%",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7790580106959",
+    "name": "Bon o bon Leche",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "FD",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896986227875",
+    "name": "Chocolate 85% Bendito Cacao",
+    "brand": "CacauShow",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000277072",
+    "name": "Crunch",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008137347",
+    "name": "TABLETE TALENTO NIBS/CACAU 75G GAROTO",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898292888269",
+    "name": "Special Dark Hershey's Laranja",
+    "brand": "Hersheys",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000276877",
+    "name": "Classic Meio Amargo",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400070",
+    "name": "Chocolate Meio Amargo 40 Cacau Hersheys Pacote 92g",
+    "brand": "SECPOWER",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896306617508",
+    "name": "Trento Dark",
+    "brand": "Peccin",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898661010611",
+    "name": "Chocolate com Avelãs 60% cacau orgânico, 25% avelã",
+    "brand": "PURAVIDA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898142863897",
+    "name": "Inspiration 70%",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400018",
+    "name": "Chocolate ao leite (colesterol 3.3mg)",
+    "brand": "Hershey's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891330017324",
+    "name": "Chocolate",
+    "brand": "Neugebauer",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400988",
+    "name": "Chocolate Amargo 60 Cacau Com Pedaços De Café Hersheys Special Dark Pacote 85g",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898142863873",
+    "name": "Meio Amargo 40%",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898206502373",
+    "name": "Achocolatado Orgânico Native",
+    "brand": "Native",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:beverages-and-beverages-preparations",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000276518",
+    "name": "Chocolate branco",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300862282",
+    "name": "Chocolate Ao Leite Lacta Diamante Negro Pacote 20g",
+    "brand": "LACTA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300991418",
+    "name": "Laka",
+    "brand": "Lacta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891330017355",
+    "name": "Dark Chocolatey Bar",
+    "brand": "Neugebauer",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896050411230",
+    "name": "Wafer Chocolate Village",
+    "brand": "Village",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008119831",
+    "name": "Talento Dark 50% Cacau Café",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210689795",
+    "name": "Lacta Intense Chocolate 60% Cacau Sabor Menta Intenso & Macio",
+    "brand": "Lacta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000329665",
+    "name": "Chocolate Ao Leite Aerado E Branco Duo Suflair Pacote 80g",
+    "brand": "SUFLAIR",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898530841254",
+    "name": "Dadinho Bitz Chocolate Ao Leite Recheio de Creme de Amendoim",
+    "brand": "Dadinho",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000336250",
+    "name": "Alpino Gianduia",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000326398",
+    "name": "Chocolate Moça Brigadeiro",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5901588018782",
+    "name": "Extra Milk Chocolate",
+    "brand": "E.Wedel",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7791875000105",
+    "name": "Tableta de Chocolate Blanco",
+    "brand": "Havanna",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300862329",
+    "name": "Chocolate Ao Leite Com Amendoim Lacta Shot Pacote 20g",
+    "brand": "LACTA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008117219",
+    "name": "Baton Choco Croc Chocolate ao Leite com Biscoito",
+    "brand": "Baton",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300991456",
+    "name": "Chocolate Ao Leite Lacta Pacote 90g",
+    "brand": "LACTA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210961716",
+    "name": "Chocolate Meio Amargo 40 Cacau Lacta Amaro Pacote 90g",
+    "brand": "LACTA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896306616389",
+    "name": "Trento Branco Dark",
+    "brand": "Trento",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7791875001461",
+    "name": "Trufas Surtidas",
+    "brand": "Havanna",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802225511186",
+    "name": "Bon o bon Chocolate",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "FD",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898142863859",
+    "name": "Chocolate Amargo 53%",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000464908",
+    "name": "Charge",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210690012",
+    "name": "Lacta Intense 60% Cacau com Laranja",
+    "brand": "Lacta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008113952",
+    "name": "Garoto",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896306623158",
+    "name": "Wafer Recheado Sabor Morango Coberto com Chocolate ao Leite",
+    "brand": "Trento",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210567567",
+    "name": "Chocolate Ao Leite Recheio Oreo",
+    "brand": "MONDELEZ",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891330011728",
+    "name": "Mix ao leite & branco",
+    "brand": "Bib's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000305232",
+    "name": "Biscoito Recheio Chocolate Bono Pacote 126g",
+    "brand": "NESTLE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899930900473",
+    "name": "Chocolate ao leite de Coco",
+    "brand": "Goldko",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891330017959",
+    "name": "Barra de Chocolate Meio Amargo e Branco",
+    "brand": "Neugebauer",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400056",
+    "name": "Hershey's Extra Cremoso",
+    "brand": "Hershey's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400094",
+    "name": "Chocolate Branco Cookies N Creme Hersheys Pacote 87g",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008123975",
+    "name": "Chocolate Ao Leite Garoto Pacote 80g",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896653709499",
+    "name": "SENSAH!",
+    "brand": "SENSAH!",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "FD",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891150077607",
+    "name": "Chocolate em pó",
+    "brand": "Mãe terra",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300986636",
+    "name": "Chocolate ao Leite com Nougat de Mel e Amêndoas",
+    "brand": "Toblerone",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898188630026",
+    "name": "Chocolates 70% com Nibs de cacau",
+    "brand": "Marcos Palmeira",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210699992",
+    "name": "Chocolate 40 Cacau Original Lacta Intense Pacote 85g",
+    "brand": "Lacta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898994683216",
+    "name": "Cake Recheado com Doce de Leite e Cobertura de Chocolate",
+    "brand": "Família Kayser",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000104842",
+    "name": "Chocolate Meio Amargo",
+    "brand": "Nestlé Professional",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898633410302",
+    "name": "Chocolate ao Leite de Coco",
+    "brand": "Espírito Cacau",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210573353",
+    "name": "Lacta Laka Chocolate Branco",
+    "brand": "Mondelez",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210674357",
+    "name": "Chocolate Branco Com Biscoito Oreo",
+    "brand": "LACTA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008119787",
+    "name": "Talento Dark 50% Cacau Menta",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008121575",
+    "name": "Talento Meio Amargo Amêndoas",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898142850019",
+    "name": "Chocolate Amargo 70 Cacau Crunchy Arcor Pacote 80g",
+    "brand": "AMARGO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970401008",
+    "name": "Chocolate Amargo 60 Cacau Caramel N Salt Hersheys Special Dark Pacote 85g",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896423470703",
+    "name": "Confeito de Chocolate ao Leite M&M's Pacote 40g",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897077836556",
+    "name": "Unique Amazônia 70% Cacau",
+    "brand": "Harald",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898192257547",
+    "name": "Barra de Chocolate Branco com Cookies",
+    "brand": "Cacau Show",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000377598",
+    "name": "Choco Trio",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008121674",
+    "name": "Talento Cereais e Passas",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970402692",
+    "name": "TABLETE SPECIAL DARK 80 85G HERSHEYS",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008121872",
+    "name": "TABLETE TALENTO RECH MORANGO 85G GAROTO",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008121773",
+    "name": "TABLETE TALENTO CAST PARA 85G GAROTO",
+    "brand": "TALENTO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896306623660",
+    "name": "WAFER TRENTO SPECIALE AV BCO 26G PECCIN",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891823924269",
+    "name": "Kop Club Keep Kop",
+    "brand": "Kopenhagen",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400452",
+    "name": "Chocolate Ao Leite Aerado Hersheys Air Pacote 85g",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891330019571",
+    "name": "Chocolate ao leite Supreme 1891",
+    "brand": "Neugebauer Co.",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896257400488",
+    "name": "AMÉRICA Chocolate sem Adição de Açúcar",
+    "brand": "AMÉRICA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896072093865",
+    "name": "BRETZKE Chocolate em Pó 50%",
+    "brand": "BRETZKE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897077820616",
+    "name": "HARALD Chocolate em Pó Melken 50% Cacau",
+    "brand": "HARALD",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896552901390",
+    "name": "QUALICAU Chocolate em Pó 50%",
+    "brand": "QUALICAU",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5410522542080",
+    "name": "CALLEBAUT Gotas de Chocolate Callebaut Meio Amargo 811",
+    "brand": "CALLEBAUT",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897077835610",
+    "name": "MELKEN Chocolate Melken ao Leite em Gotas",
+    "brand": "MELKEN",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897077836570",
+    "name": "HARALD Chocolate Unique Bahia 63% Cacau em Gotas",
+    "brand": "HARALD",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970401046",
+    "name": "HERSHEY'S Gotas Forneáveis Chocolate ao Leite Hershey's Professional",
+    "brand": "HERSHEY'S",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898592254368",
+    "name": "GOBECHE Gotas Chocolate 50% Cacau sem Açúcar e sem Adoçante",
+    "brand": "GOBECHE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970401084",
+    "name": "HERSHEY'S Cobertura Fracionada Hershey's Professional (Formato Moeda, Ao leite)",
+    "brand": "HERSHEY'S",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897077837324",
+    "name": "HARALD Cobertura TOP em Barra (Blend)",
+    "brand": "HARALD",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5410687161188",
+    "name": "NORCAU Cobertura Chocolate Fracionado Gotas Norcau (Meio amargo)",
+    "brand": "NORCAU",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891048014431",
+    "name": "DR. OETKER Cobertura Chocolate Branco em Barra Dr. Oetker (Branco)",
+    "brand": "DR. OETKER",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896072644302",
+    "name": "Mavalério Cobertura Premium em Gotas",
+    "brand": "Mavalério",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898215606505",
+    "name": "Puratos Cobertura Fracionada Norcau Premium Branco",
+    "brand": "Puratos",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896036099230",
+    "name": "Genuine Cobertura Genuine Branco em Moedas",
+    "brand": "Genuine",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896066760131",
+    "name": "CoberTop Cobertura Chocolate em Pedaços Branco",
+    "brand": "CoberTop",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896411860516",
+    "name": "Selecta Cobertura Supreme Branca em Gotas",
+    "brand": "Selecta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7796909254196",
+    "name": "Mavalério Cobertura Confeiteiro Branco",
+    "brand": "Mavalério",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970402159",
+    "name": "Chocolate Com Pedaços De Café Caramel Macchiato Hersheys Coffee Creations Pacote 85g",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7908320902383",
+    "name": "LINDT Chocolate Amargo Extrafino Excellence - 70% Cacau",
+    "brand": "LINDT",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210689573",
+    "name": "Chocolate 60% cacau",
+    "brand": "Lacta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898938940078",
+    "name": "AMMA CHOCOLATE Chocolate Orgânico 100% Cacau",
+    "brand": "AMMA CHOCOLATE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898934980986",
+    "name": "Chocolate Zeromilk 40% cacau",
+    "brand": "TUDO ZERO LEITE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896001282988",
+    "name": "LINEA Linea Chocolate Vegano Branco C/ Frutas Vermelhas",
+    "brand": "LINEA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898934982621",
+    "name": "TUDO ZERO LEITE Only4 Cranberry 70% Cacau",
+    "brand": "TUDO ZERO LEITE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898934981044",
+    "name": "TUDO ZERO LEITE ZeroMilk Puro 40% Cacau",
+    "brand": "TUDO ZERO LEITE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896063284012",
+    "name": "VITAO Chocolate Zero 70% Cacau",
+    "brand": "VITAO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898934981914",
+    "name": "CHOC 55% CACAU PURO ONLY4",
+    "brand": "ONLY4",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898617451024",
+    "name": "Pasta de Amendoim Chocotine Trufada Com Chocolate",
+    "brand": "Mandubim",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000276914",
+    "name": "Nestle Classic",
+    "brand": "Nestle",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0738581681515",
+    "name": "Chocolate Cupuaçu 64",
+    "brand": "Kaê Chocolates",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896306612831",
+    "name": "Wafer Recheio Avelã Cobertura Chocolate Ao Leite Trento Caixa 512g 16 Unidades",
+    "brand": "TRENTO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0020842060611",
+    "name": "Sicao Cobertura Fracionada Sicao Mais",
+    "brand": "Sicao",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0020842086444",
+    "name": "HARALD Cobertura TOP em Gotas (Ao leite)",
+    "brand": "HARALD",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896986261442",
+    "name": "Chocolate ao Leite sabor Laranja CacauShow",
+    "brand": "CacauShow",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "2057650020276",
+    "name": "Gota meia amarga de chocolate Harald",
+    "brand": "Harold",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891008103571",
+    "name": "Baton ao Leite",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897077837225",
+    "name": "TOP Cobertura Meio Amargo",
+    "brand": "Harald",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "KG",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898709240789",
+    "name": "Barra de Chocolate Ao Leite Casas Pedro",
+    "brand": "Casas Pedro",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898709240772",
+    "name": "Barra de Chocolate Com Café Casas Pedro",
+    "brand": "Casas Pedro",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899751201438",
+    "name": "Barra de Chocolate Castanha de Caju Avelã e Amendoim Casas Pedro",
+    "brand": "Casas Pedro",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898934980771",
+    "name": "Chocolate Smiles",
+    "brand": "Zeromilk",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802408001336",
+    "name": "Chocolate",
+    "brand": "Verona",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "4001743756182",
+    "name": "Alpenrahm Trauben Nuss",
+    "brand": "Karina",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970403569",
+    "name": "Chocolate ao leite com ovomaltine",
+    "brand": "Hershey's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802200893474",
+    "name": "ORLY SABOR MENTA",
+    "brand": "Ambrofoli",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0011000536789",
+    "name": "M&m's PEANUT",
+    "brand": "M&m's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896079820198",
+    "name": "Mentinha - pastilhas de chocolate ao leite sabor menta",
+    "brand": "Montevergine",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802215104039",
+    "name": "CAREZZA BOMBONES DE CHOCOLATE CON TROCITOS DE ALMENDRAS",
+    "brand": "Costa",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7753456795367",
+    "name": "MILK CHOKOLADE 58% COCOA LÖV MOMENTS HYGGE EDITION",
+    "brand": "VÖLKA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7804668280063",
+    "name": "85% CACAO Abinao Bitter",
+    "brand": "VARSOVIENNE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7804668283903",
+    "name": "Caja Chocolate de Leche sin Azúcar Añadida",
+    "brand": "Salzburgo",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8905551111231",
+    "name": "FUNDAMENTAL SMASHERS Nº9",
+    "brand": "VÖLKA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8445291976245",
+    "name": "Trencito Chocolate de Leche",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7804668283880",
+    "name": "Chocolate de leche",
+    "brand": "Salzburg",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "6024482126649",
+    "name": "LA FÊTE CHOCOLAT",
+    "brand": "LA FÊTE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7750126001797",
+    "name": "Chocoteja",
+    "brand": "San Roque",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7804651860678",
+    "name": "Chocolate Almendras",
+    "brand": "Manare",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622202250439",
+    "name": "Milka",
+    "brand": "Milka",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896731023431",
+    "name": "Chocolate Meio Amargo",
+    "brand": "Cacau Show",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8445290550453",
+    "name": "Trencito",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8445290550422",
+    "name": "Trencito",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8002325446138",
+    "name": "Huevitos Rellenos",
+    "brand": "Chocao",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7804668283811",
+    "name": "Salzburg mix chocolates leche, bitter y blanco",
+    "brand": "Pascua",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802225572989",
+    "name": "Huevitos de Oro",
+    "brand": "Dos en Uno",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802245001179",
+    "name": "Huevitos de Chocolate Leche",
+    "brand": "Entrelagos",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802245001841",
+    "name": "Conejo de Chocolate Leche Sin Azúcar Añadida",
+    "brand": "Entrelagos",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0600554031408",
+    "name": "Minibon Huevitos Macizos Chocolate de Leche",
+    "brand": "Muibon",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802225568920",
+    "name": "Huevitos macizos",
+    "brand": "Dos en uno",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802200852563",
+    "name": "Chocolate de Leche 40 APROX. HUEVITOS MACIZOS",
+    "brand": "Ambrosoli",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802200893436",
+    "name": "Orly Sabor Almendra",
+    "brand": "Ambrosoli",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802215108259",
+    "name": "Costa Dubai Style Pistacho & Kadayif",
+    "brand": "Costa",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7862109274422",
+    "name": "Chocolate Orgánico con sabor a LIMÓN MANDARINA",
+    "brand": "Pacari",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0623435588716",
+    "name": "SAHNE-NUSS",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079000229",
+    "name": "Nissin Lámen Galinha Caipira",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079000205",
+    "name": "Macarrão Instantâneo Lámen Carne Nissin Miojo Pacote 85g",
+    "brand": "AJINOMOTO",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "0041789002915",
+    "name": "Ramen maruchan",
+    "brand": "Maruchan",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079001028",
+    "name": "Macarrão Instantâneo Lámen Tomate Suave Turma Da Mônica Nissin Miojo Pacote 85g",
+    "brand": "NISSIN",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079006016",
+    "name": "Espaguete Instantâneo",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079000250",
+    "name": "Nissin Lámen Bacon",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079011515",
+    "name": "Yakissoba",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079013038",
+    "name": "Cup Noodles Galinha Caipira",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079011478",
+    "name": "Hot sabor Mexicano com Pimenta Jalapeño",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079012918",
+    "name": "Cup Noodles Verduras",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022087159",
+    "name": "Lamen sabor carne",
+    "brand": "ISABELA",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079011805",
+    "name": "Miojo",
+    "brand": null,
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079008058",
+    "name": "Cup Noodles Legumes",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079012420",
+    "name": "Nissin Lámen Sabor Caldo de Feijão",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079012758",
+    "name": "Cup Noodles Calabresa",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079000427",
+    "name": "Talharim Sabor Bolonhesa",
+    "brand": "Nissin Miojo",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079012215",
+    "name": "Nissin Ramen sabor a Carne",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896292309937",
+    "name": "Lámen sabor Legumes",
+    "brand": "Predilecta",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079012901",
+    "name": "Cup Noodles Sabor a Carne",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898666220220",
+    "name": "Pasta Box Pipe Rigate Carbonara",
+    "brand": "Sodebo",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891515535186",
+    "name": "Mac'n Cheese Cheddar & Bacon",
+    "brand": "Sadia",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898666220268",
+    "name": "Pasta Box Pipe Rigate Frango e Requeijão",
+    "brand": "Sodebo",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079012895",
+    "name": "Cup Noodles Pollo",
+    "brand": "Cup Noodles",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898666220244",
+    "name": "Pipe Rigate 4 Queijos Sodebo Pasta Box Caixa 310g",
+    "brand": "PASTA BOX",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079013847",
+    "name": "Macarrão Instantâneo Yakissoba Carne Com Molho Japonês Nissin U.f.o. Bandeja 97g",
+    "brand": "NISSIN",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "6935270641278",
+    "name": "Artificial Crawfish Flavored Stir Fried Noodles",
+    "brand": null,
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079000434",
+    "name": "Macarrão Instantâneo Talharim Frango Nissin Pacote 99g",
+    "brand": "AJINOMOTO",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079013250",
+    "name": "Macarrão Instantâneo Talharim Pesto Nissin Pacote 99g",
+    "brand": "NISSIN",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8801043053358",
+    "name": "Tempura Udon Flavour Noodle Soup",
+    "brand": "Nongshim",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079013335",
+    "name": "Nissin Ramen Sabor a Costilla",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079012208",
+    "name": "Ramen sabor a Pollo",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079013069",
+    "name": "Cup Noodles Galinha Picante",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079013281",
+    "name": "Cup Noodles Seafood",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891079013052",
+    "name": "Cup Noodles Carne",
+    "brand": "Nissin",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891515606329",
+    "name": "Hot Bowls Mac'n Cheese Cheddar",
+    "brand": "Sadia",
+    "ncm": "19021900",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "3014680009175",
+    "name": "Bonbon à la Sève de Pin",
+    "brand": "La Vosgienne",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891095911486",
+    "name": "Farofa De Mandioca Tradicional",
+    "brand": "YOKI",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000248768",
+    "name": "Kit Kat",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210596413",
+    "name": "Wafers, barras recheadas e tabletes sortidos",
+    "brand": "LACTA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896004006277",
+    "name": "Salgadinho De Batata Original Pringles Tubo 104g",
+    "brand": "PRINGLES",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210575975",
+    "name": "Wafer recheado com cobertura sabor chocolate",
+    "brand": "BIS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8691066267050",
+    "name": "Hay Hay Biscoito com creme de caramelo coberto de Cacau",
+    "brand": "Cizmeci Time",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896024761651",
+    "name": "Biscoito doce maizena",
+    "brand": "Piraquê",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000325131",
+    "name": "Bombom Nestlé Especialidades",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5607047020869",
+    "name": "Barra Aveia & Cereais Chocolate Preto & Amendoins",
+    "brand": "Pingo Doce",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "FD",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898024397915",
+    "name": "Nutella B-ready",
+    "brand": "Nutella",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300990749",
+    "name": "Pack Biscoito Original Club Social",
+    "brand": "CLUB SOCIAL",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5906747176594",
+    "name": "Fito's SOUR CREAM & ONION",
+    "brand": "KUPIEC",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300990732",
+    "name": "Biscoito Salgado Club Social Original",
+    "brand": "CLUB SOCIAL",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000051436",
+    "name": "BISC PASSATEMPO LEITE 150G NESTLE",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896336005917",
+    "name": "Paçoquita",
+    "brand": "Santa Helena",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897047003834",
+    "name": "Paçoca Rolha",
+    "brand": "Moreninha do Rio",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891095031115",
+    "name": "YOKI Batata Palha Tradicional 105 g",
+    "brand": "Yoki",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000241356",
+    "name": "BISC RECH PASSATEMPO CHOC 130G NESTLE",
+    "brand": "NESTLE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300830151",
+    "name": "Biscoito Original Batman Oreo Pacote 90g",
+    "brand": "OREO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7892840822286",
+    "name": "Cheetos sabor parmesão",
+    "brand": "Elma Chips",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896066304571",
+    "name": "Pão Integral Maçã, Canela E Passas Wickbold Grão Sabor Pacote 500g",
+    "brand": "WICKBOLD",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7790045001195",
+    "name": "Frutigran Salvado",
+    "brand": "Granix",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891095002207",
+    "name": "Pipoca Para Micro Ondas Natural Com Sal Yoki Pacote 100g",
+    "brand": "Goku",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962047560",
+    "name": "Cereale cacau e castanhas",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896006716471",
+    "name": "Biscoitos de Arroz Integral Chia e Linhaça",
+    "brand": "Camil",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962054810",
+    "name": "Cookies",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300992286",
+    "name": "Club Social Integral Tradicional",
+    "brand": "Mondelez International",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000376928",
+    "name": "Biscoito Recheio Doce De Leite Bono Pacote 90g",
+    "brand": "BONO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896004006406",
+    "name": "Pringles churrasco",
+    "brand": "Pringles",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898416780028",
+    "name": "BISC POLVILHO SAL CASSINI",
+    "brand": "Cassini",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210592781",
+    "name": "Biscoito Recheio Morango Trakinas Recheio Pacote 126g",
+    "brand": "Trakinas",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7892840822903",
+    "name": "Salgadinho de milho sabor presunto",
+    "brand": "Elma Chips",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962076317",
+    "name": "Bauducco Speculoos",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7790045001188",
+    "name": "Frutigran Avena y Pasas",
+    "brand": "Granix",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7790045825395",
+    "name": "Frutigran Avena, Chía y Lino",
+    "brand": "Granix",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300988470",
+    "name": "Wafer recheado coberto com chocolate",
+    "brand": "Lacta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7790045824893",
+    "name": "Frutigran Chisps de Chocolate",
+    "brand": "Granix",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210661814",
+    "name": "Mel e gotas de cacau",
+    "brand": "BelVita",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7790045824886",
+    "name": "Fiesta Surtidas",
+    "brand": "Granix",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210641144",
+    "name": "Galletita Club Social de pizza",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896019607636",
+    "name": "Recheada de Creme com Cacau",
+    "brand": "Amandita",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896006716464",
+    "name": "Biscoito de arroz",
+    "brand": "Camil",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896213006235",
+    "name": "Biscoito Cream Cracker Amanteigado Tradicional Vitarella Pacote 350g",
+    "brand": "Vitarella",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000329498",
+    "name": "Biscoito de coco",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896005030356",
+    "name": "Biscoito cream cracker",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896058258530",
+    "name": "Biscoito Maizena - Triunfo",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962050065",
+    "name": "RECHEADINHO GOIABA 112G",
+    "brand": "BAUDUCCO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896283000898",
+    "name": "Biscoito Cookie Vegano Integral Chocolate Com Gotas De Chocolate Jasmine Pacote 120g",
+    "brand": "JASMINE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962075792",
+    "name": "Waffer de pistache",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896024726742",
+    "name": "Newafer",
+    "brand": "Piraquê",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "5601069102961",
+    "name": "Cookies Special Selection",
+    "brand": "Danesita",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000089231",
+    "name": "BISC RECH PRESTIGIO 140G NESTLE",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962032290",
+    "name": "Wafer Chocolate",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962037028",
+    "name": "WAFERTRIPLO CHOC 140G BAUDUCCO",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000247648",
+    "name": "Classic cookie",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962054100",
+    "name": "Biscoito Cookie Tradicional Bauducco Pacote 100g",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210833389",
+    "name": "Bis Black",
+    "brand": "Lacta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896061300677",
+    "name": "Biscoito Din Crackers Original Tucs Pacote 100g",
+    "brand": "Tuc's",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898416780035",
+    "name": "Salgado",
+    "brand": "Cassini",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896496917846",
+    "name": "Biscoito Com Mix De Grãos Vegano Integral Orgânico Cacau Mãe Terra Zooreta Pacote 110g",
+    "brand": "MAE TERRA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962037004",
+    "name": "WAFER MORANGO 140G BAUDUCCO",
+    "brand": "BAUDUCCO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000304556",
+    "name": "Nesfit cacao & cereais",
+    "brand": "Nesfit",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210933454",
+    "name": "Mini Oreo",
+    "brand": "Oreo",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896003738629",
+    "name": "Crema cracker especial",
+    "brand": "Marilan",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962051079",
+    "name": "BISC CEREALE MACA/UVA 141G BAUDUCCO",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896213005771",
+    "name": "Biscoito Cristal Vitarella Delicitá Pacote 414g",
+    "brand": "VITARELLA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896058258844",
+    "name": "Biscoito cream cracker",
+    "brand": "Triunfo",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896283007460",
+    "name": "Biscoito de Arroz",
+    "brand": "Jasmine",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300873554",
+    "name": "Biscoito Chocolate Recheio Chocolate Oreo Pacote 90g",
+    "brand": "OREO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7899970400674",
+    "name": "Hersheys ao leite",
+    "brand": "HERSHEYS",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962065885",
+    "name": "Biscoito Recheado sabor Morango",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022205164",
+    "name": "Biscoito Cream Cracker",
+    "brand": "Renata",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891152801781",
+    "name": "Amori - Amori - Richester",
+    "brand": "Richester",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896003738520",
+    "name": "Biscoito doce maizena",
+    "brand": "Marilan",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "FD",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896004010052",
+    "name": "Biscoito recheado sabor chocolate",
+    "brand": null,
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000402931",
+    "name": "Choco Biscuit sabor Chocolate ao Leite",
+    "brand": "Garoto",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000329450",
+    "name": "Biscoito sabor maçã e canela",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022205218",
+    "name": "Biscoito Maria",
+    "brand": "Renata",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896111423813",
+    "name": "Biscoito doce sabor mel",
+    "brand": "Ninfa",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7791875000334",
+    "name": "Galletitas de Limón",
+    "brand": "Havanna",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000109298",
+    "name": "Cookie original + Trento Duo",
+    "brand": "Passatempo",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000241295",
+    "name": "Biscoito Recheio Morango Passatempo Pacote 130g",
+    "brand": "PASSATEMPO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962032283",
+    "name": "Wafer Fresa/Frutilla",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962036915",
+    "name": "Wafer Chocolate con Avellana",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8851019010229",
+    "name": "Pocky Mango Sticks 25 GR",
+    "brand": "Glico",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962045160",
+    "name": "BISC CEREALE CACAU 170G BAUDUCCO",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7790045825401",
+    "name": "Frutigran Avena, sésamo, amaranto y girasol",
+    "brand": "Granix",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896283001321",
+    "name": "Cookies Castanha-do-Pará Integral",
+    "brand": "Jasmine",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000289747",
+    "name": "Biscoito Nesfit Maçã e Canela",
+    "brand": "Nestle",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300990701",
+    "name": "Original Club Social",
+    "brand": "CLUB SOCIAL",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962056678",
+    "name": "CHOCCO BISCUIT MEIO AMARGO 80G BAUDUCCO",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962054124",
+    "name": "Bisc cookies chocco 96g/105g bauducco",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962058733",
+    "name": "TOAST CEREALE AZEITE BAUDUCCO",
+    "brand": "BAUDUCCO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962032450",
+    "name": "Biscoito Maizena Bauducco Pacote 170g",
+    "brand": "BAUDUCCO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7791875000600",
+    "name": "Galletitas de Limón con Chocolate",
+    "brand": "Havanna",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896024760456",
+    "name": "Biscoito Salgado Integral",
+    "brand": "Piraquê",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962054780",
+    "name": "Biscoito Recheado Bauducco",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300992330",
+    "name": "Pack Biscoito Integral Tradicional Club Social Pacote 288g 12 Unidades Embalagem Econômica Leve Mais Pague Menos",
+    "brand": "CLUB SOCIAL",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000329207",
+    "name": "BISC WAFER BONO LIMAO 110G NESTLE",
+    "brand": "Bono",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "8691066237510",
+    "name": "Heyo Biscoitos de Cacau com Creme de Baunilha",
+    "brand": "Cizmeci Time",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896003738582",
+    "name": "Biscoito marilan Leite 350g",
+    "brand": "Marilan",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896064201148",
+    "name": "MINI BUTTER COOKIRS",
+    "brand": "Santa Edwiges",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622210568823",
+    "name": "Bolacha Salgada Sabor Cebola com Sour Cream",
+    "brand": "Club Social",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000357972",
+    "name": "BISC RECH FININHO NEGRESCO 57G NESTLE",
+    "brand": "NEGRESCO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962054476",
+    "name": "Cookies sabor chocolate",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891168100014",
+    "name": "Tostine maisena",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896024760289",
+    "name": "BISC LEITE MALTADO COBERTO 80G PIRAQUE",
+    "brand": "Piraque",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896003738612",
+    "name": "Biscoito Cream Cracker Manteiga Marilan Pacote 350g",
+    "brand": "MARILAN",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896003738919",
+    "name": "Biscoito amanteigado sabor coco",
+    "brand": "Marilan",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896253401472",
+    "name": "Rosquinha Chocolate",
+    "brand": "RANCHEIRO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896213006396",
+    "name": "Biscoito Maizena Tradicional Vitarella Pacote 350g",
+    "brand": "Vitarella",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896024760449",
+    "name": "Pack Biscoito Original Piraquê Pacote 138g 6 Unidades",
+    "brand": "PIRAQUE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000304839",
+    "name": "NESFIT banana",
+    "brand": "NESTLE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000376843",
+    "name": "Biscoito Recheio Chocolate Bono Pacote 90g",
+    "brand": "BONO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962067629",
+    "name": "Biscoito Cookie Chocolate Com Gotas Cobertura Chocolate Branco Bauducco Maxi Pacote 96g",
+    "brand": "BAUDUCCO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896213006266",
+    "name": "Biscoito Cream Cracker Integral Vitarella Pacote 367,5g",
+    "brand": "VITARELLA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891203021120",
+    "name": "Biscoito Wind",
+    "brand": "PANCO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896024760654",
+    "name": "Biscoito Wafer Recheio Morango Piraquê Pacote 100g",
+    "brand": "PIRAQUE",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896085076183",
+    "name": "Biscoito Plugados Recheado sabor Chocolate Suíço Adria Plugados Pacote 130g",
+    "brand": "ADRIA",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962035451",
+    "name": "Biscoito Champanhe",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896213005924",
+    "name": "Treloso sabor Chocolate",
+    "brand": "Vitarela",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896024761439",
+    "name": "BISC LEITE MALTADO ORIGINAL 132G PIRAQUE",
+    "brand": "Piraque",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896003737417",
+    "name": "BISC RECH TEENS BAUNY 80G MARILAN",
+    "brand": "Marilan",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896058257670",
+    "name": "BISC TORTINI TRUFA TRIUNFO 90G",
+    "brand": "Arcor",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:plant-based-foods-and-beverages",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000381625",
+    "name": "CHOCOCOOKIES RECH AVELA",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962060361",
+    "name": "CHOCOBISCUIT AO LEITE 36G BAUDUCCO",
+    "brand": "BAUDUCCO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000350119",
+    "name": "Biscoito Cookie Alpino Nestlé Pacote 60g",
+    "brand": "ALPINO",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022086831",
+    "name": "Biscoito doce sabor leite",
+    "brand": "Isabela",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962056500",
+    "name": "CHOCCO BISCUIT AO LEITE 80G BAUDUCCO",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022086213",
+    "name": "Wafer sabor Chocolate Branco",
+    "brand": "Isabela",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896256065817",
+    "name": "Biscoito Integral de Arroz",
+    "brand": "Natural Life",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891152801446",
+    "name": "Cream Cracker Legítimo",
+    "brand": "Fabrica Fortaleza",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896071030007",
+    "name": "Rosquinhas de Coco",
+    "brand": "Mabel",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896256065497",
+    "name": "Chips de Arroz Integral e Milho Sabor Mostarda e Mel",
+    "brand": "Naturalife",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022207663",
+    "name": "Biscoito cracker fermentação natural",
+    "brand": "Renata",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891962071619",
+    "name": "Cookies Caramelo Salgado",
+    "brand": "Bauducco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022205249",
+    "name": "Biscoito cracker integral",
+    "brand": "Renata",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896058217889",
+    "name": "Salpet",
+    "brand": "Aymoré",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896111426517",
+    "name": "Biscoito doce chocolate e coco",
+    "brand": "Ninfa",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022207854",
+    "name": "Biscoito Rosquinhas Galo sabor Leite 300g",
+    "brand": "Galo",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896022205225",
+    "name": "Biscoito doce sabor leite",
+    "brand": "Renata",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897318200023",
+    "name": "Peta",
+    "brand": "Forno Mágico",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896986290121",
+    "name": "Wafer recheado sabor limão",
+    "brand": "Cacau Show",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896665822001",
+    "name": "Alfajor recheado com doce de leite coberto com chocolate",
+    "brand": "Líder do Sul",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898934847012",
+    "name": "Bolacha caseira",
+    "brand": "Mar & Mar",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897213319967",
+    "name": "Biscoito doce palitos de chocolate",
+    "brand": "Piccinini",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7897213319622",
+    "name": "Biscoito rosca de calda",
+    "brand": "Piccinini",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896111424599",
+    "name": "Biscoito doce maisena",
+    "brand": "Ninfa",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898701300313",
+    "name": "Broinha de milho",
+    "brand": "Casademãe",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7898701300283",
+    "name": "Sequilhos laranja",
+    "brand": "Casademãe",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300410247",
+    "name": "Clube Social Integral - Trigo e Flocos de Arroz",
+    "brand": "Nabisco",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300800529",
+    "name": "Bom dia! Mel e cacau",
+    "brand": "Belvita",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7622300811693",
+    "name": "Bis Xtra Lacta",
+    "brand": "Lacta",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000018750",
+    "name": "Bono",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7891000060421",
+    "name": "Nesfit Gergelim",
+    "brand": "Nestlé",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896085087240",
+    "name": "Biscoito Água E Sal",
+    "brand": "Adria",
+    "ncm": "19059020",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:crackers",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7896639800653",
+    "name": "Torrada de Arroz Integral",
+    "brand": "Okoshi",
+    "ncm": "19059020",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:brown-rice-toast",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7802225689021",
+    "name": "CRACKER Sabor Tradicional",
+    "brand": "Selz",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7803111002986",
+    "name": "Artisan Crackers HIGO & NUEZ PECANA",
+    "brand": "Perfect Choice",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  },
+  {
+    "ean": "7804666810323",
+    "name": "NAT wafer crackers PIMIENTA",
+    "brand": "NATURAL",
+    "ncm": "19059090",
+    "cest": null,
+    "unit": "UN",
+    "category": "en:snacks",
+    "source": "openfoodfacts"
+  }
+]

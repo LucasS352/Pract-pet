@@ -1,0 +1,12 @@
+# Força LF para scripts shell (OBRIGATÓRIO para Linux/Docker)
+*.sh text eol=lf
+
+# Força LF para arquivos de configuração Linux
+entrypoint.sh text eol=lf
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+
+# Windows pode usar CRLF para código TypeScript normalmente
+*.ts text eol=auto
+*.tsx text eol=auto
+*.json text eol=auto

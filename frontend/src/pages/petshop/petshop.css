@@ -1,0 +1,143 @@
+.petcare-shell {
+  /* Primitivos */
+  --pc-gray-0: #ffffff;
+  --pc-gray-25: #f6f7f9;
+  --pc-gray-50: #f0f2f4;
+  --pc-gray-200: #e2e5e9;
+  --pc-gray-300: #cbd1d7;
+  --pc-gray-500: #778390;
+  --pc-gray-700: #52606d;
+  --pc-gray-900: #17212b;
+  --pc-teal-50: #e6f2ef;
+  --pc-teal-700: #0f766e;
+  --pc-teal-800: #115e59;
+
+  /* Semânticos */
+  --pc-canvas: #f6f7f9;
+  --pc-surface: var(--pc-gray-0);
+  --pc-surface-subtle: var(--pc-gray-50);
+  --pc-border: var(--pc-gray-200);
+  --pc-border-strong: var(--pc-gray-300);
+  --pc-text: var(--pc-gray-900);
+  --pc-text-secondary: var(--pc-gray-700);
+  --pc-text-muted: var(--pc-gray-500);
+  --pc-action: var(--pc-teal-700);
+  --pc-action-hover: var(--pc-teal-800);
+  --pc-action-soft: var(--pc-teal-50);
+  --pc-focus: var(--pc-teal-700);
+  --pc-warning: #92400e;
+  --pc-warning-soft: #fffbeb;
+  --pc-danger: #b42318;
+  --pc-danger-soft: #fef3f2;
+  --pc-success: #166534;
+  --pc-success-soft: #f0fdf4;
+  --pc-info: #1d4ed8;
+  --pc-info-soft: #eff6ff;
+
+  /* Componentes */
+  --pc-panel-bg: var(--pc-surface);
+  --pc-panel-border: var(--pc-border);
+  --pc-panel-radius: 12px;
+  --pc-control-height: 44px;
+  --pc-control-radius: 8px;
+  --pc-motion-fast: 160ms;
+  color: var(--pc-text);
+  background: var(--pc-canvas);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.petcare-shell * {
+  scrollbar-color: var(--pc-border-strong) transparent;
+}
+
+.petcare-shell :where(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--pc-focus) 28%, transparent);
+  outline-offset: 2px;
+}
+
+.pc-panel {
+  border: 1px solid var(--pc-panel-border);
+  border-radius: var(--pc-panel-radius);
+  background: var(--pc-panel-bg);
+}
+
+.pc-row {
+  transition: background-color var(--pc-motion-fast) ease;
+}
+
+.pc-row:hover {
+  background: color-mix(in srgb, var(--pc-surface-subtle) 62%, transparent);
+}
+
+.pc-status {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.pc-status--neutral { background: var(--pc-surface-subtle); color: var(--pc-text-secondary); }
+.pc-status--info { background: var(--pc-info-soft); color: var(--pc-info); }
+.pc-status--warning { background: var(--pc-warning-soft); color: var(--pc-warning); }
+.pc-status--success { background: var(--pc-success-soft); color: var(--pc-success); }
+.pc-status--danger { background: var(--pc-danger-soft); color: var(--pc-danger); }
+
+.petcare-live-status-title {
+  font-family: "Sora", "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.025em;
+  text-wrap: pretty;
+}
+
+/* Os formulários de produto são compartilhados com o PDV. Dentro do Pet Care,
+   mantemos toda a lógica deles e adaptamos apenas a apresentação. */
+.petcare-product-crud [role="dialog"][class*="bg-zinc-9"],
+.petcare-product-crud [role="dialog"] [class*="bg-zinc-9"] {
+  background-color: var(--pc-surface) !important;
+}
+
+.petcare-product-crud [role="dialog"] [class*="bg-zinc-8"] {
+  background-color: var(--pc-surface-subtle) !important;
+}
+
+.petcare-product-crud [role="dialog"][class*="border-zinc-"],
+.petcare-product-crud [role="dialog"] [class*="border-zinc-"] {
+  border-color: var(--pc-border) !important;
+}
+
+.petcare-product-crud [role="dialog"] [class*="text-white"] {
+  color: var(--pc-text) !important;
+}
+
+.petcare-product-crud [role="dialog"] [class*="text-zinc-"] {
+  color: var(--pc-text-secondary) !important;
+}
+
+.petcare-product-crud [role="dialog"] [class*="bg-blue-600"] {
+  background-color: var(--pc-action) !important;
+}
+
+.petcare-product-crud [role="dialog"] [class*="border-blue-500"] {
+  border-color: var(--pc-action) !important;
+}
+
+.petcare-product-crud [role="dialog"] [class*="text-blue-"] {
+  color: var(--pc-action) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .petcare-shell *,
+  .petcare-shell *::before,
+  .petcare-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

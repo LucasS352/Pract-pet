@@ -1,0 +1,84 @@
+// ============================================================
+//  HEART SCHEMA — Banco mestre multi-tenant
+//  Gerencia tenants (empresas) e usuários globais
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "./generated/heart-client"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL_HEART")
+}
+
+// ------------------------------------------------------------
+//  Tenant — dados completos da empresa emitente (NFC-e)
+// ------------------------------------------------------------
+model Tenant {
+  id           String @id @default(uuid())
+  databaseName String @unique @map("database_name")
+  databaseUrl  String @map("database_url")
+  name         String @default("") // nome legado (mantém compatibilidade)
+  status       String @default("active") // active, suspended, inactive
+
+  // Identificação
+  razaoSocial  String?
+  nomeFantasia String?
+  cnpj         String? @unique
+  ie           String? // Inscrição Estadual
+  im           String? // Inscrição Municipal
+  crt          Int     @default(1) // 1=Simples Nacional, 2=SN Excesso, 3=Regime Normal
+
+  // Endereço
+  logradouro   String?
+  numero       String?
+  complemento  String?
+  bairro       String?
+  municipio    String?
+  codMunicipio String? // Código IBGE (7 dígitos) ex: "3506003" para Bauru-SP
+  uf           String?
+  cep          String?
+  telefone     String?
+
+  // NFC-e — configurações de emissão
+  nfceAtivo    Boolean @default(false) // habilita emissão NFC-e
+  nfceSerie    Int     @default(1) // série (ex: 1)
+  nfceAmbiente Int     @default(2) // 1=Produção, 2=Homologação
+  nfceCsc      String? // Código de Segurança do Contribuinte (SEFAZ)
+  nfceIdCsc    String? // ID do CSC
+
+  // Certificado Digital A1
+  certPfx      Bytes? // .pfx armazenado como BLOB
+  certSenha    String? // senha do certificado
+  certValidade DateTime? // data de vencimento
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  users User[]
+
+  @@map("tenants")
+}
+
+// ------------------------------------------------------------
+//  User — usuários vinculados ao tenant
+// ------------------------------------------------------------
+model User {
+  id       String @id @default(uuid())
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name     String
+  email    String  @unique
+  password String
+  role     String  @default("operator") // admin, manager, operator
+  pin      String? // PIN de 4-6 dígitos para troca rápida no PDV
+  active   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}

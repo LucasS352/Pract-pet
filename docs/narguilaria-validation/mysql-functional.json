@@ -1,0 +1,42 @@
+{
+  "prefix": "NARG-1789577050143",
+  "results": [
+    {
+      "scenario": "Reserva concorrente global entre produtos: uma aceita, outra 409 sem item parcial",
+      "passed": true
+    },
+    {
+      "scenario": "Timer inicia somente na entrega; quantidade e recolhimento antecipado protegidos",
+      "passed": true
+    },
+    {
+      "scenario": "Ronda vencida recebe 15 minutos reais; prorrogação concorrente não duplica e item exige comanda correta",
+      "passed": true
+    },
+    {
+      "scenario": "Recolhimento idempotente libera número para nova comanda",
+      "passed": true
+    },
+    {
+      "scenario": "Liberação automática: cancel",
+      "passed": true
+    },
+    {
+      "scenario": "Liberação automática: remove",
+      "passed": true
+    },
+    {
+      "scenario": "Liberação automática: close",
+      "passed": true
+    },
+    {
+      "scenario": "Liberação automática: checkout",
+      "passed": true
+    },
+    {
+      "scenario": "Módulo desativado bloqueia Carvoaria no backend",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

@@ -1,0 +1,57 @@
+﻿# ============================================================
+# .antigravityignore — Otimizacao de Tokens e Indexacao
+# ============================================================
+
+# 1. Backups e Dumps pesados (Critico para economia de tokens)
+backend/backups/
+backups/
+mysql/dumps/
+*.sql
+*.sql.gz
+*.dump
+
+# 2. Dependencias e Builds compilados
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+nfce-service/vendor/
+backend/dist/
+frontend/dist/
+frontend/dev-dist/
+frontend/.next/
+.cache/
+
+# 3. Midias, Imagens e Uploads (Arquivos binarios)
+uploads/
+backend/uploads/
+image-packages/
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.svg
+*.ico
+*.pdf
+*.zip
+*.tar.gz
+
+# 4. Logs e Arquivos Temporarios
+*.log
+logs.txt
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+playwright-report/
+test-results/
+
+# 5. Certificados e Chaves Digitais
+*.pfx
+*.p12
+*.pem
+certs/
+
+# 6. Dados de Ambiente Local
+.env
+.env.local
+*.env.local

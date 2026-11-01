@@ -1,0 +1,10 @@
+{
+  "prefix": "RACE-1789558942748",
+  "results": [
+    {
+      "passed": false,
+      "error": "Falha no lançamento concorrente: 500,500,201"
+    }
+  ],
+  "passed": false
+}

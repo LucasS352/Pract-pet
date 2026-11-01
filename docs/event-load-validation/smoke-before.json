@@ -1,0 +1,133 @@
+{
+  "runId": "LOAD-1789558752681",
+  "mode": "API real; sem emissão fiscal; cozinha acelerada; produtos simples",
+  "elapsedSeconds": 20.972506307,
+  "planned": 8,
+  "created": 8,
+  "closed": 1,
+  "failures": [
+    "POST /sales/checkout: HTTP 500",
+    "Execução interrompida ou prazo excedido; há comandas não concluídas."
+  ],
+  "slowEndpoints": [],
+  "endpoints": {
+    "GET /tenants/me": {
+      "requests": 7,
+      "errors": 0,
+      "p50Ms": 13.742895000000004,
+      "p95Ms": 118.47868299999999,
+      "p99Ms": 118.47868299999999,
+      "maxMs": 118.47868299999999,
+      "bytes": 7826
+    },
+    "GET /v1/kds/config": {
+      "requests": 1,
+      "errors": 0,
+      "p50Ms": 22.118704999999977,
+      "p95Ms": 22.118704999999977,
+      "p99Ms": 22.118704999999977,
+      "maxMs": 22.118704999999977,
+      "bytes": 16
+    },
+    "GET /products?inventory-snapshot": {
+      "requests": 1,
+      "errors": 0,
+      "p50Ms": 251.50641699999994,
+      "p95Ms": 251.50641699999994,
+      "p99Ms": 251.50641699999994,
+      "maxMs": 251.50641699999994,
+      "bytes": 595813
+    },
+    "GET /cash-registers/current": {
+      "requests": 2,
+      "errors": 0,
+      "p50Ms": 6.705412000000024,
+      "p95Ms": 9.16087099999993,
+      "p99Ms": 9.16087099999993,
+      "maxMs": 9.16087099999993,
+      "bytes": 646
+    },
+    "POST /v1/comandas": {
+      "requests": 8,
+      "errors": 0,
+      "p50Ms": 32.50704899999994,
+      "p95Ms": 57.95454799999993,
+      "p99Ms": 57.95454799999993,
+      "maxMs": 57.95454799999993,
+      "bytes": 3512
+    },
+    "GET /v1/comandas?status=open": {
+      "requests": 12,
+      "errors": 0,
+      "p50Ms": 93.72864300000003,
+      "p95Ms": 112.92344500000036,
+      "p99Ms": 112.92344500000036,
+      "maxMs": 112.92344500000036,
+      "bytes": 408396
+    },
+    "GET /v1/kds/tickets": {
+      "requests": 20,
+      "errors": 0,
+      "p50Ms": 30.44452000000092,
+      "p95Ms": 81.48916400000053,
+      "p99Ms": 90.21367099999998,
+      "maxMs": 90.21367099999998,
+      "bytes": 270577
+    },
+    "GET /products?limit=2000&active=true": {
+      "requests": 8,
+      "errors": 0,
+      "p50Ms": 813.2007680000002,
+      "p95Ms": 978.2433770000001,
+      "p99Ms": 978.2433770000001,
+      "maxMs": 978.2433770000001,
+      "bytes": 4263820
+    },
+    "POST /v1/comandas/:id/items": {
+      "requests": 8,
+      "errors": 0,
+      "p50Ms": 262.1837129999999,
+      "p95Ms": 363.5977720000001,
+      "p99Ms": 363.5977720000001,
+      "maxMs": 363.5977720000001,
+      "bytes": 32376
+    },
+    "PATCH /v1/kds/status": {
+      "requests": 6,
+      "errors": 0,
+      "p50Ms": 102.21359200000006,
+      "p95Ms": 121.76379599999927,
+      "p99Ms": 121.76379599999927,
+      "maxMs": 121.76379599999927,
+      "bytes": 80
+    },
+    "POST /v1/comandas/:id/request-payment": {
+      "requests": 8,
+      "errors": 0,
+      "p50Ms": 57.20325199999934,
+      "p95Ms": 74.71783499999947,
+      "p99Ms": 74.71783499999947,
+      "maxMs": 74.71783499999947,
+      "bytes": 33408
+    },
+    "GET /v1/comandas/:id": {
+      "requests": 3,
+      "errors": 0,
+      "p50Ms": 21.00643399999899,
+      "p95Ms": 29.677191999999195,
+      "p99Ms": 29.677191999999195,
+      "maxMs": 29.677191999999195,
+      "bytes": 13295
+    },
+    "POST /sales/checkout": {
+      "requests": 3,
+      "errors": 1,
+      "p50Ms": 373.322514999998,
+      "p95Ms": 425.67716500000097,
+      "p99Ms": 425.67716500000097,
+      "maxMs": 425.67716500000097,
+      "bytes": 6188
+    }
+  },
+  "passed": false
+}

@@ -1,0 +1,122 @@
+services:
+  # ─── MySQL Database (Pract Pet Dedicado) ───────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: practpet_mysql
+    restart: unless-stopped
+    command: --innodb-redo-log-capacity=536870912
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-7bar@2025}
+      MYSQL_DATABASE: practpet
+    ports:
+      - "3309:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    networks:
+      - practpet_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-7bar@2025}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Backend (NestJS Pract Pet) ────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: practpet_backend
+    restart: unless-stopped
+    ports:
+      - "3530:3530"
+    environment:
+      PORT: 3530
+      GOOGLE_DRIVE_CLIENT_ID: ${GOOGLE_DRIVE_CLIENT_ID}
+      GOOGLE_DRIVE_CLIENT_SECRET: ${GOOGLE_DRIVE_CLIENT_SECRET}
+      GOOGLE_DRIVE_REFRESH_TOKEN: ${GOOGLE_DRIVE_REFRESH_TOKEN}
+      DATABASE_URL_HEART: mysql://root:7bar%402025@mysql:3306/heart_practpet
+      DATABASE_URL_TENANT: mysql://root:7bar%402025@mysql:3306/practpet
+      JWT_SECRET: ${JWT_SECRET:-7bar_jwt_super_secret_2025}
+      SETUP_PIN: ${SETUP_PIN:-teltech352}
+      SQL_PIN: ${SQL_PIN:-43619835}
+      NFCE_SERVICE_URL: http://nfce-service:80
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      TZ: America/Sao_Paulo
+      GOOGLE_APPLICATION_CREDENTIALS: /app/google-credentials.json
+    volumes:
+      - uploads_data:/app/uploads
+      - ./backups:/app/backups
+      - ./backend/google-credentials.json:/app/google-credentials.json:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - practpet_network
+
+  # ─── Frontend (Vite/React PWA Pract Pet) ───────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: practpet_frontend
+    restart: unless-stopped
+    ports:
+      - "3531:3531"
+    environment:
+      PORT: 3531
+    depends_on:
+      - backend
+    volumes:
+      - uploads_data:/usr/share/nginx/html/uploads:ro
+    networks:
+      - practpet_network
+
+  # ─── NFC-e PHP Microsserviço ───────────────────────────────────────────────
+  nfce-service:
+    build:
+      context: ./nfce-service
+      dockerfile: Dockerfile
+    container_name: practpet_nfce
+    restart: unless-stopped
+    ports:
+      - "3532:80"
+    networks:
+      - practpet_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ─── Integrações (Microserviço Separado) ───────────────────────────────────
+  integrations-hub:
+    build:
+      context: ./integrations-hub
+      dockerfile: Dockerfile
+    container_name: practpet_integrations
+    restart: unless-stopped
+    environment:
+      DATABASE_URL_HEART: mysql://root:7bar%402025@mysql:3306/heart_practpet
+      DATABASE_URL_TENANT: mysql://root:7bar%402025@mysql:3306/practpet
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - practpet_network
+
+volumes:
+  mysql_data:
+    name: practpet_mysql_data
+  uploads_data:
+    name: practpet_uploads_data
+
+networks:
+  practpet_network:
+    name: practpet_network
+    driver: bridge

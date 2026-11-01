@@ -1,0 +1,106 @@
+{
+  "prefix": "RACE-1789559072608",
+  "results": [
+    {
+      "round": 0,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 0,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 1,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 1,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 2,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 2,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 3,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 3,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 4,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 4,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 5,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 5,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 6,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 6,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 7,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 7,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 8,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 8,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 9,
+      "scenario": "lançamentos simultâneos na mesma comanda",
+      "passed": true
+    },
+    {
+      "round": 9,
+      "scenario": "dois caixas fechando a mesma comanda",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

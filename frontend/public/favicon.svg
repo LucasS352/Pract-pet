@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" fill="none">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#3B82F6"/>
+      <stop offset="100%" stop-color="#1D4ED8"/>
+    </linearGradient>
+  </defs>
+  <!-- Fundo arredondado azul vibrante idêntico ao card de login -->
+  <rect width="128" height="128" rx="28" fill="url(#bg)"/>
+  <rect x="2" y="2" width="124" height="124" rx="26" stroke="#60A5FA" stroke-width="4" stroke-opacity="0.3"/>
+  <!-- Carrinho de compras nítido em branco -->
+  <path d="M30 36h14l11 36h42l11-28H46" stroke="white" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="58" cy="94" r="8" fill="white"/>
+  <circle cx="90" cy="94" r="8" fill="white"/>
+</svg>

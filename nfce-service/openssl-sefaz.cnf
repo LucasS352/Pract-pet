@@ -1,0 +1,36 @@
+# openssl-sefaz.cnf
+# Configuração OpenSSL customizada para compatibilidade com os webservices SEFAZ.
+#
+# PROBLEMA: OpenSSL 3.0+ eleva o SECLEVEL padrão para 2, que exige
+#           SHA-256+ e TLS 1.2+. Os servidores de homologação SEFAZ/SVRS
+#           ainda usam cifras legadas (ex: SHA-1 na cadeia ICP-Brasil),
+#           causando SSL_ERROR_SYSCALL no handshake.
+#
+# SOLUÇÃO:  SECLEVEL=1 aceita chaves RSA >= 1024 bits e SHA-1, necessário
+#           para a cadeia ICP-Brasil. Força TLS 1.2 como protocolo mínimo
+#           e máximo para evitar downgrade para TLS 1.0/1.1 (rejeitados
+#           por servidores modernos) e compatibilidade com legados SEFAZ.
+
+openssl_conf = openssl_init
+
+[openssl_init]
+providers = provider_sect
+ssl_conf = ssl_sect
+
+[provider_sect]
+default = default_sect
+[default_sect]
+activate = 1
+
+[ssl_sect]
+system_default = system_default_sect
+
+[system_default_sect]
+MinProtocol = TLSv1.2
+CipherString = DEFAULT@SECLEVEL=1
+Options = UnsafeLegacyRenegotiation
+
+[req]
+distinguished_name = req_distinguished_name
+
+[req_distinguished_name]

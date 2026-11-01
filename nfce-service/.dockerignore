@@ -1,0 +1,12 @@
+# Vendor gerado no container via composer install
+vendor/
+composer.lock
+
+# Scripts de debug — NUNCA devem entrar na imagem de produção
+inspecionar-soap.php
+teste-certificado.php
+public/ssl.php
+
+# Arquivos de desenvolvimento
+.git
+*.md

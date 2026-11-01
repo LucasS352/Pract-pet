@@ -1,0 +1,9 @@
+﻿node_modules
+.env
+/generated/prisma
+google-credentials.json
+*.sql
+!scripts/petshop-demo-sos.sql
+list-drive.js
+test-upload.js
+backups/

@@ -1,0 +1,1253 @@
+// ============================================================
+//  TENANT SCHEMA — Banco por empresa (multi-tenant)
+//  Cada tenant tem seu próprio banco com esta estrutura
+// ============================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL_TENANT")
+}
+
+// ------------------------------------------------------------
+//  Enums do Módulo Fiscal
+// ------------------------------------------------------------
+enum FiscalImportStatus {
+  RECEBIDA
+  PROCESSANDO
+  AGUARDANDO_CONCILIACAO
+  PRONTA_IMPORTAR
+  IMPORTANDO
+  IMPORTADA
+  CANCELADA
+  ERRO
+}
+
+enum FiscalEventType {
+  IMPORT_STARTED
+  IMPORT_FINISHED
+  IMPORT_PARTIAL
+  SUPPLIER_CREATED
+  PRODUCT_MATCHED
+  PRODUCT_CREATED
+  NFE_DOWNLOADED
+  XML_UPLOADED
+  SEFAZ_ERROR
+  NFE_CANCELLED
+  STATUS_CHECK
+  XML_GENERATED
+  DANFE_GENERATED
+}
+
+// ------------------------------------------------------------
+//  GrupoTributacao — regras fiscais por grupo de produtos
+//  Baseado na estrutura GRUPO_TRIBUTACAO + TRIBUTACAO do Packon
+// ------------------------------------------------------------
+model GrupoTributacao {
+  id       String  @id @default(uuid())
+  nome     String // ex: "TRIBUTADOS - Consumidor Final SP"
+  ativo    Boolean @default(true)
+  isPadrao Boolean @default(false)
+
+  // ICMS — Simples Nacional
+  csosn    String? // 102=SN s/ crédito, 400=Isento ST, 500=ST recolhido
+  // ICMS — Regime Normal
+  cstIcms  String? // 00=Tributado, 10=Com ST, 20=Red BC, 60=ST retido...
+  cfop     String // 5102=Venda interna, 6108=Venda outra UF
+  aliqIcms Decimal @default(0) @db.Decimal(5, 2)
+
+  // Redução de base de cálculo ICMS (quando aplicável)
+  redBcIcms Decimal @default(0) @db.Decimal(5, 2)
+
+  // PIS
+  cstPis  String  @default("99") // 99=SN, 01=Tributado, 07=Isento...
+  aliqPis Decimal @default(0) @db.Decimal(5, 2)
+
+  // COFINS
+  cstCofins  String  @default("99")
+  aliqCofins Decimal @default(0) @db.Decimal(5, 2)
+
+  // IPI (opcional — bebidas podem ter)
+  cstIpi  String?
+  aliqIpi Decimal @default(0) @db.Decimal(5, 2)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products   Product[]
+  categories Category[]
+
+  @@map("grupo_tributacao")
+}
+
+// ------------------------------------------------------------
+//  Category — categorias de produto
+// ------------------------------------------------------------
+model Category {
+  id                String           @id @default(uuid())
+  name              String           @unique
+  grupoTributacaoId String?
+  grupoTributacao   GrupoTributacao? @relation(fields: [grupoTributacaoId], references: [id], onDelete: SetNull)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  products Product[]
+
+  @@map("categories")
+}
+
+// ------------------------------------------------------------
+//  Product — cadastro completo com campos fiscais
+//  Espelhado nos campos PRO_* do Packon identificados no Firebird
+// ------------------------------------------------------------
+model Product {
+  requiresCarvoaria      Boolean @default(false)
+  serviceTimerMinutes    Int?
+  assetTrackingTotal     Int?
+  requiresKitchen        Boolean @default(false)
+  requiresBar            Boolean @default(false)
+  barStation             String  @default("BAR")
+  preparationIngredients String? @db.Text
+
+  id                String           @id @default(uuid())
+  categoryId        String
+  category          Category         @relation(fields: [categoryId], references: [id])
+  grupoTributacaoId String?
+  grupoTributacao   GrupoTributacao? @relation(fields: [grupoTributacaoId], references: [id])
+
+  // Dados básicos
+  name      String
+  shortCode String? @unique // código interno curto
+  barcode   String? @unique // EAN-13 / GTIN
+  unit      String  @default("UN") // UN, KG, LT, CX, DZ, PCT...
+  active    Boolean @default(true)
+  imageUrl  String? @db.Text // URL da imagem do produto
+
+  // Preços
+  priceCost Decimal @db.Decimal(10, 4) // custo
+  priceSell Decimal @db.Decimal(10, 4) // preço de venda
+
+  // Estoque e Vendas
+  stock      Decimal  @default(0) @db.Decimal(10, 3) // Decimal para fracionados
+  minStock   Decimal? @db.Decimal(10, 3) // Estoque mínimo (alerta de reposição). Null = usa default global
+  salesCount Int      @default(0) // Contador de vendas para ranking no PDV
+
+  // Campos Fiscais (NCM, CEST vindos do Packon PRO_NCM / PRO_CEST)
+  ncm    String? // 8 dígitos — obrigatório para NFC-e
+  cest   String? // 7 dígitos — quando há ST
+  origem Int     @default(0)
+  // 0=Nacional, 1=Estrangeiro import direta, 2=Estrangeiro adquirido no mercado interno
+
+  // Sistema de Perfis Fiscais
+  fiscalProfileId String?
+  emiteNfce       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  isComposite    Boolean  @default(false)
+  volumeUnit     String? // ML, UN
+  volumeCapacity Decimal? @db.Decimal(10, 3)
+
+  saleItems           SaleItem[]
+  inventoryLogs       InventoryLog[]
+  modifierGroups      ProductModifierGroup[]  @relation("ProductModifiers")
+  modifierOptionsUsed ProductModifierOption[] @relation("ComponentProduct")
+  saleItemModifiers   SaleItemModifier[]      @relation("ComponentProduct")
+  lots                StockLot[]
+
+  supplierProducts     SupplierProduct[]
+  purchaseOrderItems   PurchaseOrderItem[]
+  nfeEntradaItens      NfeEntradaItem[]
+  comandaItems         ComandaItem[]
+  comandaItemModifiers ComandaItemModifier[] @relation("ComandaItemModifierComponent")
+
+  @@map("products")
+}
+
+// ------------------------------------------------------------
+//  Customer — consumidor (destinatário da NFC-e)
+// ------------------------------------------------------------
+model Customer {
+  id        String  @id @default(uuid())
+  name      String
+  phone     String  @unique
+  cpfCnpj   String? // CPF ou CNPJ (identificação na NFC-e)
+  address   String?
+  reference String?
+  email     String?
+  notes     String? @db.Text
+  photoUrl  String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales           Sale[]
+  pets            Pet[]
+  petAppointments PetAppointment[]
+  petPortalTokens PetPortalAccessToken[]
+
+  @@map("customers")
+}
+
+// ------------------------------------------------------------
+//  Operator — colaboradores da empresa
+// ------------------------------------------------------------
+model Operator {
+  id        String   @id @default(uuid())
+  name      String
+  pin       String // PIN hasheado do operador (ex: Julio)
+  jobTitle  String? // Função/cargo do colaborador (ex: Motoqueiro, Garçom)
+  active    Boolean  @default(true)
+  isManager Boolean  @default(false) // Pode auditar fechamentos e ver totais
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sales               Sale[]
+  cashRegisters       CashRegister[]
+  consumptions        OperatorConsumption[] @relation("OperatorConsumptions")
+  comandasResponsible Comanda[]             @relation("ComandaResponsibleWaiter") // Módulo Restaurante V1
+  comandaItemsCreated ComandaItem[]         @relation("ComandaItemCreatedBy") // Auditoria de Itens V2
+  petAppointments     PetAppointment[]      @relation("PetAppointmentProfessional")
+
+  @@map("operators")
+}
+
+// ------------------------------------------------------------
+//  Pet Shop — domínio isolado, habilitado por modulos.petshop
+// ------------------------------------------------------------
+model Pet {
+  id         String    @id @default(uuid())
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  name       String
+  species    String    @default("dog")
+  breed      String?
+  sex        String?
+  birthDate  DateTime?
+  size       String?
+  weight     Decimal?  @db.Decimal(8, 3)
+  color      String?
+  neutered   Boolean   @default(false)
+  microchip  String?   @unique
+  photoUrl   String?   @db.Text
+  allergies  String?   @db.Text
+  behavior   String?   @db.Text
+  notes      String?   @db.Text
+  active     Boolean   @default(true)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  vaccinations PetVaccination[]
+  appointments PetAppointment[]
+
+  @@index([customerId, name])
+  @@index([active])
+  @@map("pets")
+}
+
+model PetVaccination {
+  id           String    @id @default(uuid())
+  petId        String
+  pet          Pet       @relation(fields: [petId], references: [id], onDelete: Cascade)
+  vaccineName  String
+  status       String    @default("applied") // scheduled, applied, overdue, waived
+  appliedAt    DateTime?
+  nextDueAt    DateTime?
+  batchNumber  String?
+  manufacturer String?
+  clinic       String?
+  professional String?
+  notes        String?   @db.Text
+  proofUrl     String?   @db.Text
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([petId, nextDueAt])
+  @@index([nextDueAt, status])
+  @@map("pet_vaccinations")
+}
+
+model PetService {
+  id              String   @id @default(uuid())
+  name            String
+  description     String?  @db.Text
+  durationMinutes Int      @default(60)
+  price           Decimal  @db.Decimal(10, 2)
+  color           String   @default("#0d9488")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  appointmentItems PetAppointmentService[]
+
+  @@index([active, name])
+  @@map("pet_services")
+}
+
+model PetAppointment {
+  id             String    @id @default(uuid())
+  customerId     String
+  customer       Customer  @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  petId          String
+  pet            Pet       @relation(fields: [petId], references: [id], onDelete: Restrict)
+  professionalId String?
+  professional   Operator? @relation("PetAppointmentProfessional", fields: [professionalId], references: [id], onDelete: SetNull)
+  startsAt       DateTime
+  endsAt         DateTime
+  status         String    @default("scheduled") // requested, scheduled, checked_in, bathing, grooming, finishing, ready, delivered, cancelled, no_show
+  source         String    @default("internal") // internal, client_portal, whatsapp
+  notes          String?   @db.Text
+  checkInNotes   String?   @db.Text
+  checkedInAt    DateTime?
+  readyAt        DateTime?
+  completedAt    DateTime?
+  stagePhotoUrl  String?   @db.Text
+  stageNotes     String?   @db.Text
+  stageHistory   Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  services PetAppointmentService[]
+
+  @@index([startsAt, status])
+  @@index([professionalId, startsAt, endsAt])
+  @@index([petId, startsAt])
+  @@map("pet_appointments")
+}
+
+model PetAppointmentService {
+  id              String         @id @default(uuid())
+  appointmentId   String
+  appointment     PetAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  serviceId       String
+  service         PetService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  nameSnapshot    String
+  priceSnapshot   Decimal        @db.Decimal(10, 2)
+  durationMinutes Int
+
+  @@unique([appointmentId, serviceId])
+  @@index([serviceId])
+  @@map("pet_appointment_services")
+}
+
+model PetPortalAccessToken {
+  id         String    @id @default(uuid())
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  tokenHash  String    @unique @db.Char(64)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([customerId, revokedAt])
+  @@index([expiresAt])
+  @@map("pet_portal_access_tokens")
+}
+
+// ------------------------------------------------------------
+//  OperatorConsumption — consumo de colaboradores (comandas)
+// ------------------------------------------------------------
+model OperatorConsumption {
+  id         String    @id @default(uuid())
+  operatorId String
+  operator   Operator  @relation("OperatorConsumptions", fields: [operatorId], references: [id], onDelete: Cascade)
+  saleId     String    @unique
+  sale       Sale      @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  settled    Boolean   @default(false)
+  settledAt  DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  @@map("operator_consumptions")
+}
+
+// ------------------------------------------------------------
+//  Sale — cabeçalho da venda + dados NFC-e
+// ------------------------------------------------------------
+model Sale {
+  id                 String            @id @default(uuid())
+  requestFingerprint String?           @db.VarChar(80)
+  deliveryJobs       SaleDeliveryJob[]
+  customerId         String?
+  customer           Customer?         @relation(fields: [customerId], references: [id])
+  operatorId         String? // ID do colaborador
+  operator           Operator?         @relation(fields: [operatorId], references: [id])
+  cashRegisterId     String?
+  cashRegister       CashRegister?     @relation(fields: [cashRegisterId], references: [id])
+
+  // Valores
+  subtotal Decimal @default(0) @db.Decimal(10, 2)
+  discount Decimal @default(0) @db.Decimal(10, 2)
+  addition Decimal @default(0) @db.Decimal(10, 2) // Acréscimos/Taxas (ex: iFood)
+  total    Decimal @db.Decimal(10, 2)
+
+  // Status da venda
+  status String @default("completed") // completed, cancelled
+  source String @default("pdv") // pdv, ifood, rappi, goomer...
+
+  // NFC-e — dados de emissão
+  emitirNfce Boolean @default(false) // o operador escolheu emitir?
+  nfceStatus String? // pendente, autorizada, rejeitada, cancelada, nao_emitida
+
+  // Dados retornados pelo microsserviço PHP após autorização
+  nfceNumero       Int? // número sequencial da nota
+  nfceSerie        Int? // série
+  nfceChave        String?   @unique // chave de acesso 44 dígitos
+  nfceProtocolo    String? // número do protocolo SEFAZ
+  nfceAutorizadaEm DateTime?
+
+  // Armazenamento do resultado
+  nfceXml    String? @db.LongText // XML completo autorizado
+  nfceQrcode String? @db.Text // URL do QR Code
+
+  // Erro (quando rejeitada)
+  nfceCodRejeicao    String?
+  nfceMotivoRejeicao String? @db.Text // Mensagens SEFAZ podem ser longas
+
+  // CPF do consumidor informado na emissão (opcional)
+  consumidorCpf  String?
+  consumidorNome String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  code         Int? // Código sequencial amigável da venda (ex: 1, 2, 3...)
+  cancelReason String?   @db.Text
+  cancelledAt  DateTime?
+
+  items               SaleItem[]
+  payments            Payment[]
+  operatorConsumption OperatorConsumption?
+  comandas            Comanda[]
+
+  @@index([code])
+  @@index([createdAt])
+  @@map("sales")
+}
+
+// Transactional outbox: jobs are committed together with the sale.
+model SaleDeliveryJob {
+  id          String    @id @default(uuid())
+  saleId      String
+  sale        Sale      @relation(fields: [saleId], references: [id])
+  kind        String
+  payload     String    @db.LongText
+  status      String    @default("PENDING")
+  attempts    Int       @default(0)
+  availableAt DateTime  @default(now())
+  claimedAt   DateTime?
+  claimToken  String?
+  lastError   String?   @db.Text
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([saleId, kind])
+  @@index([status, availableAt])
+  @@map("sale_delivery_jobs")
+}
+
+// ------------------------------------------------------------
+//  SaleItem — itens da venda com SNAPSHOT fiscal imutável
+//  Os tributos são congelados no momento da venda
+//  (conformidade fiscal — nota não pode ser recalculada)
+// ------------------------------------------------------------
+model SaleItem {
+  id        String  @id @default(uuid())
+  saleId    String
+  sale      Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  // Snapshot do produto no momento da venda
+  productName String  @default("") // nome no momento da venda
+  unit        String  @default("UN")
+  quantity    Decimal @db.Decimal(10, 3)
+  priceUnit   Decimal @db.Decimal(10, 4)
+  discount    Decimal @default(0) @db.Decimal(10, 2)
+  subtotal    Decimal @db.Decimal(10, 2)
+
+  // Snapshot fiscal (congelado — NÃO alterar após criação)
+  ncm    String? // NCM do produto na hora da venda
+  cest   String? // CEST
+  cfop   String? // CFOP aplicado
+  origem Int     @default(0)
+
+  // ICMS (Simples Nacional ou Regime Normal — apenas um será preenchido)
+  csosn     String? // Simples Nacional: 102, 400, 500...
+  cstIcms   String? // Regime Normal: 00, 10, 20, 60...
+  aliqIcms  Decimal @default(0) @db.Decimal(5, 2)
+  valorIcms Decimal @default(0) @db.Decimal(10, 2)
+
+  // PIS
+  cstPis   String  @default("99")
+  aliqPis  Decimal @default(0) @db.Decimal(5, 2)
+  valorPis Decimal @default(0) @db.Decimal(10, 2)
+
+  // COFINS
+  cstCofins   String  @default("99")
+  aliqCofins  Decimal @default(0) @db.Decimal(5, 2)
+  valorCofins Decimal @default(0) @db.Decimal(10, 2)
+
+  modifiers       SaleItemModifier[]
+  lotConsumptions StockLotConsumption[]
+  priceCost       Decimal               @default(0) @db.Decimal(10, 4)
+  settled         Boolean               @default(false)
+  settledAt       DateTime?
+
+  @@map("sale_items")
+}
+
+// ------------------------------------------------------------
+//  Payment — formas de pagamento com código tPag SEFAZ
+// ------------------------------------------------------------
+model Payment {
+  id     String @id @default(uuid())
+  saleId String
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  // tPag — código oficial SEFAZ (Tab. 5.4)
+  // 01=Dinheiro, 03=Cartão Crédito, 04=Cartão Débito, 17=PIX, 99=Outros
+  tPag   String  @default("99")
+  method String // label amigável: cash, credit, debit, pix, other, ou ID de TenantPaymentMethod
+  label  String? // nome legível para métodos customizados
+  value  Decimal @db.Decimal(10, 2)
+  troco  Decimal @default(0) @db.Decimal(10, 2)
+
+  @@map("payments")
+}
+
+// ------------------------------------------------------------
+//  TenantPaymentMethod — formas de pagamento personalizadas
+// ------------------------------------------------------------
+model TenantPaymentMethod {
+  id                 String   @id @default(uuid())
+  name               String // Ex: "iFood", "Ticket Alimentação"
+  tPag               String   @default("99") // código SEFAZ (99=Outros por padrão)
+  active             Boolean  @default(true)
+  emitirNfce         Boolean  @default(false) // Se true, pagamentos com este método exigem emissão de NFC-e
+  hasVariablePricing Boolean  @default(false) // Se true, abre tabela de preços customizada no PDV
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  prices ProductPaymentMethodPrice[]
+
+  @@map("tenant_payment_methods")
+}
+
+// ------------------------------------------------------------
+//  ProductPaymentMethodPrice — memória de preços por canal/pagamento
+// ------------------------------------------------------------
+model ProductPaymentMethodPrice {
+  id              String   @id @default(uuid())
+  productId       String
+  paymentMethodId String
+  price           Decimal  @db.Decimal(10, 2)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  paymentMethod TenantPaymentMethod @relation(fields: [paymentMethodId], references: [id], onDelete: Cascade)
+  // Nota: Não fiz relação forte com Product aqui para manter simples, 
+  // mas o productId deve referenciar products.id
+
+  @@unique([productId, paymentMethodId])
+  @@map("product_payment_method_prices")
+}
+
+// ------------------------------------------------------------
+//  CashRegister — abertura e fechamento de caixa
+// ------------------------------------------------------------
+model CashRegister {
+  id             String    @id @default(uuid())
+  operatorId     String? // ID do colaborador
+  operator       Operator? @relation(fields: [operatorId], references: [id])
+  code           Int? // Código sequencial amigável do turno/caixa (ex: 1, 2, 3...)
+  openingTime    DateTime  @default(now())
+  closingTime    DateTime?
+  openingValue   Decimal   @default(0) @db.Decimal(10, 2)
+  closingValue   Decimal?  @db.Decimal(10, 2)
+  closingDetails String?   @db.Text // JSON com auditoria detalhada e valores digitais corrigidos/declarados
+  status         String    @default("open") // open, closed
+
+  conferenceDetails    String?   @db.Text // JSON de rascunho de conferência enquanto o caixa estiver aberto
+  conferenceSavedAt    DateTime? // Data/hora da última conferência salva
+  conferenceSystemSnap String?   @db.Text // Snapshot dos totais do sistema na conferência (para detecção de divergência/stale)
+
+  movements           CashMovement[]
+  sales               Sale[]
+  conferenceRevisions CashRegisterConferenceRevision[]
+
+  @@index([code])
+  @@index([status])
+  @@map("cash_registers")
+}
+
+// ------------------------------------------------------------
+//  CashRegisterConferenceRevision — histórico de conferências e auditorias
+// ------------------------------------------------------------
+model CashRegisterConferenceRevision {
+  id                 String       @id @default(uuid())
+  cashRegisterId     String
+  cashRegister       CashRegister @relation(fields: [cashRegisterId], references: [id], onDelete: Cascade)
+  details            String       @db.Text // JSON dos valores declarados/conferidos
+  systemSnap         String?      @db.Text // Snapshot dos totais do sistema no momento
+  savedByUserId      String?
+  savedByOpId        String?
+  savedByOpName      String?
+  pinAuthType        String? // 'cashier_pin' | 'manager_pin' | null
+  pinAuthManagerId   String?
+  pinAuthManagerName String?
+  savedAt            DateTime     @default(now())
+
+  @@index([cashRegisterId])
+  @@map("cash_register_conference_revisions")
+}
+
+// ------------------------------------------------------------
+//  CashMovement — suprimento e sangria
+// ------------------------------------------------------------
+model CashMovement {
+  id             String       @id @default(uuid())
+  cashRegisterId String
+  cashRegister   CashRegister @relation(fields: [cashRegisterId], references: [id])
+
+  type      String // IN=suprimento, OUT=sangria
+  value     Decimal  @db.Decimal(10, 2)
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("cash_movements")
+}
+
+// ------------------------------------------------------------
+//  InventoryLog — histórico de movimentações de estoque
+// ------------------------------------------------------------
+model InventoryLog {
+  id        String  @id @default(uuid())
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  type      String // IN=entrada, OUT=ajuste saída, SALE=venda PDV
+  quantity  Decimal  @db.Decimal(10, 3)
+  costPrice Decimal? @db.Decimal(10, 4)
+  reason    String?
+
+  origin       String? @default("MANUAL") // IMPORT_XML, IMPORT_DFE, MANUAL, AJUSTE, PERDA, DEVOLUCAO
+  referenceId  String? // ID referencial (ex: ID da NfeEntrada)
+  referenceKey String? // Chave referencial (ex: chave de 44 digitos da nota)
+
+  createdAt DateTime @default(now())
+
+  @@map("inventory_logs")
+}
+
+// ------------------------------------------------------------
+//  NumeracaoNfce — controle sequencial de numeração por série
+//  Garante sequência sem gaps (exigência SEFAZ)
+// ------------------------------------------------------------
+model NumeracaoNfce {
+  id     String @id @default(uuid())
+  serie  Int
+  ultimo Int    @default(0) // último número emitido
+
+  @@unique([serie])
+  @@map("numeracao_nfce")
+}
+
+// ------------------------------------------------------------
+//  TenantSettings — configurações globais do tenant
+//  Tabela de linha única (singleton), gerenciada via upsert
+// ------------------------------------------------------------
+model TenantSettings {
+  id                   String  @id @default("singleton")
+  /// Permite que o PDV finalize vendas mesmo com estoque zerado ou negativo
+  allowNegativeStock   Boolean @default(false)
+  /// PIN numérico (hasheado) para autorizar descontos no PDV
+  discountPin          String?
+  /// PIN numérico (hasheado) para desbloquear auditoria e valores de caixas restritos no PDV
+  cashierPin           String?
+  /// Módulo de Controle de Validade de Lotes
+  enableExpiryControl  Boolean @default(false)
+  /// Dias de antecedência para alerta de vencimento
+  expiryAlertDays      Int     @default(30)
+  /// Limite padrão de estoque baixo (para produtos sem minStock definido)
+  lowStockAlertDefault Int     @default(5)
+  /// Configurações fiscais e de comportamento das formas de pagamento fixas (dinheiro, pix, cartões, etc.)
+  paymentMethodsConfig Json?
+
+  @@map("tenant_settings")
+}
+
+// ------------------------------------------------------------
+//  ProductModifierGroup — grupos de adicionais (ex: "Escolha o Gelo")
+// ------------------------------------------------------------
+model ProductModifierGroup {
+  id          String                  @id @default(uuid())
+  productId   String
+  product     Product                 @relation("ProductModifiers", fields: [productId], references: [id], onDelete: Cascade)
+  name        String // ex: "Escolha o Energético"
+  minSelected Int                     @default(1)
+  maxSelected Int                     @default(1)
+  options     ProductModifierOption[]
+
+  @@map("product_modifier_groups")
+}
+
+// ------------------------------------------------------------
+//  ProductModifierOption — opções de adicionais vinculadas a produtos reais
+// ------------------------------------------------------------
+model ProductModifierOption {
+  id                 String               @id @default(uuid())
+  groupId            String
+  group              ProductModifierGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  name               String // ex: "TNT"
+  componentProductId String
+  componentProduct   Product              @relation("ComponentProduct", fields: [componentProductId], references: [id], onDelete: Restrict)
+  quantity           Decimal              @db.Decimal(10, 3) // ex: 100.000 para ML, 1.000 para UN
+  priceAdjustment    Decimal              @default(0) @db.Decimal(10, 2)
+
+  @@map("product_modifier_options")
+}
+
+// ------------------------------------------------------------
+//  SaleItemModifier — persistência das opções escolhidas na venda
+// ------------------------------------------------------------
+model SaleItemModifier {
+  id                 String   @id @default(uuid())
+  saleItemId         String
+  saleItem           SaleItem @relation(fields: [saleItemId], references: [id], onDelete: Cascade)
+  componentProductId String
+  componentProduct   Product  @relation("ComponentProduct", fields: [componentProductId], references: [id])
+  name               String // ex: "TNT"
+  quantity           Decimal  @db.Decimal(10, 3)
+  priceAdjustment    Decimal  @db.Decimal(10, 2)
+
+  @@map("sale_item_modifiers")
+}
+
+// ------------------------------------------------------------
+//  StockLot — lotes de estoque para custeio PEPS/FIFO
+// ------------------------------------------------------------
+model StockLot {
+  id         String    @id @default(uuid())
+  productId  String
+  product    Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  costPrice  Decimal   @db.Decimal(10, 4) // Custo de aquisição unitário
+  quantity   Decimal   @db.Decimal(10, 3) // Quantidade comprada originalmente
+  remaining  Decimal   @db.Decimal(10, 3) // Quantidade restante no lote
+  // ── Controle de Validade (módulo opcional) ────────────────
+  lotNumber  String? // Ex: "LT-2025-001" — para rastreabilidade
+  expiresAt  DateTime? // Data de validade do lote
+  supplierId String? // Fornecedor deste lote
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  cProdFornecedor String? // Código interno de produto do fornecedor
+  loteFornecedor  String? // Lote impresso pelo fornecedor
+  dataFabricacao  DateTime? // Data de fabricação do lote
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  consumptions    StockLotConsumption[]
+
+  @@index([expiresAt])
+  @@map("stock_lots")
+}
+
+// ------------------------------------------------------------
+//  StockLotConsumption — consumo detalhado de cada lote
+// ------------------------------------------------------------
+model StockLotConsumption {
+  id         String   @id @default(uuid())
+  saleItemId String
+  saleItem   SaleItem @relation(fields: [saleItemId], references: [id], onDelete: Cascade)
+  lotId      String
+  lot        StockLot @relation(fields: [lotId], references: [id], onDelete: Cascade)
+  quantity   Decimal  @db.Decimal(10, 3)
+
+  @@map("stock_lot_consumptions")
+}
+
+// ------------------------------------------------------------
+//  Supplier — fornecedores
+// ------------------------------------------------------------
+model Supplier {
+  id         String  @id @default(uuid())
+  name       String
+  whatsapp   String?
+  cnpjCpf    String?
+  email      String?
+  ie         String? // Inscrição Estadual
+  logradouro String?
+  numero     String?
+  bairro     String?
+  municipio  String?
+  uf         String?
+  cep        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  products       SupplierProduct[]
+  purchaseOrders PurchaseOrder[]
+  payables       Payable[]
+  stockLots      StockLot[]
+  nfeEntradas    NfeEntrada[]
+
+  @@map("suppliers")
+}
+
+// ------------------------------------------------------------
+//  Image — armazenamento de fotos no banco
+// ------------------------------------------------------------
+// ------------------------------------------------------------
+//  SupplierProduct — produtos fornecidos pelo fornecedor
+// ------------------------------------------------------------
+model SupplierProduct {
+  id         String   @id @default(uuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  // Código interno que este fornecedor específico usa para este produto (cProd no XML)
+  cProdFornecedor String?
+
+  // Preço estimado que o fornecedor cobra
+  expectedCost Decimal? @db.Decimal(10, 4)
+
+  @@unique([supplierId, productId])
+  @@map("supplier_products")
+}
+
+// ------------------------------------------------------------
+//  Packaging — Tipos de Embalagem (Fardo, Caixa, etc.)
+// ------------------------------------------------------------
+model Packaging {
+  id         String   @id @default(uuid())
+  name       String
+  multiplier Int
+  createdAt  DateTime @default(now())
+
+  @@map("packagings")
+}
+
+// ------------------------------------------------------------
+//  PurchaseOrder — pedido de compra
+// ------------------------------------------------------------
+model PurchaseOrder {
+  id         String   @id @default(uuid())
+  supplierId String
+  supplier   Supplier @relation(fields: [supplierId], references: [id])
+
+  status String @default("DRAFT") // DRAFT, SENT, COMPLETED, CANCELLED
+
+  totalEstimated Decimal @default(0) @db.Decimal(10, 2)
+  totalReal      Decimal @default(0) @db.Decimal(10, 2)
+
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  receivedAt DateTime?
+
+  items PurchaseOrderItem[]
+
+  @@map("purchase_orders")
+}
+
+model PurchaseOrderItem {
+  id              String        @id @default(uuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  productId       String
+  product         Product       @relation(fields: [productId], references: [id])
+
+  quantity       Decimal @db.Decimal(10, 3)
+  unitMultiplier Int     @default(1)
+  unitName       String  @default("UN")
+
+  expectedCost Decimal  @db.Decimal(10, 4)
+  realCost     Decimal? @db.Decimal(10, 4) // Preenchido no recebimento
+
+  @@map("purchase_order_items")
+}
+
+// ------------------------------------------------------------
+//  Payable — Contas a pagar (Fixas e Variáveis)
+// ------------------------------------------------------------
+model Payable {
+  id              String   @id @default(uuid())
+  description     String
+  amount          Decimal  @db.Decimal(10, 2)
+  dueDate         DateTime
+  status          String   @default("PENDING") // PENDING, PAID, CANCELLED
+  type            String   @default("VARIABLE") // FIXED, VARIABLE
+  isRecurring     Boolean  @default(false)
+  recurrenceId    String?  @db.VarChar(36)
+  recurrenceMonth String?  @db.VarChar(7) // YYYY-MM: identidade da ocorrência, mesmo se vencimento for editado
+  recurrenceDay   Int? // dia original (31 -> último dia em meses curtos)
+  category        String? // agua, luz, internet, aluguel, funcionario, boleto, impostos...
+
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id])
+
+  paidAt DateTime?
+  notes  String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([recurrenceId, recurrenceMonth])
+  @@index([status, dueDate])
+  @@map("payables")
+}
+
+// ------------------------------------------------------------
+//  NfeEntrada — NF-es de fornecedores (entrada de mercadoria)
+// ------------------------------------------------------------
+model NfeEntrada {
+  id             String   @id @default(uuid())
+  chave          String   @unique // Chave 44 dígitos — garante idempotência
+  numero         String
+  serie          String
+  dataEmissao    DateTime
+  cnpjFornecedor String
+  nomeFornecedor String
+  valorTotal     Decimal  @db.Decimal(10, 2)
+  quantItens     Int      @default(0)
+
+  // Status granular do processo de importação
+  status FiscalImportStatus @default(RECEBIDA)
+
+  // Storage de XML (não salva LongText no banco — salva no disco)
+  xmlPath       String? // Caminho no storage local: /uploads/fiscal/YYYY/MM/chave.xml
+  xmlHash       String? @unique // SHA-256 do XML para auditoria de integridade
+  xmlSize       Int? // Tamanho em bytes
+  xmlVersion    String? // Versão do layout (ex: "4.00")
+  schemaVersion String? // Schema do layout (ex: "PL_009_V4")
+
+  importadaEm DateTime?
+  nsu         String? // NSU da distribuição DF-e
+
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  itens   NfeEntradaItem[]
+  eventos FiscalEvent[]
+
+  @@index([status])
+  @@index([cnpjFornecedor])
+  @@index([createdAt])
+  @@map("nfe_entradas")
+}
+
+// ------------------------------------------------------------
+//  NfeEntradaItem — Itens da NF-e de entrada
+// ------------------------------------------------------------
+model NfeEntradaItem {
+  id           String     @id @default(uuid())
+  nfeEntradaId String
+  nfeEntrada   NfeEntrada @relation(fields: [nfeEntradaId], references: [id], onDelete: Cascade)
+
+  // Dados extraídos do XML
+  descricao        String
+  codigoFornecedor String? // cProd do XML (código interno do fornecedor)
+  codigoBarras     String? // EAN-13 / GTIN
+  ncm              String?
+  cest             String?
+  cfop             String?
+  unidade          String  @default("UN")
+  quantidade       Decimal @db.Decimal(10, 3)
+  custoUnitario    Decimal @db.Decimal(10, 4)
+  custoTotal       Decimal @db.Decimal(10, 2)
+
+  // Conversão de unidades (Caixa vs Unidade/Lata)
+  uCom     String? // Unidade comercial (ex: CX)
+  qCom     Decimal? @db.Decimal(10, 3) // Quantidade comercial (ex: 1.00)
+  vUnCom   Decimal? @db.Decimal(10, 4) // Valor unitário comercial (ex: 48.61)
+  cEANTrib String? // EAN do item individual tributado (ex: 7898938890090)
+
+  // Impostos extraídos para fins de auditoria histórica
+  cstIcms    String?
+  aliqIcms   Decimal? @db.Decimal(5, 2)
+  vBCIcms    Decimal? @db.Decimal(10, 2)
+  vIcms      Decimal? @db.Decimal(10, 2)
+  cstPis     String?
+  aliqPis    Decimal? @db.Decimal(5, 2)
+  vPis       Decimal? @db.Decimal(10, 2)
+  cstCofins  String?
+  aliqCofins Decimal? @db.Decimal(5, 2)
+  vCofins    Decimal? @db.Decimal(10, 2)
+  cstIpi     String?
+  aliqIpi    Decimal? @db.Decimal(5, 2)
+  vIpi       Decimal? @db.Decimal(10, 2)
+  ibsCst     String?
+  ibsAliq    Decimal? @db.Decimal(5, 2)
+  vIbs       Decimal? @db.Decimal(10, 2)
+  cbsCst     String?
+  cbsAliq    Decimal? @db.Decimal(5, 2)
+  vCbs       Decimal? @db.Decimal(10, 2)
+
+  // Status individual do item (suporta importação parcial)
+  status FiscalImportStatus @default(RECEBIDA)
+
+  // Produto relacionado no sistema (após match ou criação)
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([nfeEntradaId])
+  @@index([codigoBarras])
+  @@map("nfe_entrada_itens")
+}
+
+// ------------------------------------------------------------
+//  FiscalEvent — Auditoria completa de eventos fiscais
+// ------------------------------------------------------------
+model FiscalEvent {
+  id           String      @id @default(uuid())
+  nfeEntradaId String?
+  nfeEntrada   NfeEntrada? @relation(fields: [nfeEntradaId], references: [id], onDelete: Cascade)
+
+  type              FiscalEventType
+  description       String          @db.Text
+  performedByUserId String? // Usuário que realizou a ação
+  correlationId     String? // ID de rastreamento end-to-end (fiscal_xxx)
+
+  createdAt DateTime @default(now())
+
+  @@index([nfeEntradaId])
+  @@index([type])
+  @@index([correlationId])
+  @@map("fiscal_events")
+}
+
+// ------------------------------------------------------------
+//  FiscalFailedJob — Dead Letter Queue para falhas de processamento
+// ------------------------------------------------------------
+model FiscalFailedJob {
+  id            String    @id @default(uuid())
+  correlationId String
+  action        String // Ex: "DISTRIBUICAO_DFE", "IMPORT_XML", "CANCELAMENTO"
+  payload       Json? // Payload original que falhou
+  error         String    @db.Text
+  resolved      Boolean   @default(false)
+  resolvedAt    DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([resolved])
+  @@index([action])
+  @@map("fiscal_failed_jobs")
+}
+
+// ------------------------------------------------------------
+//  Comanda — Comanda de Consumo / Mesas (Módulo Ativável)
+// ------------------------------------------------------------
+model Comanda {
+  id           String  @id @default(uuid())
+  number       String // Ex: "01", "12", "Mesa 05", "Sinuca 1"
+  customerName String? // Identificador / Nome do cliente (ex: "João Sinuca")
+  status       String  @default("open") // open, waiting_payment, closed, cancelled
+  total        Decimal @default(0) @db.Decimal(10, 2)
+  notes        String? @db.Text
+
+  responsibleWaiterId String? // Garçom responsável pela comanda (Módulo Restaurante)
+  responsibleWaiter   Operator? @relation("ComandaResponsibleWaiter", fields: [responsibleWaiterId], references: [id])
+
+  // Cancelamento é lógico: a comanda permanece fora do financeiro, porém consultável.
+  cancelledAt                   DateTime?
+  cancellationReason            String?
+  cancelledByOperatorId         String?
+  cancelledByName               String?
+  cancellationAuthorizationType String?
+  cancellationAuthorizedById    String?
+  cancellationAuthorizedByName  String?
+
+  items                ComandaItem[]
+  auditEvents          ComandaAuditEvent[]
+  actionAuthorizations ComandaActionAuthorization[]
+
+  saleId String? // Venda gerada no fechamento
+  sale   Sale?   @relation(fields: [saleId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([responsibleWaiterId])
+  @@map("comandas")
+}
+
+model ComandaItem {
+  assetNumber      Int?
+  timerStartedAt   DateTime?
+  timerMinutes     Int?
+  timerDueAt       DateTime?
+  assetReturnedAt  DateTime?
+  assetReservation ComandaAssetReservation?
+  kdsDestination   String?
+  kdsStatus        String?
+  kdsSentAt        DateTime?
+  kdsReadyAt       DateTime?
+  kdsDeliveredAt   DateTime?
+  serveImmediately Boolean                  @default(false)
+
+  id            String  @id @default(uuid())
+  comandaId     String
+  comanda       Comanda @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+  productId     String
+  product       Product @relation(fields: [productId], references: [id])
+  quantity      Decimal @db.Decimal(10, 3)
+  unitPrice     Decimal @db.Decimal(10, 2)
+  totalPrice    Decimal @db.Decimal(10, 2)
+  notes         String? @db.Text
+  stockDeducted Boolean @default(false) // Se true: product.stock já foi debitado no lançamento da comanda
+
+  // Nunca apagar lançamento já efetivado: a baixa e o estado original ficam auditáveis.
+  status                   String    @default("active") // active, removed, cancelled
+  removedAt                DateTime?
+  removalReason            String?
+  removedByOperatorId      String?
+  removedByName            String?
+  removalAuthorizationType String?
+  removalAuthorizedById    String?
+  removalAuthorizedByName  String?
+
+  createdById String? // Garçom/Operador que adicionou o item (Auditoria V2)
+  createdBy   Operator? @relation("ComandaItemCreatedBy", fields: [createdById], references: [id])
+
+  modifiers            ComandaItemModifier[]
+  auditEvents          ComandaAuditEvent[]
+  actionAuthorizations ComandaActionAuthorization[]
+
+  createdAt DateTime @default(now())
+
+  @@index([kdsStatus, kdsSentAt])
+  @@index([comandaId])
+  @@index([comandaId, status])
+  @@index([createdById])
+  @@map("comanda_items")
+}
+
+// Autorização de operação sensível. Apenas o hash do segredo aleatório é salvo;
+// o token expira e é consumido na mesma transação da remoção/cancelamento.
+model ComandaActionAuthorization {
+  id                     String       @id @default(uuid())
+  tokenHash              String       @unique
+  action                 String // remove_item | cancel_comanda
+  comandaId              String
+  comanda                Comanda      @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+  comandaItemId          String?
+  comandaItem            ComandaItem? @relation(fields: [comandaItemId], references: [id], onDelete: Cascade)
+  requestedByOperatorId  String?
+  requestedByName        String?
+  authorizationType      String // cashier_pin | manager_pin
+  authorizedByOperatorId String?
+  authorizedByName       String?
+  expiresAt              DateTime
+  consumedAt             DateTime?
+  createdAt              DateTime     @default(now())
+
+  @@index([comandaId, action, expiresAt])
+  @@map("comanda_action_authorizations")
+}
+
+// Evento imutável para conferência posterior. Snapshots evitam que uma troca de
+// cadastro de produto ou operador apague o contexto do ocorrido.
+model ComandaAuditEvent {
+  id                     String       @id @default(uuid())
+  comandaId              String
+  comanda                Comanda      @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+  comandaItemId          String?
+  comandaItem            ComandaItem? @relation(fields: [comandaItemId], references: [id], onDelete: SetNull)
+  action                 String // item_removed | comanda_cancelled
+  reason                 String
+  requestedByOperatorId  String?
+  requestedByName        String?
+  authorizationType      String
+  authorizedByOperatorId String?
+  authorizedByName       String?
+  snapshot               Json
+  createdAt              DateTime     @default(now())
+
+  @@index([comandaId, createdAt])
+  @@index([comandaItemId])
+  @@map("comanda_audit_events")
+}
+
+// Reserva atual; histórico permanece no item. Número físico único na loja.
+model ComandaAssetReservation {
+  assetNumber   Int         @id
+  comandaItemId String      @unique
+  item          ComandaItem @relation(fields: [comandaItemId], references: [id], onDelete: Cascade)
+
+  @@map("comanda_asset_reservations")
+}
+
+// ------------------------------------------------------------
+//  ComandaItemModifier — snapshot imutável dos ingredientes consumidos
+//  por item composto lançado em comanda. Usado para baixa, estorno
+//  e custeio FIFO sem recalcular pela configuração atual do produto.
+// ------------------------------------------------------------
+model ComandaItemModifier {
+  id            String      @id @default(uuid())
+  comandaItemId String
+  comandaItem   ComandaItem @relation(fields: [comandaItemId], references: [id], onDelete: Cascade)
+
+  optionId           String // ID da ProductModifierOption (auditoria)
+  componentProductId String
+  componentProduct   Product @relation("ComandaItemModifierComponent", fields: [componentProductId], references: [id])
+
+  name             String // Snapshot do nome da opção no momento do lançamento
+  consumedQuantity Decimal @db.Decimal(10, 3) // Pré-calculado: itemQty × (option.qty / volumeCapacity ∥ 1)
+  priceAdjustment  Decimal @db.Decimal(10, 2) // Snapshot do ajuste de preço
+
+  @@index([comandaItemId])
+  @@map("comanda_item_modifiers")
+}
+
+// ------------------------------------------------------------
+//  VitrineConfig — Módulo Vitrine Digital TV
+//  Configuração da vitrine de promoções exibida em TV/tela secundária.
+//  Um único registro por tenant (upsert). A TV acessa via tvPublicId
+//  do Heart DB, sem JWT, pelo endpoint público.
+// ------------------------------------------------------------
+model VitrineConfig {
+  id String @id @default(uuid())
+
+  // Estado da vitrine
+  active  Boolean @default(false)
+  version Int     @default(0) // Incrementa a cada "Publicar na TV"
+
+  // Rastreabilidade da última publicação
+  publishedAt       DateTime?
+  publishedByUserId String? // ID do usuário que publicou (imutável)
+  publishedByName   String? // Nome do usuário no momento da publicação (snapshot)
+  draftUpdatedAt    DateTime? // Última edição do rascunho
+
+  // Visual
+  theme         String  @default("dark_premium") // slug do tema escolhido
+  customBgUrl   String? @db.Text // URL do fundo personalizado (upload)
+  showLogo      Boolean @default(true)
+  logoPosition  String? @db.Text // top-left, top-right, bottom ou JSON de metadados
+  slideDuration Int     @default(8) // segundos por slide
+
+  // Slides em formato JSON (MVP)
+  // Estrutura de cada item: { productId, productName, imageUrl, priceSell,
+  //                           promoPrice?, badge?, order }
+  // ⚠️ Nota: armazenamento JSON é adequado para o MVP.
+  // Migrar para tabela relacional se escopo crescer (vídeos, agendamento).
+  draftSlides     Json @default("[]") // Rascunho em edição (não exibido na TV)
+  publishedSlides Json @default("[]") // Snapshot publicado (TV lê este campo)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("vitrine_config")
+}

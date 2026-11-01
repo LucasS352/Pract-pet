@@ -1,0 +1,350 @@
+// ============================================================
+//  HEART SCHEMA — Banco mestre multi-tenant
+//  Gerencia tenants (empresas) e usuários globais
+// ============================================================
+
+generator client {
+  provider      = "prisma-client-js"
+  output        = "../src/generated/heart-client"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL_HEART")
+}
+
+// ------------------------------------------------------------
+//  Tenant — dados completos da empresa emitente (NFC-e)
+// ------------------------------------------------------------
+model Tenant {
+  id            String  @id @default(uuid())
+  databaseName  String  @unique @map("database_name")
+  databaseUrl   String  @map("database_url")
+  name          String  @default("") // nome legado (mantém compatibilidade)
+  status        String  @default("active") // active, suspended, inactive
+  logoUrl       String?
+  modulos       Json?   @default("{\"petshop\": true, \"nfce\": true, \"estoque\": true, \"dashboardMobile\": true, \"comandas\": true}")
+
+  // Vitrine Digital — identificador público imutável (ex: "4J9XQ2KM")
+  // Gerado automaticamente na criação do tenant. Nunca muda mesmo que databaseName mude.
+  tvPublicId    String?  @unique @map("tv_public_id")
+
+  // Identificação
+  razaoSocial   String?
+  nomeFantasia  String?
+  cnpj          String? @unique
+  ie            String? // Inscrição Estadual
+  im            String? // Inscrição Municipal
+  crt           Int     @default(1) // 1=Simples Nacional, 2=SN Excesso, 3=Regime Normal
+
+  // Endereço
+  logradouro    String?
+  numero        String?
+  complemento   String?
+  bairro        String?
+  municipio     String?
+  codMunicipio  String? // Código IBGE (7 dígitos) ex: "3506003" para Bauru-SP
+  uf            String?
+  cep           String?
+  telefone      String?
+  emailContador String?
+
+  // NFC-e — configurações de emissão
+  nfceAtivo       Boolean  @default(false)  // habilita emissão NFC-e
+  nfceAutoSync    Boolean  @default(true)   // habilita o CRON de retentativa para este tenant
+  nfceSerie       Int      @default(1)      // série (ex: 1)
+  nfceAmbiente    Int      @default(2)      // 1=Produção, 2=Homologação
+  nfceCsc         String?  // Código de Segurança do Contribuinte (SEFAZ)
+  nfceIdCsc       String?  // ID do CSC
+
+  // Certificado Digital A1
+  certPfx         Bytes?    // .pfx armazenado como BLOB
+  certSenha       String?   // senha do certificado
+  certValidade    DateTime? // data de vencimento
+
+  // Integração Cosmos (Bluesoft) — lookup de EAN brasileiro
+  cosmosApiKey   String?  // Token da API Cosmos do cliente para lookup de EAN
+
+  // Mensalidades
+  mensalidadeValor      Decimal?   @db.Decimal(10, 2) @default(0.00) @map("mensalidade_valor")
+  mensalidadeVencimento DateTime?  @map("mensalidade_vencimento")
+
+  // Informações de contato do cliente (telefone, e-mail de contato)
+  telefoneContato  String?  @map("telefone_contato")
+  emailContato     String?  @map("email_contato")
+  observacoes      String?  @db.Text // Notas livres sobre o cliente
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  termsAcceptedAt DateTime? @map("terms_accepted_at")
+
+  users               User[]
+  tenantIntegrations  TenantIntegration[]
+  groupMembers        TenantGroupMember[]
+  paymentLogs         PaymentLog[]
+  stationAccessLinks  StationAccessLink[]
+
+  @@map("tenants")
+}
+
+model StationAccessLink {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  station   String
+  tokenHash String   @unique @db.Char(64)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, station])
+  @@map("station_access_links")
+}
+
+// ------------------------------------------------------------
+//  User — usuários vinculados ao tenant
+// ------------------------------------------------------------
+model User {
+  id        String  @id @default(uuid())
+  tenantId  String
+  tenant    Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  name      String
+  email     String  @unique
+  password  String
+  role      String  @default("operator") // admin, manager, operator, group_owner
+  pin       String? // PIN de 4-6 dígitos para troca rápida no PDV
+  active    Boolean @default(true)
+
+  // Multiempresa: se group_owner, este usuário acessa o portal consolidado
+  groupId   String?
+  group     TenantGroup? @relation(fields: [groupId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("users")
+}
+
+// ------------------------------------------------------------
+//  MasterProduct — dicionário global de produtos por EAN
+//  Compartilhado entre todos os tenants (banco heart)
+//  Usado para auto-preenchimento ao bipar código de barras
+// ------------------------------------------------------------
+model MasterProduct {
+  id        String   @id @default(uuid())
+  ean       String?  @unique // EAN-13 (13 dígitos)
+  name      String           // Nome comercial padronizado (PT-BR)
+  brand     String?          // Marca (ex: Heineken, Ambev)
+  ncm       String?          // NCM 8 dígitos — obrigatório NFC-e
+  cest      String?          // CEST 7 dígitos — quando há ST
+  unit      String   @default("UN") // UN, LT, FD, CX, KG
+  imageUrl  String?  @db.Text // URL da foto do produto
+  category  String?          // Categoria OFF (ex: en:beers)
+  source    String   @default("openfoodfacts") // rastreabilidade da origem
+
+  createdAt DateTime @default(now())
+
+  @@index([ean])
+  @@index([name])
+  @@map("master_products")
+}
+
+// ------------------------------------------------------------
+//  Image — armazenamento global de fotos no banco heart
+// ------------------------------------------------------------
+model Image {
+  id        String   @id @default(uuid())
+  data      Bytes    @db.LongBlob
+  mimeType  String
+  createdAt DateTime @default(now())
+
+  @@map("images")
+}
+
+// ------------------------------------------------------------
+//  TenantIntegration — central de integrações (App Store)
+// ------------------------------------------------------------
+model TenantIntegration {
+  id           String   @id @default(uuid())
+  tenantId     String
+  tenant       Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  
+  provider     String   // ex: "ifood", "goomer", "whatsapp"
+  status       String   @default("active") // active, paused, disconnected
+  credentials  Json     // Tokens OAuth (accessToken, refreshToken, merchantId)
+  settings     Json     // Configurações (autoAceitarPedido, imprimirAutomatico)
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  
+  @@unique([tenantId, provider])
+  @@map("tenant_integrations")
+}
+
+// ------------------------------------------------------------
+//  TenantGroup — grupos multiempresa
+// ------------------------------------------------------------
+model TenantGroup {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members   TenantGroupMember[]
+  users     User[]
+
+  @@map("tenant_groups")
+}
+
+model TenantGroupMember {
+  id       String      @id @default(uuid())
+  groupId  String
+  group    TenantGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  tenantId String
+  tenant   Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  alias    String?     // apelido ex: "Disk Centro"
+
+  @@unique([groupId, tenantId])
+  @@map("tenant_group_members")
+}
+
+// ------------------------------------------------------------
+//  NfeSyncState — Controle do CRON de distribuição DF-e por tenant
+// ------------------------------------------------------------
+model NfeSyncState {
+  id               String    @id @default(uuid())
+  tenantId         String    @unique
+  ultimoNSU        String    @default("0")
+  ultimaConsulta   DateTime?
+  status           String    @default("idle") // idle, syncing, error
+  notasBaixadas    Int       @default(0)       // Estatísticas do último run
+  tempoGastoMs     Int       @default(0)
+  lastError        String?   @db.Text
+  correlationId    String?                     // ID de rastreamento ponta-a-ponta
+  lastDiagnostico  Json?                       // Diagnóstico completo da última execução
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("nfe_sync_states")
+}
+
+// ============================================================
+//  SISTEMA DE PERFIS FISCAIS
+// ============================================================
+
+model StoreProfile {
+  id          String               @id @default(cuid())
+  slug        String               @unique  // "adega", "mercado"
+  name        String               // "Adega"
+  icon        String?              // "🍺"
+  description String?
+  profiles    StoreProfileFiscal[]
+}
+
+model StoreProfileFiscal {
+  storeProfileId  String
+  fiscalProfileId String
+  storeProfile    StoreProfile  @relation(fields: [storeProfileId], references: [id], onDelete: Cascade)
+  fiscalProfile   FiscalProfile @relation(fields: [fiscalProfileId], references: [id], onDelete: Cascade)
+  @@id([storeProfileId, fiscalProfileId])
+}
+
+model FiscalProfile {
+  id           String   @id @default(cuid())
+  name         String   // "Cerveja Nacional"
+  icon         String?  // "🍺"
+  group        String   // "Bebidas"
+  description  String?
+  scope        String   // "SYSTEM" | "TENANT"
+  tenantId     String?  // null = SYSTEM, uuid = TENANT
+  version      String   // "2026.1"
+  status       String   @default("ACTIVE")  // "ACTIVE" | "DEPRECATED" | "ARCHIVED"
+  emiteNfce    Boolean  @default(true)
+  ncm          String?
+  cest         String?
+  unit         String   @default("UN")
+  observacoes  String?
+  taxRules      FiscalTaxRule[]
+  history       FiscalProfileHistory[]
+  storeProfiles StoreProfileFiscal[]
+  favoritedBy   FiscalFavorite[]
+}
+
+model FiscalTaxRule {
+  id              String        @id @default(cuid())
+  fiscalProfileId String
+  fiscalProfile   FiscalProfile @relation(fields: [fiscalProfileId], references: [id], onDelete: Cascade)
+  regime          String        // "simples" | "normal"
+  csosn           String?       
+  cstIcms         String?       
+  aliqIcms        Float         @default(0)
+  cstPis          String        @default("99")
+  aliqPis         Float         @default(0)
+  cstCofins       String        @default("99")
+  aliqCofins      Float         @default(0)
+  ibsCst          String        @default("99")
+  ibsAliq         Float         @default(0)
+  cbsCst          String        @default("99")
+  cbsAliq         Float         @default(0)
+  validFrom       DateTime      @default(now())
+  validUntil      DateTime?     
+}
+
+model FiscalProfileHistory {
+  id              String        @id @default(cuid())
+  fiscalProfileId String
+  fiscalProfile   FiscalProfile @relation(fields: [fiscalProfileId], references: [id], onDelete: Cascade)
+  changedBy       String        
+  changedAt       DateTime      @default(now())
+  field           String        
+  oldValue        String        
+  newValue        String        
+  reason          String?       
+}
+
+model FiscalFavorite {
+  tenantId        String
+  fiscalProfileId String
+  fiscalProfile   FiscalProfile @relation(fields: [fiscalProfileId], references: [id], onDelete: Cascade)
+  @@id([tenantId, fiscalProfileId])
+}
+
+// ------------------------------------------------------------
+//  PaymentLog — histórico de pagamentos de mensalidade por tenant
+// ------------------------------------------------------------
+model PaymentLog {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  valor           Decimal  @db.Decimal(10, 2)  // Valor cobrado
+  vencimentoAntes DateTime  // Vencimento antes do registro
+  vencimentoApos  DateTime  // Novo vencimento após registro
+  observacao      String?  @db.Text
+  registradoPor   String?  // Nome ou identificação de quem registrou
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([createdAt])
+  @@map("payment_logs")
+}
+
+// ------------------------------------------------------------
+//  Lead — captura de interessados na demonstração gratuita
+// ------------------------------------------------------------
+model Lead {
+  id        String   @id @default(uuid())
+  name      String
+  whatsapp  String
+  status    String   @default("NOVO") // NOVO, EM_DEMO, CONTATADO, CONVERTIDO, DESCARTADO
+  source    String   @default("demo") // demo, landing, whatsapp
+  notes     String?  @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("leads")
+}

@@ -1,0 +1,67 @@
+# Env files (contém senhas - NÃO commitar)
+.env
+.env.local
+*.env.local
+
+# Node
+node_modules/
+
+# Logs
+*.log
+logs.txt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Scripts de debug/teste (não vão para produção)
+backend/check_tenants.js
+backend/clear-operator-id.js
+backend/dump.js
+backend/test-open.js
+backend/test-tenants.js
+backend/test_push.js
+backend/update-all-tenants.js
+backend/test-*.js
+backend/test-*.ts
+backend/test_*.ts
+backend/check*.ts
+frontend/count-divs.js
+frontend/create-icons.js
+
+# Build artifacts
+backend/dist/
+frontend/dist/
+frontend/dev-dist/
+frontend/.next/
+
+# NFCe service — debug e vendor (gerado no container via composer)
+nfce-service/inspecionar-soap.php
+nfce-service/teste-certificado.php
+nfce-service/public/ssl.php
+nfce-service/vendor/
+nfce-service/composer.lock
+
+# Certificados digitais — NUNCA commitar
+*.pfx
+*.p12
+*.pem
+certs/
+
+# Uploads de usuários (logos, etc) — gerados em runtime
+uploads/
+
+# Dumps MySQL com dados sensíveis (tenants, clientes, vendas)
+# NOTA: mysql/products-seed.sql É permitido — só contém catálogo de produtos genérico
+mysql/dumps/
+mysql/dump-completo.sql
+mysql/heart_backup.sql
+mysql/artcoco_backup.sql
+mysql/7bar_tenant_backup.sql
+mysql/master_products_backup.sql
+
+# Pasta de backups — gerada em runtime pelo sistema
+backups/
+
+# Pacotes de manutenção contêm fotos de clientes e mapeamentos privados.
+image-packages/

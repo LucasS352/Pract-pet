@@ -1,0 +1,172 @@
+@import "tailwindcss";
+
+/* Garçom: permite rolagem, sem zoom por toque duplo/pinça, inclusive nos portais. */
+body.garcom-touch-screen,
+body.garcom-touch-screen * {
+  touch-action: pan-x pan-y;
+}
+
+/* Evita zoom automático ao focar campos pequenos no Safari mobile. */
+@media (pointer: coarse) {
+  body.garcom-touch-screen input,
+  body.garcom-touch-screen textarea,
+  body.garcom-touch-screen select {
+    font-size: max(1rem, 16px);
+  }
+}
+
+/* Custom Scrollbar minimalista */
+.custom-scrollbar::-webkit-scrollbar {
+  width: 6px;
+}
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: #3f3f46;
+  border-radius: 10px;
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: #52525b;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-10px); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+.animate-in {
+  animation-duration: 300ms;
+  animation-fill-mode: forwards;
+}
+
+.fade-in {
+  animation-name: fade-in;
+}
+
+.slide-in-from-left-2 {
+  animation-name: slide-in-left;
+}
+
+/* ─── Mobile PDV Animations ───────────────────────────────────────────────── */
+
+@keyframes slide-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes card-tap {
+  0% { transform: scale(1); }
+  50% { transform: scale(0.92); }
+  100% { transform: scale(1); }
+}
+.card-tap {
+  animation: card-tap 200ms ease-out;
+}
+
+@keyframes badge-bounce {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+.badge-bounce {
+  animation: badge-bounce 300ms ease-out;
+}
+
+@keyframes item-added {
+  0% { background-color: rgba(59, 130, 246, 0.2); }
+  100% { background-color: transparent; }
+}
+.item-added {
+  animation: item-added 500ms ease-out;
+}
+
+/* Safe area padding for notched and dynamic island devices */
+.pt-safe {
+  padding-top: max(env(safe-area-inset-top, 0px), 16px);
+}
+.pt-safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.pb-safe {
+  padding-bottom: max(env(safe-area-inset-bottom, 0px), 12px);
+}
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.safe-area-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* Bottom sheet drag handle */
+.drag-handle {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: #52525b;
+  margin: 8px auto;
+}
+
+/* Numpad button styles */
+.numpad-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  font-weight: 700;
+  border-radius: 0.75rem;
+  background: #18181b;
+  border: 1px solid #27272a;
+  color: #fff;
+  min-height: 56px;
+  transition: all 150ms ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.numpad-btn:active {
+  transform: scale(0.93);
+  background: #27272a;
+}
+.numpad-btn-action {
+  background: #2563eb;
+  border-color: #3b82f6;
+}
+.numpad-btn-action:active {
+  background: #1d4ed8;
+}
+.numpad-btn-danger {
+  background: #7f1d1d;
+  border-color: #991b1b;
+  color: #fca5a5;
+}
+.numpad-btn-danger:active {
+  background: #991b1b;
+}
+
+/* ─── Capitão Gelada — Pop-up Animations ────────────────────────────────────── */
+
+/* Character bouncing into screen */
+@keyframes capitao-bounce-in {
+  0%   { transform: scale(0.3) translateY(20px); opacity: 0; }
+  60%  { transform: scale(1.15) translateY(-6px); opacity: 1; }
+  80%  { transform: scale(0.95) translateY(2px); }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* Speech bubble pop-in */
+@keyframes pop-in {
+  0%   { transform: scale(0.5) translateY(10px); opacity: 0; }
+  70%  { transform: scale(1.05) translateY(-2px); opacity: 1; }
+  100% { transform: scale(1) translateY(0); opacity: 1; }
+}
+
+/* Idle float */
+@keyframes breathe {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-5px); }
+}
+

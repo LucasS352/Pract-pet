@@ -1,0 +1,32 @@
+{
+  "date": "2026-10-10T11:44:17.722Z",
+  "engine": "local MySQL, real Prisma and GroupsService; group membership fixture",
+  "passed": [
+    "create selected stores with independent prices and zero stock",
+    "duplicate barcode cannot change unit or prices",
+    "reject creation outside group and invalid cost",
+    "concurrent entries preserve stock, lots and history including zero cost",
+    "transfer commits both databases and FIFO with common receipt",
+    "concurrent transfers cannot overspend source",
+    "stale stock adjustment rejected, current adjustment reconciles FIFO",
+    "price update affects only selected product and store",
+    "sync copies missing product at zero stock, never overwrites existing prices",
+    "destination log failure rolls back receiving and restores source and lots",
+    "entry log failure rolls back stock and new FIFO lot"
+  ],
+  "blockers": [
+    {
+      "issue": "Transfer retry duplicates movement",
+      "evidence": "Same requestId submitted twice produces two different receipts and two debits of 0.1."
+    },
+    {
+      "issue": "Transfer loses FIFO valuation",
+      "evidence": "Source lots cost zero; received lot cost is 4 (product default)."
+    },
+    {
+      "issue": "Sync loses product behavior",
+      "evidence": "Composite kitchen product copied as simple product without kitchen routing."
+    }
+  ],
+  "releaseReady": false
+}
