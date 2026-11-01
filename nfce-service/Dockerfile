@@ -1,7 +1,7 @@
-FROM php:8.2-apache-bullseye
+FROM php:8.2-apache-bookworm
 
 # ─── 1. Dependências do sistema e extensões PHP ───────────────────────────────
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --fix-missing \
     libzip-dev zip unzip git libxml2-dev libssl-dev curl ca-certificates openssl \
     libfreetype6-dev libjpeg62-turbo-dev libpng-dev libonig-dev \
     && docker-php-ext-configure gd --with-freetype --with-jpeg \
