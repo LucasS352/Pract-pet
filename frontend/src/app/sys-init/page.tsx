@@ -980,7 +980,6 @@ export default function SysInitPage() {
               <div className="flex flex-wrap items-center gap-2 lg:ml-auto">
                 <button disabled={!selectedTenantIds.length} onClick={() => setImageOptimizationOpen(true)} className="flex h-10 items-center gap-2 whitespace-nowrap rounded-xl border border-zinc-700 px-3 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-40"><ImageIcon size={16} /> Otimizar imagens</button>
                 <button onClick={() => { setStep('backups'); loadBackups(); }} className="flex h-10 items-center gap-2 whitespace-nowrap rounded-xl border border-zinc-700 px-3 text-sm text-zinc-300 hover:bg-zinc-800"><Database size={16} /> Gerenciar Backups</button>
-                <button onClick={handleExportTelemetry} className="flex h-10 items-center gap-2 whitespace-nowrap rounded-xl border border-zinc-700 px-3 text-sm text-zinc-300 hover:bg-zinc-800"><Activity size={16} /> Exportar telemetria ({telemetryCount})</button>
                 {telemetryCount > 0 && <button onClick={handleClearTelemetry} title="Limpar telemetria local" className="flex h-10 items-center gap-2 rounded-xl px-3 text-sm text-zinc-400 hover:bg-rose-500/10 hover:text-rose-300"><Trash2 size={16} /> Limpar telemetria</button>}
               </div>
             </div>}
