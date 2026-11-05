@@ -31,6 +31,9 @@ export class PetshopController {
     return this.petshop.uploadPhoto(file);
   }
 
+  @Get('reception/tutors') findReceptionTutor(@Query('phone') phone: string) { return this.petshop.findReceptionTutor(phone); }
+  @Post('reception/registrations') registerReception(@Body() body: any) { return this.petshop.registerReception(body); }
+
   @Get('tutors') listTutors(@Query('search') search?: string) { return this.petshop.listTutors(search); }
   @Post('tutors') createTutor(@Body() body: any) { return this.petshop.createTutor(body); }
   @Patch('tutors/:id') updateTutor(@Param('id') id: string, @Body() body: any) { return this.petshop.updateTutor(id, body); }

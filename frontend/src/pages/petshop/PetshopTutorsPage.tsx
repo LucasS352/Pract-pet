@@ -1,3 +1,4 @@
+import { ReceptionRegistrationModal } from './ReceptionRegistrationModal';
 import { FormEvent, useEffect, useState } from 'react';
 import { Bell, BellOff, Link2, Mail, MapPin, MessageCircle, PackageCheck, PawPrint, Pencil, Phone, Plus, Users } from 'lucide-react';
 import { toast } from 'sonner';
@@ -153,7 +154,8 @@ export default function PetshopTutorsPage() {
       </article>)}</div>}
     </section>
 
-    {open && <Modal title={editingTutor ? 'Editar tutor' : 'Novo tutor'} onClose={() => { setOpen(false); setEditingTutor(null); }}><form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
+    {open && !editingTutor && <ReceptionRegistrationModal onClose={() => setOpen(false)} onSaved={() => { setOpen(false); void load(false); }} />}
+    {open && editingTutor && <Modal title={editingTutor ? 'Editar tutor' : 'Novo tutor'} onClose={() => { setOpen(false); setEditingTutor(null); }}><form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
       <PhotoUploadField label="Foto do tutor" subjectName={form.name} value={form.photoUrl} onChange={photoUrl => setForm({ ...form, photoUrl })} />
       <label className="sm:col-span-2"><span className={labelClass}>Nome completo *</span><input className={inputClass} required autoComplete="name" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
       <label><span className={labelClass}>WhatsApp / telefone *</span><input type="tel" className={inputClass} required autoComplete="tel" value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>

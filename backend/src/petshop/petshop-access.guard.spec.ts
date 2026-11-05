@@ -16,4 +16,12 @@ describe('Pet Shop operational authorization', () => {
     expect(await guard.canActivate(context('pending-reservations'))).toBe(true);
     await expect(guard.canActivate(context('services/a', 'PATCH'))).rejects.toThrow();
   });
+  it('allows reception registration and exact lookup under staff PIN', async () => {
+    expect(await guard.canActivate(context('reception/tutors?phone=11999999999'))).toBe(true);
+    expect(await guard.canActivate(context('reception/registrations', 'POST'))).toBe(true);
+  });
+  it('requires staff identification for reception under operator accounts', async () => {
+    const noPinGuard = new PetshopAccessGuard({ tenant: { findUnique: async () => ({ status: 'active', modulos: { petshop: true } }) } } as any, { sessionOperator: async () => null } as any);
+    await expect(noPinGuard.canActivate(context('reception/registrations', 'POST', 'operator'))).rejects.toThrow('PIN');
+  });
 });

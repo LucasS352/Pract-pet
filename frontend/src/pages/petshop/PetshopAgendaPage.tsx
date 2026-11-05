@@ -1,3 +1,4 @@
+import { ReceptionRegistrationModal } from './ReceptionRegistrationModal';
 import { PaymentModal } from '@/components/PaymentModal';
 import { buildWhatsAppMessage } from './appointment-media';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
@@ -227,6 +228,7 @@ export default function PetshopAgendaPage() {
   const [hideCompleted, setHideCompleted] = useState(false);
 
   // Modais e ações
+  const [openReception, setOpenReception] = useState(false);
   const [openNew, setOpenNew] = useState(searchParams.get('new') === '1');
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [updatingId, setUpdatingId] = useState('');
@@ -2141,9 +2143,22 @@ export default function PetshopAgendaPage() {
       )}
 
       {/* 10. MODAL DE NOVO AGENDAMENTO */}
-      {openNew && (
+      {openReception && <ReceptionRegistrationModal includePet onClose={() => setOpenReception(false)} onSaved={({ pet }) => {
+        if (pet) {
+          setPets(current => [...current.filter(item => item.id !== pet.id), pet]);
+          setAvailablePackages([]);
+          setPackageSelections({});
+          setForm(current => ({ ...current, petId: pet.id, serviceIds: [] }));
+        }
+        setOpenReception(false);
+      }} />}
+      {openNew && !openReception && (
         <Modal title="Novo agendamento" onClose={() => setOpenNew(false)}>
           <form onSubmit={submitNew} className="grid gap-4 sm:grid-cols-2">
+            <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-100 bg-teal-50/50 px-3 py-2">
+              <span className="text-xs text-slate-600">Cliente ou pet novo?</span>
+              <button type="button" className="min-h-11 text-sm font-semibold text-teal-700 underline underline-offset-4" onClick={() => setOpenReception(true)}>+ Cadastrar tutor e pet</button>
+            </div>
             <label className="sm:col-span-2">
               <span className={labelClass}>Pet *</span>
               <select

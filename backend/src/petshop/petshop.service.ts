@@ -247,19 +247,50 @@ export class PetshopService {
     });
   }
 
+  private tutorData(data: any) {
+    const phone = requiredText(data?.phone, 'Telefone').replace(/\D/g, '');
+    if (phone.length < 10 || phone.length > 15) throw new BadRequestException('Informe um telefone válido com DDD.');
+    return {
+      name: requiredText(data?.name, 'Nome'), phone,
+      cpfCnpj: optionalText(data?.cpfCnpj), address: optionalText(data?.address),
+      reference: optionalText(data?.reference), email: optionalText(data?.email), notes: optionalText(data?.notes), photoUrl: optionalText(data?.photoUrl),
+      whatsappOptIn: data?.whatsappOptIn === undefined ? true : Boolean(data.whatsappOptIn),
+    };
+  }
+
   async createTutor(data: any) {
     const prisma = await this.prisma();
-    const phone = requiredText(data.phone, 'Telefone').replace(/\D/g, '');
-    if (phone.length < 10) throw new BadRequestException('Informe um telefone válido com DDD.');
-    return prisma.customer.create({ data: {
-      name: requiredText(data.name, 'Nome'), phone,
-      cpfCnpj: optionalText(data.cpfCnpj), address: optionalText(data.address),
-      reference: optionalText(data.reference), email: optionalText(data.email), notes: optionalText(data.notes), photoUrl: optionalText(data.photoUrl),
-      whatsappOptIn: data.whatsappOptIn === undefined ? true : Boolean(data.whatsappOptIn),
-    } }).catch(error => {
+    return prisma.customer.create({ data: this.tutorData(data) }).catch(error => {
       if (error?.code === 'P2002') throw new ConflictException('Já existe um tutor com este telefone ou documento. Localize o cadastro existente.');
       throw error;
     });
+  }
+
+  async findReceptionTutor(phoneInput: string) {
+    const phone = requiredText(phoneInput, 'Telefone').replace(/\D/g, '');
+    if (phone.length < 10 || phone.length > 15) throw new BadRequestException('Informe o telefone completo com DDD.');
+    const prisma = await this.prisma();
+    return prisma.customer.findUnique({ where: { phone }, select: { id: true, name: true, phone: true } });
+  }
+
+  async registerReception(body: any) {
+    const prisma = await this.prisma();
+    const customerId = body?.customerId ? requiredText(body.customerId, 'Tutor') : null;
+    const tutorData = customerId ? null : this.tutorData(body?.tutor);
+    if (customerId && !body?.pet) throw new BadRequestException('Informe o pet a cadastrar para este tutor.');
+    const petData = body?.pet ? this.petData({ ...body.pet, name: requiredText(body.pet.name, 'Nome do pet'), species: requiredText(body.pet.species, 'Espécie') }) : null;
+    if (petData && !['dog', 'cat', 'bird', 'other'].includes(petData.species)) throw new BadRequestException('Espécie inválida.');
+    try {
+      return await prisma.$transaction(async tx => {
+        const tutor = customerId ? await tx.customer.findUnique({ where: { id: customerId } }) : await tx.customer.create({ data: tutorData! });
+        if (!tutor) throw new BadRequestException('Tutor não encontrado.');
+        const pet = petData ? await tx.pet.create({ data: { ...petData, customerId: tutor.id }, include: { customer: true } }) : null;
+        return { tutor: { id: tutor.id, name: tutor.name, phone: tutor.phone }, pet };
+      });
+    } catch (error: any) {
+      if (error?.code === 'P2002') throw new ConflictException('Já existe um tutor com este telefone ou documento. Use Buscar por telefone para aproveitar o cadastro.');
+      throw error;
+    }
   }
 
   async updateTutor(id: string, data: any) {
