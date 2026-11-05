@@ -28,7 +28,7 @@ import {
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { CollaboratorAccessModal } from './CollaboratorAccessModal';
-import { EmptyState, inputClass, labelClass, ListSkeleton, Modal, pageClass, PageHeader, primaryButton, secondaryButton } from './ui';
+import { EmptyState, inputClass, labelClass, ListSkeleton, Modal, pageClass, PageHeader, primaryButton, secondaryButton, TeamTabs } from './ui';
 
 export type Operator = {
   id: string;
@@ -571,6 +571,8 @@ export default function PetshopTeamPage() {
           </div>
         }
       />
+
+      <TeamTabs />
 
       {/* 4 Cards de KPI */}
       <section aria-label="Indicadores da equipe" className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

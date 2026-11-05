@@ -1,28 +1,47 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { buildWhatsAppMessage } from './appointment-media';
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import {
+  AlertTriangle,
   ArrowRight,
+  Calendar,
   CalendarDays,
+  Camera,
+  Check,
   CheckCircle2,
+  Clock,
   Clock3,
-  PawPrint,
+  ExternalLink,
+  Layers,
+  Loader2,
+  MessageCircle,
+  MessageSquare,
+  MoreHorizontal,
   Package,
+  PawPrint,
+  Play,
   Plus,
   RefreshCw,
-  Syringe,
+  Scissors,
+  Sparkles,
+  UserCheck,
   UserRound,
-  UserRoundCog,
   Users,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { usePetshopContext } from '@/layouts/PetshopLayout';
 import type { Appointment } from './types';
-import { PetAvatar, PetHeroShowcase } from './ui';
+import { Modal, PetAvatar, PetHeroShowcase } from './ui';
+import { PhotoUploadField } from './PhotoUploadField';
+import { getFullUrl } from '@/lib/getFullUrl';
 
 type Overview = {
   metrics: {
     pets: number;
     tutors: number;
     products?: number;
+    services?: number;
     today: number;
     inProgress: number;
     vaccinesDue: number;
@@ -30,17 +49,47 @@ type Overview = {
   nextAppointments: Appointment[];
 };
 
-const STATUS: Record<string, { label: string; tone: string }> = {
-  requested: { label: 'Solicitado', tone: 'pc-status--warning' },
-  scheduled: { label: 'Agendado', tone: 'pc-status--neutral' },
-  checked_in: { label: 'Check-in', tone: 'pc-status--info' },
-  bathing: { label: 'No banho', tone: 'pc-status--info' },
-  grooming: { label: 'Na tosa', tone: 'pc-status--info' },
-  finishing: { label: 'Finalização', tone: 'pc-status--warning' },
-  ready: { label: 'Pronto para retirada', tone: 'pc-status--success' },
-  delivered: { label: 'Entregue', tone: 'pc-status--neutral' },
-  cancelled: { label: 'Cancelado', tone: 'pc-status--danger' },
-  no_show: { label: 'Não compareceu', tone: 'pc-status--danger' },
+const STATUS_CONFIG: Record<string, { label: string; badgeClass: string }> = {
+  ready: {
+    label: '✓ Pronto p/ busca',
+    badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  },
+  bathing: {
+    label: 'Em atendimento',
+    badgeClass: 'bg-sky-50 text-sky-700 border-sky-200',
+  },
+  grooming: {
+    label: 'Em atendimento',
+    badgeClass: 'bg-sky-50 text-sky-700 border-sky-200',
+  },
+  finishing: {
+    label: 'Em atendimento',
+    badgeClass: 'bg-sky-50 text-sky-700 border-sky-200',
+  },
+  checked_in: {
+    label: 'Em atendimento',
+    badgeClass: 'bg-sky-50 text-sky-700 border-sky-200',
+  },
+  requested: {
+    label: 'Aguardando confirmação',
+    badgeClass: 'bg-amber-50 text-amber-800 border-amber-200',
+  },
+  scheduled: {
+    label: '✓ Confirmado',
+    badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+  },
+  delivered: {
+    label: '✓ Concluído',
+    badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
+  },
+  cancelled: {
+    label: 'Cancelado',
+    badgeClass: 'bg-rose-50 text-rose-800 border-rose-200',
+  },
+  no_show: {
+    label: 'Não compareceu',
+    badgeClass: 'bg-zinc-100 text-zinc-700 border-zinc-200',
+  },
 };
 
 const activeStatuses = new Set(['requested', 'scheduled', 'checked_in', 'bathing', 'grooming', 'finishing', 'ready']);
@@ -55,41 +104,70 @@ function todayRange() {
 }
 
 function time(value: string) {
-  return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+  try {
+    return new Intl.DateTimeFormat('pt-BR', { hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+  } catch {
+    return value;
+  }
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const config = STATUS[status] || { label: status, tone: 'pc-status--neutral' };
-  return <span className={`pc-status ${config.tone}`}>{config.label}</span>;
+function getPetSpeciesSize(pet: any): string {
+  if (!pet) return 'Pet';
+  if (pet.species === 'cat') return 'Gato';
+  const sizeMap: Record<string, string> = {
+    mini: 'Mini',
+    small: 'Pequeno',
+    medium: 'Médio',
+    large: 'Grande',
+    giant: 'Gigante',
+  };
+  const size = sizeMap[pet.size || ''] || 'Médio';
+  return `Cão (${size})`;
 }
 
-function EmptyPanel({ title, description }: { title: string; description: string }) {
-  return <div className="flex min-h-32 flex-col items-center justify-center px-5 py-7 text-center"><CheckCircle2 aria-hidden="true" className="mb-3 text-[var(--pc-border-strong)]" size={24} /><p className="text-sm font-medium">{title}</p><p className="mt-1 max-w-xs text-xs leading-5 text-[var(--pc-text-muted)]">{description}</p></div>;
-}
-
-function CompactAppointment({ item }: { item: Appointment }) {
-  return <div className="border-t border-[var(--pc-border)] px-4 py-3 first:border-t-0"><div className="flex items-center gap-3"><PetAvatar pet={item.pet} size="sm" /><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><p className="truncate text-sm font-semibold">{item.pet.name}</p><span className="text-xs font-semibold tabular-nums text-[var(--pc-text-secondary)]">· {time(item.startsAt)}</span></div><p className="mt-0.5 truncate text-xs text-[var(--pc-text-muted)]">{item.customer.name}</p></div><StatusBadge status={item.status} /></div></div>;
+function getElapsedMinutes(item: Appointment): number {
+  try {
+    const refDate = item.checkedInAt || (item as any).updatedAt || item.startsAt;
+    const elapsed = Math.floor((Date.now() - new Date(refDate).getTime()) / 60000);
+    return Number.isFinite(elapsed) ? Math.max(0, elapsed) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export default function PetshopDashboardPage() {
+  const { isRestrictedStaff, operator } = usePetshopContext();
+  const navigate = useNavigate();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
-  const [updatedAt, setUpdatedAt] = useState<Date | null>(null);
+  const [updatingId, setUpdatingId] = useState<string>('');
 
+  // Modal de Foto e Etapa Rápida
+  const [stageModalItem, setStageModalItem] = useState<Appointment | null>(null);
+  const [stageForm, setStageForm] = useState({
+    status: '',
+    stagePhotoUrl: '',
+    stageNotes: '',
+    notifyTutor: false, // Desflegado por padrão conforme solicitado
+  });
+  const [savingStage, setSavingStage] = useState(false);
+
+  const [pendingReservations, setPendingReservations] = useState<Appointment[]>([]);
   const load = useCallback(async (signal?: AbortSignal) => {
     setError('');
     setLoading(true);
     try {
       const range = todayRange();
-      const [overviewResponse, appointmentsResponse] = await Promise.all([
+      const [overviewResponse, pendingResponse, appointmentsResponse] = await Promise.all([
         api.get<Overview>('/petshop/overview', { signal }),
+        api.get<Appointment[]>('/petshop/pending-reservations', { signal }),
         api.get<Appointment[]>('/petshop/appointments', { params: range, signal }),
       ]);
       setOverview(overviewResponse.data);
-      setAppointments(appointmentsResponse.data);
-      setUpdatedAt(new Date());
+      setPendingReservations(pendingResponse.data || []);
+      setAppointments(appointmentsResponse.data || []);
     } catch (requestError: any) {
       if (requestError?.code !== 'ERR_CANCELED') {
         setError(requestError?.response?.data?.message || 'Não foi possível carregar a operação de hoje.');
@@ -105,66 +183,856 @@ export default function PetshopDashboardPage() {
     return () => controller.abort();
   }, [load]);
 
-  const activeAppointments = useMemo(() => appointments.filter(item => activeStatuses.has(item.status)), [appointments]);
-  const inProduction = useMemo(() => activeAppointments.filter(item => productionStatuses.has(item.status)), [activeAppointments]);
-  const ready = useMemo(() => activeAppointments.filter(item => item.status === 'ready'), [activeAppointments]);
-  const requested = useMemo(() => activeAppointments.filter(item => item.status === 'requested'), [activeAppointments]);
-  const agendaCount = useMemo(() => appointments.filter(item => !['cancelled', 'no_show'].includes(item.status)).length, [appointments]);
+  const [, refreshClock] = useState(0);
+  useEffect(() => { const timer = setInterval(() => refreshClock(n => n + 1), 30000); return () => clearInterval(timer); }, []);
+
+  const activeAppointments = useMemo(
+    () => appointments.filter(item => activeStatuses.has(item.status)),
+    [appointments]
+  );
+  const inProduction = useMemo(
+    () => activeAppointments.filter(item => productionStatuses.has(item.status)),
+    [activeAppointments]
+  );
+  const ready = useMemo(
+    () => activeAppointments.filter(item => item.status === 'ready'),
+    [activeAppointments]
+  );
+  const requested = useMemo(
+    () => pendingReservations,
+    [pendingReservations]
+  );
+  const agendaCount = useMemo(
+    () => appointments.filter(item => !['cancelled', 'no_show'].includes(item.status)).length,
+    [appointments]
+  );
+
+  const upcomingAppointments = useMemo(() => {
+    return appointments
+      .filter(item => ['scheduled', 'requested', 'checked_in'].includes(item.status))
+      .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
+  }, [appointments]);
+
   const rawDateLabel = new Intl.DateTimeFormat('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' }).format(new Date());
   const dateLabel = rawDateLabel.charAt(0).toUpperCase() + rawDateLabel.slice(1);
 
+  // Ação rápida de avanço de status
+  const changeStatus = async (item: Appointment, newStatus: string) => {
+    setUpdatingId(item.id);
+    try {
+      const { data: updated } = await api.patch(`/petshop/appointments/${item.id}/status`, {
+        status: newStatus,
+      });
+      setAppointments(curr => curr.map(row => (row.id === item.id ? updated : row)));
+      setPendingReservations(curr => curr.filter(row => row.id !== item.id));
+      const label = STATUS_CONFIG[newStatus]?.label || newStatus;
+      toast.success(`${item.pet.name} atualizado(a) para "${label}".`);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Não foi possível atualizar o atendimento.');
+    } finally {
+      setUpdatingId('');
+    }
+  };
+
+  const openStageModal = (item: Appointment) => {
+    setStageModalItem(item);
+    setStageForm({
+      status: item.status === 'scheduled' || item.status === 'requested' ? 'bathing' : item.status,
+      stagePhotoUrl: item.stagePhotoUrl || '',
+      stageNotes: item.stageNotes || '',
+      notifyTutor: false, // Desmarcado por padrão
+    });
+  };
+
+  const notifyTutorDirect = async (item: Appointment) => {
+    try {
+      const { data } = await api.post(`/petshop/tutors/${item.customer.id}/portal-link`, {
+        rotate: false,
+      });
+      const portalUrl = `${window.location.origin}${data.path}`;
+      const cleanPhone = (item.customer?.phone || '').replace(/\D/g, '');
+      const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+      const msg = buildWhatsAppMessage(item, portalUrl, item.stageNotes);
+      window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+      toast.success(`Aviso WhatsApp preparado para ${item.customer.name}!`);
+    } catch {
+      toast.error('Não foi possível gerar link do tutor.');
+    }
+  };
+
+  const submitStageModal = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!stageModalItem) return;
+    setSavingStage(true);
+    try {
+      const { data: updated } = await api.patch(`/petshop/appointments/${stageModalItem.id}/status`, {
+        status: stageForm.status,
+        stagePhotoUrl: stageForm.stagePhotoUrl || null,
+        stageNotes: stageForm.stageNotes || null,
+      });
+      setAppointments(curr => curr.map(row => (row.id === stageModalItem.id ? updated : row)));
+      toast.success(`Foto e etapa salvas para ${stageModalItem.pet.name}!`);
+
+      if (stageForm.notifyTutor && stageModalItem.customer?.phone) {
+        try {
+          const { data } = await api.post(`/petshop/tutors/${stageModalItem.customer.id}/portal-link`, {
+            rotate: false,
+          });
+          const portalUrl = `${window.location.origin}${data.path}`;
+          const cleanPhone = stageModalItem.customer.phone.replace(/\D/g, '');
+          const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+          const msg = buildWhatsAppMessage(updated, portalUrl, stageForm.stageNotes);
+          window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
+        } catch {}
+      }
+      setStageModalItem(null);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Erro ao salvar foto.');
+    } finally {
+      setSavingStage(false);
+    }
+  };
+
   if (loading && !overview) {
-    return <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8"><div className="animate-pulse" role="status" aria-label="Carregando operação de hoje"><div className="h-7 w-52 rounded bg-[var(--pc-border)]" /><div className="mt-3 h-4 w-80 max-w-full rounded bg-[var(--pc-border)]" /><div className="mt-8 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[0, 1, 2, 3].map(item => <div key={item} className="h-24 rounded-xl bg-[var(--pc-surface)]" />)}</div><div className="mt-5 h-96 rounded-xl bg-[var(--pc-surface)]" /></div></div>;
+    return (
+      <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
+        <div className="animate-pulse" role="status" aria-label="Carregando operação de hoje">
+          <div className="h-7 w-52 rounded bg-zinc-200" />
+          <div className="mt-3 h-4 w-80 max-w-full rounded bg-zinc-200" />
+          <div className="mt-8 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            {[0, 1, 2, 3].map(item => (
+              <div key={item} className="h-28 rounded-2xl bg-zinc-100" />
+            ))}
+          </div>
+          <div className="mt-6 h-96 rounded-2xl bg-zinc-100" />
+        </div>
+      </div>
+    );
   }
 
   if (error && !overview) {
-    return <div className="mx-auto grid min-h-[70vh] max-w-xl place-items-center p-6"><div className="pc-panel p-7 text-center"><h1 className="text-lg font-semibold">Não foi possível abrir a visão de hoje</h1><p className="mt-2 text-sm text-[var(--pc-text-secondary)]">{error}</p><button onClick={() => load()} className="mt-5 min-h-11 rounded-lg bg-[var(--pc-action)] px-5 text-sm font-semibold text-white hover:bg-[var(--pc-action-hover)]">Tentar novamente</button></div></div>;
+    return (
+      <div className="mx-auto grid min-h-[70vh] max-w-xl place-items-center p-6">
+        <div className="rounded-2xl border border-zinc-200 bg-white p-7 text-center shadow-xs">
+          <h1 className="text-lg font-bold text-zinc-900">Não foi possível abrir a visão de hoje</h1>
+          <p className="mt-2 text-sm text-zinc-500">{error}</p>
+          <button
+            onClick={() => load()}
+            className="mt-5 min-h-11 rounded-xl bg-teal-700 px-5 text-sm font-semibold text-white hover:bg-teal-800 transition cursor-pointer"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      </div>
+    );
   }
 
-  if (!overview) return null;
+  return (
+    <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8 space-y-6">
+      {/* 1. Header do Painel */}
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-teal-800">
+            <CalendarDays aria-hidden="true" size={14} className="text-teal-700" />
+            {dateLabel}
+          </p>
+          <h1 className="mt-0.5 text-2xl font-bold tracking-tight text-zinc-900">
+            Operação de hoje
+          </h1>
+          <p className="mt-0.5 text-xs text-zinc-500">
+            Agenda, andamento dos serviços e pendências do estabelecimento.
+          </p>
+        </div>
 
-  const summary = [
-    { label: 'Agenda de hoje', value: agendaCount, note: 'atendimentos no dia', icon: CalendarDays, iconClass: 'bg-[var(--pc-action-soft)] text-[var(--pc-action)]' },
-    { label: 'Em atendimento', value: inProduction.length, note: 'em execução agora', icon: Clock3, iconClass: 'bg-[var(--pc-warning-soft)] text-[var(--pc-warning)]' },
-    { label: 'Aguardando retirada', value: ready.length, note: 'prontos hoje', icon: CheckCircle2, iconClass: 'bg-[var(--pc-info-soft)] text-[var(--pc-info)]' },
-    { label: 'Novas solicitações', value: requested.length, note: 'aguardando confirmação', icon: PawPrint, iconClass: 'bg-[var(--pc-danger-soft)] text-[var(--pc-danger)]' },
-  ];
+        <div className="flex flex-wrap items-center gap-4">
+          <PetHeroShowcase />
+          <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() => load()}
+              disabled={loading}
+              className="flex h-10 cursor-pointer items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 text-xs font-semibold text-zinc-700 shadow-2xs transition hover:bg-zinc-50 disabled:opacity-60"
+            >
+              <RefreshCw aria-hidden="true" size={14} className={loading ? 'animate-spin' : ''} />
+              Atualizar
+            </button>
+            <Link
+              to="/petshop/agenda?new=1"
+              className="flex h-10 items-center gap-1.5 rounded-xl bg-teal-800 px-4 text-xs font-bold text-white shadow-xs transition hover:bg-teal-900"
+            >
+              <Plus aria-hidden="true" size={15} strokeWidth={2.5} />
+              Novo atendimento
+            </Link>
+          </div>
+        </div>
+      </header>
 
-  return <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8">
-    <header className="relative flex flex-col gap-5 overflow-hidden rounded-2xl border border-[var(--pc-border)] bg-gradient-to-r from-white via-[#f9fcfb] to-[#eaf4f1] px-5 py-5 shadow-2xs sm:flex-row sm:items-center sm:justify-between sm:px-6">
-      <div className="min-w-0 flex-1">
-        <p className="flex items-center gap-1.5 text-sm font-medium text-[var(--pc-action)]"><CalendarDays aria-hidden="true" size={15} />{dateLabel}</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em] text-[var(--pc-text)]">Operação de hoje</h1>
-        <p className="mt-1 text-sm text-[var(--pc-text-secondary)]">Agenda, andamento dos serviços e pendências do estabelecimento.</p>
-      </div>
-      <div className="flex flex-wrap items-center gap-5">
-        <PetHeroShowcase />
-        <div className="flex flex-wrap items-center gap-2"><button onClick={() => load()} disabled={loading} className="flex min-h-11 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] bg-white px-3 text-sm font-medium transition hover:bg-[var(--pc-surface-subtle)] disabled:cursor-wait disabled:opacity-60"><RefreshCw aria-hidden="true" size={16} className={loading ? 'animate-spin' : ''} />Atualizar</button><Link to="/petshop/agenda?new=1" className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--pc-action)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--pc-action-hover)]"><Plus aria-hidden="true" size={17} />Novo atendimento</Link></div>
-      </div>
-    </header>
+      {error && (
+        <div
+          role="alert"
+          className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <span>{error} Os últimos dados carregados continuam visíveis.</span>
+          <button onClick={() => load()} className="font-bold underline underline-offset-4">
+            Tentar novamente
+          </button>
+        </div>
+      )}
 
-    {error && <div role="alert" className="mt-4 flex flex-col gap-2 rounded-lg border border-[var(--pc-warning)]/20 bg-[var(--pc-warning-soft)] px-4 py-3 text-sm text-[var(--pc-warning)] sm:flex-row sm:items-center sm:justify-between"><span>{error} Os últimos dados carregados continuam visíveis.</span><button onClick={() => load()} className="font-semibold underline underline-offset-4">Tentar novamente</button></div>}
+      {/* 2. Top 4 Cards de Resumo Operacional */}
+      <section aria-label="Resumo da operação" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        {/* Card 1: Agenda de hoje */}
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+            <CalendarDays size={22} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-zinc-600">Agenda de hoje</p>
+            <div className="mt-0.5 flex items-baseline gap-2">
+              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">{agendaCount}</strong>
+              <span className="truncate text-xs text-zinc-400">atendimentos no dia</span>
+            </div>
+          </div>
+        </div>
 
-    <section aria-label="Resumo da operação" className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-      {summary.map(item => <div key={item.label} className="pc-panel flex items-center gap-4 px-5 py-4 shadow-2xs"><span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${item.iconClass}`}><item.icon aria-hidden="true" size={20} /></span><div className="min-w-0"><p className="text-xs font-medium text-[var(--pc-text-secondary)]">{item.label}</p><div className="mt-0.5 flex items-baseline gap-2"><strong className="text-2xl font-semibold tabular-nums">{item.value}</strong><span className="truncate text-xs text-[var(--pc-text-muted)]">{item.note}</span></div></div></div>)}
-    </section>
+        {/* Card 2: Em atendimento */}
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-amber-50 text-amber-700">
+            <Clock3 size={22} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-zinc-600">Em atendimento</p>
+            <div className="mt-0.5 flex items-baseline gap-2">
+              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">{inProduction.length}</strong>
+              <span className="truncate text-xs text-zinc-400">serviços em execução</span>
+            </div>
+          </div>
+        </div>
 
-    <div className="mt-5 grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-      <section className="pc-panel min-w-0 overflow-hidden" aria-labelledby="agenda-title">
-        <div className="flex items-center justify-between border-b border-[var(--pc-border)] px-4 py-4 sm:px-5"><div><h2 id="agenda-title" className="text-base font-semibold">Agenda do dia</h2><p className="mt-0.5 text-xs text-[var(--pc-text-muted)]">Atendimentos ativos em ordem de horário</p></div><Link to="/petshop/agenda" className="flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-sm font-medium text-[var(--pc-action)] hover:bg-[var(--pc-action-soft)]">Ver agenda<ArrowRight aria-hidden="true" size={15} /></Link></div>
-        {activeAppointments.length === 0 ? <div className="flex min-h-80 flex-col items-center justify-center px-6 py-12 text-center"><CalendarDays aria-hidden="true" className="mb-4 text-[var(--pc-border-strong)]" size={30} /><h3 className="text-sm font-semibold">Nenhum atendimento ativo hoje</h3><p className="mt-1 max-w-sm text-sm leading-6 text-[var(--pc-text-muted)]">A agenda está livre. Você pode criar um atendimento para começar a organizar o dia.</p><Link to="/petshop/agenda?new=1" className="mt-5 flex min-h-11 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] px-4 text-sm font-semibold hover:bg-[var(--pc-surface-subtle)]"><Plus aria-hidden="true" size={16} />Novo atendimento</Link></div> : <div className="divide-y divide-[var(--pc-border)]">{activeAppointments.map(item => <article key={item.id} className="grid gap-3 px-4 py-4 transition-colors hover:bg-[var(--pc-surface-subtle)]/60 sm:grid-cols-[64px_44px_minmax(0,1fr)_auto] sm:items-center sm:px-5"><time dateTime={item.startsAt} className="text-sm font-semibold tabular-nums text-[var(--pc-text)]">{time(item.startsAt)}</time><PetAvatar pet={item.pet} /><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-x-2"><h3 className="truncate text-sm font-semibold">{item.pet.name}</h3><span className="truncate text-sm text-[var(--pc-text-secondary)]">{item.customer.name}</span></div><p className="mt-1 truncate text-xs text-[var(--pc-text-muted)]">{item.services.map(service => service.nameSnapshot).join(' + ') || 'Serviço não informado'}</p><p className="mt-1 flex items-center gap-1 text-xs text-[var(--pc-text-muted)]"><UserRound aria-hidden="true" size={13} />{item.professional?.name || 'Profissional a definir'} · até {time(item.endsAt)}</p></div><div className="sm:justify-self-end"><StatusBadge status={item.status} /></div></article>)}</div>}
+        {/* Card 3: Prontos para retirada */}
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-sky-50 text-sky-700">
+            <CheckCircle2 size={22} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-zinc-600">Prontos para retirada</p>
+            <div className="mt-0.5 flex items-baseline gap-2">
+              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">{ready.length}</strong>
+              <span className="truncate text-xs text-zinc-400">pets prontos hoje</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 4: Pendentes / Aguardando confirmação */}
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
+          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-orange-50 text-orange-700">
+            <AlertTriangle size={22} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-zinc-600">Pendentes / Aguardando confirmação</p>
+            <div className="mt-0.5 flex items-baseline gap-2">
+              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">{requested.length}</strong>
+              <span className="truncate text-xs text-zinc-400">solicitações pendentes</span>
+            </div>
+          </div>
+        </div>
       </section>
 
-      <aside className="space-y-5" aria-label="Acompanhamento da operação">
-        <section className="pc-panel overflow-hidden"><div className="flex items-center gap-2 border-b border-[var(--pc-border)] px-4 py-3.5"><CheckCircle2 aria-hidden="true" className="text-[var(--pc-success)]" size={17} /><h2 className="text-sm font-semibold">Prontos para retirada</h2><span className="ml-auto text-xs font-semibold tabular-nums text-[var(--pc-text-muted)]">{ready.length}</span></div>{ready.length ? ready.slice(0, 4).map(item => <CompactAppointment key={item.id} item={item} />) : <EmptyPanel title="Nenhum pet aguardando" description="Os atendimentos finalizados aparecerão aqui." />}</section>
+      {/* 3. Grade Central: Tabela da Agenda Operacional (Esquerda) e Widgets de Acompanhamento (Direita) */}
+      <div className="grid grid-cols-1 xl:grid-cols-[1fr_390px] gap-5 items-start">
+        {/* Coluna Esquerda: Agenda operacional do dia */}
+        <section className="rounded-2xl border border-zinc-200/90 bg-white shadow-xs overflow-hidden">
+          <div className="flex items-center justify-between border-b border-zinc-100 p-4 sm:px-5">
+            <div>
+              <h2 className="text-sm font-bold text-zinc-900">Agenda operacional do dia</h2>
+              <p className="text-xs text-zinc-400">
+                Atendimentos programados, status em tempo real e ações de operação.
+              </p>
+            </div>
+            <Link
+              to="/petshop/agenda"
+              className="text-xs font-bold text-teal-800 hover:text-teal-900 hover:underline flex items-center gap-1"
+            >
+              Ver agenda completa →
+            </Link>
+          </div>
 
-        <section className="pc-panel overflow-hidden"><div className="flex items-center gap-2 border-b border-[var(--pc-border)] px-4 py-3.5"><Clock3 aria-hidden="true" className="text-[var(--pc-info)]" size={17} /><h2 className="text-sm font-semibold">Em atendimento</h2><span className="ml-auto text-xs font-semibold tabular-nums text-[var(--pc-text-muted)]">{inProduction.length}</span></div>{inProduction.length ? inProduction.slice(0, 4).map(item => <CompactAppointment key={item.id} item={item} />) : <EmptyPanel title="Nenhum serviço em execução" description="Check-ins e etapas de banho e tosa aparecerão aqui." />}</section>
+          {activeAppointments.length === 0 ? (
+            <div className="flex min-h-64 flex-col items-center justify-center p-8 text-center">
+              <CalendarDays className="mb-3 text-zinc-300" size={32} />
+              <h3 className="text-xs font-bold text-zinc-700">Nenhum atendimento programado para hoje</h3>
+              <p className="mt-1 text-xs text-zinc-400 max-w-sm">
+                A agenda de hoje está livre. Clique em novo atendimento para agendar.
+              </p>
+              <Link
+                to="/petshop/agenda?new=1"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-teal-800 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 transition"
+              >
+                <Plus size={14} /> Novo atendimento
+              </Link>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-zinc-100 bg-zinc-50/70 text-[11px] font-semibold text-zinc-400">
+                    <th className="py-2.5 px-4 font-semibold">Horário</th>
+                    <th className="py-2.5 px-3 font-semibold">Pet</th>
+                    <th className="py-2.5 px-3 font-semibold">Tutor</th>
+                    <th className="py-2.5 px-3 font-semibold">Serviço</th>
+                    <th className="py-2.5 px-3 font-semibold">Profissional</th>
+                    <th className="py-2.5 px-3 font-semibold">Status</th>
+                    <th className="py-2.5 px-4 text-right font-semibold">Ações</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100 text-xs">
+                  {activeAppointments.map(item => {
+                    const statusInfo = STATUS_CONFIG[item.status] || {
+                      label: item.status,
+                      badgeClass: 'bg-zinc-50 text-zinc-700 border-zinc-200',
+                    };
+                    const primaryService = item.services[0]?.nameSnapshot || 'Serviço';
+                    const hasMore = item.services.length > 1;
 
-        {requested.length > 0 && <section className="pc-panel overflow-hidden"><div className="flex items-center gap-2 border-b border-[var(--pc-border)] px-4 py-3.5"><CalendarDays aria-hidden="true" className="text-[var(--pc-warning)]" size={17} /><h2 className="text-sm font-semibold">Aguardando confirmação</h2><span className="ml-auto text-xs font-semibold tabular-nums text-[var(--pc-warning)]">{requested.length}</span></div>{requested.slice(0, 4).map(item => <CompactAppointment key={item.id} item={item} />)}</section>}
-      </aside>
+                    return (
+                      <tr key={item.id} className="hover:bg-zinc-50/70 transition">
+                        {/* Horário */}
+                        <td className="py-3 px-4 whitespace-nowrap">
+                          <strong className="block text-xs font-bold text-zinc-900 tabular-nums">
+                            {time(item.startsAt)}
+                          </strong>
+                          <span className="block text-[10px] text-zinc-400 tabular-nums">
+                            até {time(item.endsAt)}
+                          </span>
+                        </td>
+
+                        {/* Pet */}
+                        <td className="py-3 px-3 whitespace-nowrap">
+                          <div className="flex items-center gap-2.5">
+                            <PetAvatar pet={item.pet} size="sm" />
+                            <div>
+                              <div className="font-bold text-zinc-900">{item.pet?.name}</div>
+                              <div className="text-[10px] text-zinc-400">{getPetSpeciesSize(item.pet)}</div>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Tutor */}
+                        <td className="py-3 px-3 whitespace-nowrap text-zinc-700">
+                          {item.customer?.name}
+                        </td>
+
+                        {/* Serviço */}
+                        <td className="py-3 px-3 text-zinc-700 max-w-[200px] truncate" title={item.services.map(s => s.nameSnapshot).join(', ')}>
+                          {primaryService} {hasMore && <span className="text-[10px] text-zinc-400 font-semibold">+{item.services.length - 1}</span>}
+                        </td>
+
+                        {/* Profissional */}
+                        <td className="py-3 px-3 whitespace-nowrap text-zinc-600">
+                          <div className="flex items-center gap-1.5 text-xs">
+                            <UserRound size={13} className="text-zinc-400" />
+                            <span>{item.professional?.name || 'A definir'}</span>
+                          </div>
+                        </td>
+
+                        {/* Status */}
+                        <td className="py-3 px-3 whitespace-nowrap">
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${statusInfo.badgeClass}`}
+                          >
+                            {['bathing', 'grooming', 'finishing', 'checked_in'].includes(item.status) && (
+                              <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
+                            )}
+                            {statusInfo.label}
+                          </span>
+                        </td>
+
+                        {/* Ações */}
+                        <td className="py-3 px-4 text-right whitespace-nowrap">
+                          <div className="flex items-center justify-end gap-1.5">
+                            {/* Se Pronto: Ver foto e Ver atendimento */}
+                            {item.status === 'ready' && (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => openStageModal(item)}
+                                  className="h-7 px-2.5 rounded-lg border border-zinc-200 bg-white text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
+                                >
+                                  Ver foto
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${item.startsAt.slice(0, 10)}`)}
+                                  className="h-7 px-2.5 rounded-lg border border-zinc-200 bg-white text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
+                                >
+                                  Ver atendimento →
+                                </button>
+                              </>
+                            )}
+
+                            {/* Se Em atendimento */}
+                            {['bathing', 'grooming', 'finishing'].includes(item.status) && (
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${item.startsAt.slice(0, 10)}`)}
+                                className="h-7 px-2.5 rounded-lg border border-zinc-200 bg-white text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
+                              >
+                                Ver atendimento →
+                              </button>
+                            )}
+
+                            {/* Se Aguardando confirmação (requested) */}
+                            {item.status === 'requested' && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={updatingId === item.id}
+                                  onClick={() => changeStatus(item, 'scheduled')}
+                                  className="h-7 px-3 rounded-lg bg-teal-800 text-[11px] font-bold text-white hover:bg-teal-900 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                >
+                                  {updatingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                                  Confirmar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${item.startsAt.slice(0, 10)}`)}
+                                  className="h-7 w-7 grid place-items-center rounded-lg border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50 transition cursor-pointer"
+                                  title="Mais detalhes"
+                                >
+                                  <MoreHorizontal size={13} />
+                                </button>
+                              </>
+                            )}
+
+                            {/* Se Confirmado / Agendado */}
+                            {item.status === 'scheduled' && (
+                              <button
+                                type="button"
+                                disabled={updatingId === item.id}
+                                onClick={() => changeStatus(item, 'checked_in')}
+                                className="h-7 px-3 rounded-lg bg-teal-800 text-[11px] font-bold text-white hover:bg-teal-900 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              >
+                                {updatingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <PawPrint size={12} />}
+                                Check-in
+                              </button>
+                            )}
+
+                            {/* Se Check-in feito: Iniciar */}
+                            {item.status === 'checked_in' && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={updatingId === item.id}
+                                  onClick={() => changeStatus(item, 'bathing')}
+                                  className="h-7 px-3 rounded-lg bg-teal-800 text-[11px] font-bold text-white hover:bg-teal-900 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                >
+                                  {updatingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={11} fill="currentColor" />}
+                                  Iniciar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${item.startsAt.slice(0, 10)}`)}
+                                  className="h-7 w-7 grid place-items-center rounded-lg border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50 transition cursor-pointer"
+                                  title="Mais detalhes"
+                                >
+                                  <MoreHorizontal size={13} />
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
+        {/* Coluna Direita: 3 Cartões Empilhados (Pendências, Prontos, Em atendimento) */}
+        <aside className="space-y-4">
+          {/* Cartão 1: Reservas pendentes */}
+          <section className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-2">
+                <AlertTriangle size={15} className="text-amber-600" />
+                <h3 className="text-xs font-bold text-zinc-900">Reservas pendentes</h3>
+              </div>
+              <span className="grid h-5 w-5 place-items-center rounded-full bg-amber-100 text-[10px] font-bold text-amber-800">
+                {requested.length}
+              </span>
+            </div>
+            <p className="text-[11px] text-zinc-400 mb-3">
+              Todas as reservas aguardando confirmação, em ordem de agendamento.
+            </p>
+
+            {requested.length === 0 ? (
+              <p className="text-xs text-zinc-400 italic py-2">Nenhuma solicitação pendente.</p>
+            ) : (
+              <div className="space-y-2.5 max-h-96 overflow-y-auto">
+                {requested.map(item => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-2.5 first:border-t-0 first:pt-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <PetAvatar pet={item.pet} size="sm" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-zinc-900 truncate">{item.pet?.name}</p>
+                        <p className="text-[10px] text-zinc-400 truncate">
+                          {item.services[0]?.nameSnapshot || 'Serviço'} • {item.professional?.name || item.customer?.name}
+                        </p><p className="text-xs font-semibold text-teal-800">{new Date(item.startsAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="text-[9px] font-bold text-amber-800 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded-md">
+                        Aguardando confirmação
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => changeStatus(item, 'scheduled')}
+                        className="h-6 px-2 rounded-md bg-teal-800 text-[10px] font-bold text-white hover:bg-teal-900 transition cursor-pointer"
+                      >
+                        Confirmar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Cartão 2: Prontos para retirada */}
+          <section className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 size={15} className="text-emerald-600" />
+                <h3 className="text-xs font-bold text-zinc-900">Prontos para retirada</h3>
+              </div>
+              <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-800">
+                {ready.length}
+              </span>
+            </div>
+
+            {ready.length === 0 ? (
+              <p className="text-xs text-zinc-400 italic py-2">Nenhum pet aguardando retirada.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {ready.slice(0, 4).map(item => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-2.5 first:border-t-0 first:pt-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <PetAvatar pet={item.pet} size="sm" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-zinc-900 truncate">{item.pet?.name}</p>
+                        <p className="text-[10px] text-zinc-400 truncate">
+                          {item.services[0]?.nameSnapshot || 'Serviço'} • {item.customer?.name}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => notifyTutorDirect(item)}
+                      className="h-6 px-2.5 rounded-md border border-emerald-300 bg-white text-[10px] font-bold text-emerald-800 hover:bg-emerald-50 transition cursor-pointer shrink-0"
+                    >
+                      Avisar tutor
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          {/* Cartão 3: Em atendimento agora */}
+          <section className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Clock3 size={15} className="text-sky-600" />
+                <h3 className="text-xs font-bold text-zinc-900">Em atendimento agora</h3>
+              </div>
+              <span className="grid h-5 w-5 place-items-center rounded-full bg-sky-100 text-[10px] font-bold text-sky-800">
+                {inProduction.length}
+              </span>
+            </div>
+
+            {inProduction.length === 0 ? (
+              <p className="text-xs text-zinc-400 italic py-2">Nenhum serviço em execução no momento.</p>
+            ) : (
+              <div className="space-y-2.5">
+                {inProduction.slice(0, 4).map(item => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-2.5 first:border-t-0 first:pt-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <PetAvatar pet={item.pet} size="sm" />
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-zinc-900 truncate">{item.pet?.name}</p>
+                        <p className="text-[10px] text-zinc-400 truncate">
+                          {item.services[0]?.nameSnapshot || 'Serviço'} • {item.professional?.name || item.customer?.name}
+                        </p><p className="text-xs font-semibold text-teal-800">{new Date(item.startsAt).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', dateStyle: 'short', timeStyle: 'short' })}
+                        </p>
+                      </div>
+                    </div>
+                    <span className="inline-flex items-center gap-1 text-[10px] font-bold text-zinc-500 bg-zinc-100 px-2 py-0.5 rounded-full shrink-0 tabular-nums">
+                      <Clock size={11} className="text-zinc-400" />
+                      {getElapsedMinutes(item)} min
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        </aside>
+      </div>
+
+      {/* 4. Linha Inferior: 3 Cartões (Próximos atendimentos, Base do estabelecimento, Atalhos rápidos) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        {/* Card 1: Próximos atendimentos */}
+        <section className="rounded-2xl border border-zinc-200/90 bg-white p-4 sm:p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-xs font-bold text-zinc-900 flex items-center gap-2">
+                <Calendar size={15} className="text-teal-700" />
+                Próximos atendimentos
+              </h3>
+              <Link
+                to="/petshop/agenda"
+                className="text-[11px] font-bold text-teal-800 hover:underline flex items-center gap-0.5"
+              >
+                Ver agenda →
+              </Link>
+            </div>
+            <p className="text-[11px] text-zinc-400 mb-3">Próximos da agenda de hoje.</p>
+
+            {upcomingAppointments.length === 0 ? (
+              <p className="text-xs text-zinc-400 italic py-3">Sem outros atendimentos agendados para hoje.</p>
+            ) : (
+              <div className="space-y-2 py-1">
+                {upcomingAppointments.slice(0, 4).map(item => (
+                  <div key={item.id} className="flex items-center gap-2 text-xs text-zinc-700">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 shrink-0" />
+                    <strong className="font-bold text-zinc-900 tabular-nums">{time(item.startsAt)}</strong>
+                    <span className="font-semibold text-zinc-800 truncate">{item.pet?.name}</span>
+                    <span className="text-zinc-300">•</span>
+                    <span className="text-zinc-500 truncate">{item.services[0]?.nameSnapshot || 'Serviço'}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Card 2: Base do estabelecimento */}
+        <section className="rounded-2xl border border-zinc-200/90 bg-white p-4 sm:p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <h3 className="text-xs font-bold text-zinc-900 flex items-center gap-2 mb-1">
+              <Layers size={15} className="text-teal-700" />
+              Base do estabelecimento
+            </h3>
+            <p className="text-[11px] text-zinc-400 mb-4">
+              Cadastros do Pet Care e recursos integrados com o PDV.
+            </p>
+
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <Link
+                to="/petshop/pets"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 hover:bg-zinc-100/70 transition"
+              >
+                <div className="flex justify-center text-teal-700 mb-1">
+                  <PawPrint size={15} />
+                </div>
+                <strong className="block text-base font-extrabold text-zinc-900 tabular-nums">
+                  {overview?.metrics.pets ?? 0}
+                </strong>
+                <span className="block text-[10px] text-zinc-500 font-medium truncate">Pets ativos</span>
+              </Link>
+
+              <Link
+                to="/petshop/tutores"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 hover:bg-zinc-100/70 transition"
+              >
+                <div className="flex justify-center text-teal-700 mb-1">
+                  <Users size={15} />
+                </div>
+                <strong className="block text-base font-extrabold text-zinc-900 tabular-nums">
+                  {overview?.metrics.tutors ?? 0}
+                </strong>
+                <span className="block text-[10px] text-zinc-500 font-medium truncate">Tutores</span>
+              </Link>
+
+              <Link
+                to="/petshop/produtos"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 hover:bg-zinc-100/70 transition"
+              >
+                <div className="flex justify-center text-teal-700 mb-1">
+                  <Package size={15} />
+                </div>
+                <strong className="block text-base font-extrabold text-zinc-900 tabular-nums">
+                  {overview?.metrics.products ?? 0}
+                </strong>
+                <span className="block text-[10px] text-zinc-500 font-medium truncate">Produtos</span>
+              </Link>
+
+              <Link
+                to="/petshop/servicos"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 hover:bg-zinc-100/70 transition"
+              >
+                <div className="flex justify-center text-teal-700 mb-1">
+                  <Scissors size={15} />
+                </div>
+                <strong className="block text-base font-extrabold text-zinc-900 tabular-nums">
+                  {overview?.metrics.services ?? 5}
+                </strong>
+                <span className="block text-[10px] text-zinc-500 font-medium truncate">Serviços</span>
+              </Link>
+            </div>
+          </div>
+        </section>
+
+        {/* Card 3: Atalhos rápidos */}
+        <section className="rounded-2xl border border-zinc-200/90 bg-white p-4 sm:p-5 shadow-xs flex flex-col justify-between">
+          <div>
+            <h3 className="text-xs font-bold text-zinc-900 flex items-center gap-2 mb-1">
+              <Sparkles size={15} className="text-teal-700" />
+              Atalhos rápidos
+            </h3>
+            <p className="text-[11px] text-zinc-400 mb-4">Ações mais utilizadas no dia a dia.</p>
+
+            <div className="grid grid-cols-5 gap-1.5 text-center">
+              <Link
+                to="/petshop/agenda?new=1"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2 hover:bg-zinc-100/70 transition flex flex-col items-center justify-center gap-1"
+                title="Novo agendamento"
+              >
+                <CalendarDays size={16} className="text-teal-700" />
+                <span className="text-[9px] font-semibold text-zinc-700 leading-tight">Nova agenda</span>
+              </Link>
+
+              <Link
+                to="/petshop/servicos?new=1"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2 hover:bg-zinc-100/70 transition flex flex-col items-center justify-center gap-1"
+                title="Cadastrar serviço"
+              >
+                <Scissors size={16} className="text-teal-700" />
+                <span className="text-[9px] font-semibold text-zinc-700 leading-tight">Novo serviço</span>
+              </Link>
+
+              <Link
+                to="/petshop/pacotes?new=1"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2 hover:bg-zinc-100/70 transition flex flex-col items-center justify-center gap-1"
+                title="Vender pacote"
+              >
+                <Layers size={16} className="text-teal-700" />
+                <span className="text-[9px] font-semibold text-zinc-700 leading-tight">Pacote cliente</span>
+              </Link>
+
+              <Link
+                to="/petshop/whatsapp"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2 hover:bg-zinc-100/70 transition flex flex-col items-center justify-center gap-1"
+                title="Automações de WhatsApp"
+              >
+                <MessageSquare size={16} className="text-teal-700" />
+                <span className="text-[9px] font-semibold text-zinc-700 leading-tight">WhatsApp</span>
+              </Link>
+
+              <Link
+                to="/petshop/equipe/comissoes"
+                className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2 hover:bg-zinc-100/70 transition flex flex-col items-center justify-center gap-1"
+                title="Comissões e Fechamento"
+              >
+                <Clock3 size={16} className="text-teal-700" />
+                <span className="text-[9px] font-semibold text-zinc-700 leading-tight">Comissões</span>
+              </Link>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      {/* Modal Rápido: Foto e Recado da Etapa */}
+      {stageModalItem && (
+        <Modal
+          title={`Foto e Recado · ${stageModalItem.pet?.name}`}
+          onClose={() => setStageModalItem(null)}
+          maxWidth="sm:max-w-xl"
+        >
+          <form onSubmit={submitStageModal} className="space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-3 flex items-center gap-2.5">
+                <PetAvatar pet={stageModalItem.pet} size="sm" />
+                <div className="min-w-0">
+                  <p className="text-xs font-bold text-zinc-900 truncate">{stageModalItem.pet?.name}</p>
+                  <p className="text-[11px] text-zinc-500 truncate">
+                    Tutor(a): {stageModalItem.customer?.name}
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                  Etapa atual do pet *
+                </label>
+                <select
+                  value={stageForm.status}
+                  onChange={e => setStageForm({ ...stageForm, status: e.target.value })}
+                  className="w-full h-10 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-800 outline-none focus:border-teal-600"
+                  required
+                >
+                  <option value="checked_in">Check-in (Chegou na loja)</option>
+                  <option value="bathing">No banho</option>
+                  <option value="grooming">Na tosa</option>
+                  <option value="finishing">Finalização / Secagem</option>
+                  <option value="ready">Pronto p/ busca</option>
+                </select>
+              </div>
+            </div>
+
+            <PhotoUploadField
+              label="Foto do pet nesta etapa (aparece no painel do tutor)"
+              value={stageForm.stagePhotoUrl}
+              onChange={url => setStageForm({ ...stageForm, stagePhotoUrl: url })}
+            />
+
+            <div className="rounded-xl border border-zinc-200 p-3 bg-zinc-50/30">
+              <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                Recado carinhoso para o tutor (opcional)
+              </label>
+              <textarea
+                value={stageForm.stageNotes}
+                onChange={e => setStageForm({ ...stageForm, stageNotes: e.target.value })}
+                rows={2}
+                placeholder="Ex: Tomou banho quentinho, comportou super bem e já está secando!"
+                className="w-full rounded-lg border border-zinc-200 bg-white p-2.5 text-xs text-zinc-800 placeholder-zinc-400 outline-none focus:border-teal-600"
+              />
+            </div>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-zinc-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={stageForm.notifyTutor}
+                onChange={e => setStageForm({ ...stageForm, notifyTutor: e.target.checked })}
+                className="rounded text-teal-700 focus:ring-teal-500"
+              />
+              <span>
+                Abrir WhatsApp após salvar para avisar <strong>{stageModalItem.customer?.name}</strong> com o link direto
+              </span>
+            </label>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
+              <button
+                type="button"
+                onClick={() => setStageModalItem(null)}
+                className="h-9 px-4 rounded-xl border border-zinc-200 text-xs font-semibold text-zinc-600 hover:bg-zinc-50 transition cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingStage}
+                className="h-9 px-4 rounded-xl bg-teal-800 text-xs font-bold text-white hover:bg-teal-900 transition flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                {savingStage && <Loader2 size={13} className="animate-spin" />}
+                Salvar etapa e foto
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
-
-    <section className="pc-panel mt-5 p-4 sm:p-5" aria-labelledby="base-title"><div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between"><div><h2 id="base-title" className="text-sm font-semibold">Base do estabelecimento</h2><p className="mt-0.5 text-xs text-[var(--pc-text-muted)]">Cadastros do Pet Care e recursos compartilhados com o PDV</p></div>{updatedAt && <p role="status" className="text-xs text-[var(--pc-text-muted)]">Atualizado às {time(updatedAt.toISOString())}</p>}</div><div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5"><Link to="/petshop/pets" className="flex min-h-16 items-center gap-3 rounded-lg border border-[var(--pc-border)] px-4 transition hover:bg-[var(--pc-surface-subtle)]"><PawPrint aria-hidden="true" size={18} className="text-[var(--pc-text-muted)]" /><div><strong className="text-base font-semibold tabular-nums">{overview.metrics.pets}</strong><p className="text-xs text-[var(--pc-text-secondary)]">Pets ativos</p></div></Link><Link to="/petshop/tutores" className="flex min-h-16 items-center gap-3 rounded-lg border border-[var(--pc-border)] px-4 transition hover:bg-[var(--pc-surface-subtle)]"><Users aria-hidden="true" size={18} className="text-[var(--pc-text-muted)]" /><div><strong className="text-base font-semibold tabular-nums">{overview.metrics.tutors}</strong><p className="text-xs text-[var(--pc-text-secondary)]">Tutores cadastrados</p></div></Link><Link to="/petshop/pets" className="flex min-h-16 items-center gap-3 rounded-lg border border-[var(--pc-border)] px-4 transition hover:bg-[var(--pc-surface-subtle)]"><Syringe aria-hidden="true" size={18} className="text-[var(--pc-text-muted)]" /><div><strong className="text-base font-semibold tabular-nums">{overview.metrics.vaccinesDue}</strong><p className="text-xs text-[var(--pc-text-secondary)]">Vacinas a acompanhar</p></div></Link><Link to="/petshop/produtos" className="flex min-h-16 items-center gap-3 rounded-lg border border-[var(--pc-border)] px-4 transition hover:bg-[var(--pc-surface-subtle)]"><Package aria-hidden="true" size={18} className="text-[var(--pc-text-muted)]" /><div><strong className="text-base font-semibold tabular-nums">{overview.metrics.products ?? 0}</strong><p className="text-xs text-[var(--pc-text-secondary)]">Produtos do PDV</p></div></Link><Link to="/petshop/equipe" className="flex min-h-16 items-center gap-3 rounded-lg border border-[var(--pc-border)] px-4 transition hover:bg-[var(--pc-surface-subtle)]"><UserRoundCog aria-hidden="true" size={18} className="text-[var(--pc-text-muted)]" /><div><strong className="text-sm font-semibold">Gerenciar</strong><p className="text-xs text-[var(--pc-text-secondary)]">Equipe e acessos</p></div></Link></div></section>
-  </div>;
+  );
 }
-

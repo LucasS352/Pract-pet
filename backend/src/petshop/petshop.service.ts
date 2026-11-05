@@ -1,10 +1,15 @@
-import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
+import { SalesService } from '../sales/sales.service';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
 import { productImageOptimizer } from '../images/product-image.optimizer';
 import { createHash, randomBytes } from 'crypto';
+import { PetshopPackagesService } from './petshop-packages.service';
+import { PetshopWhatsappService } from './petshop-whatsapp.service';
+import { PetshopPricingService, DEFAULT_STAGE_DEFINITIONS, PetshopStageItem } from './petshop-pricing.service';
+import { PetshopCommissionsService } from './petshop-commissions.service';
 
 const APPOINTMENT_STATUSES = new Set([
   'requested', 'scheduled', 'checked_in', 'bathing', 'grooming',
@@ -37,6 +42,11 @@ export class PetshopService {
     private readonly tenantManager: TenantConnectionManager,
     private readonly tenantContext: TenantContextService,
     private readonly heart: HeartPrismaService,
+    private readonly packages: PetshopPackagesService,
+    private readonly whatsapp: PetshopWhatsappService,
+    private readonly pricing: PetshopPricingService,
+    private readonly commissions: PetshopCommissionsService,
+    private readonly sales: SalesService,
   ) {}
 
   private async prisma() {
@@ -66,10 +76,11 @@ export class PetshopService {
     const vaccineLimit = new Date(Date.now() + 30 * 86_400_000);
     const activeStatuses = ['requested', 'scheduled', 'checked_in', 'bathing', 'grooming', 'finishing', 'ready'];
 
-    const [pets, tutors, products, today, inProgress, vaccinesDue, nextAppointments] = await Promise.all([
+    const [pets, tutors, products, servicesCount, today, inProgress, vaccinesDue, nextAppointments] = await Promise.all([
       prisma.pet.count({ where: { active: true } }),
       prisma.customer.count({ where: { pets: { some: { active: true } } } }),
       prisma.product.count({ where: { active: true } }),
+      prisma.petService.count({ where: { active: true } }),
       prisma.petAppointment.count({ where: { startsAt: { gte: start, lte: end }, status: { notIn: ['cancelled', 'no_show'] } } }),
       prisma.petAppointment.count({ where: { status: { in: ['checked_in', 'bathing', 'grooming', 'finishing', 'ready'] } } }),
       prisma.petVaccination.count({ where: { nextDueAt: { lte: vaccineLimit }, status: { not: 'waived' } } }),
@@ -80,7 +91,7 @@ export class PetshopService {
         take: 12,
       }),
     ]);
-    return { metrics: { pets, tutors, products, today, inProgress, vaccinesDue }, nextAppointments };
+    return { metrics: { pets, tutors, products, services: servicesCount, today, inProgress, vaccinesDue }, nextAppointments };
   }
 
   async getMetrics(period: string = 'today', customFrom?: string, customTo?: string) {
@@ -131,21 +142,29 @@ export class PetshopService {
       }
     }
 
-    // Métricas de serviços / Atendimentos
+    // Métricas de serviços / Atendimentos (desconta valor já coberto por pacote para evitar duplicidade de faturamento)
     let serviceRevenue = 0;
+    let packageCoveredSessionsCount = 0;
     const serviceMap = new Map<string, { name: string; count: number; revenue: number }>();
     const proMap = new Map<string, { name: string; count: number; revenue: number }>();
 
     for (const app of appointments) {
       let appServiceTotal = 0;
       for (const svc of app.services) {
-        const val = Number(svc.priceSnapshot || 0);
-        serviceRevenue += val;
-        appServiceTotal += val;
+        const isCoveredByPkg = svc.coverageStatus === 'reserved' || svc.coverageStatus === 'consumed';
+        if (isCoveredByPkg) {
+          packageCoveredSessionsCount += 1;
+        }
+        const rawVal = Number(svc.priceSnapshot || 0);
+        const coveredVal = isCoveredByPkg ? Number(svc.coveredAmount || rawVal) : 0;
+        const netVal = Math.max(0, rawVal - coveredVal);
+
+        serviceRevenue += netVal;
+        appServiceTotal += rawVal;
 
         const current = serviceMap.get(svc.nameSnapshot) || { name: svc.nameSnapshot, count: 0, revenue: 0 };
         current.count += 1;
-        current.revenue += val;
+        current.revenue += rawVal;
         serviceMap.set(svc.nameSnapshot, current);
       }
 
@@ -156,7 +175,24 @@ export class PetshopService {
       proMap.set(proName, proCurrent);
     }
 
-    const totalRevenue = productRevenue + serviceRevenue;
+    // Receita de pacotes contratados e pagos no período
+    let packageRevenue = 0;
+    try {
+      const soldPackages = await prisma.customerPetPackage.findMany({
+        where: {
+          createdAt: { gte: start, lte: end },
+          status: { not: 'cancelled' },
+          paymentStatus: 'paid',
+          saleId: null, // Evita somar duas vezes caso já tenha entrado como Sale no PDV
+        },
+        select: { finalPrice: true },
+      });
+      packageRevenue = soldPackages.reduce((sum, p) => sum + Number(p.finalPrice || 0), 0);
+    } catch {
+      // Caso tabela ainda não migrada
+    }
+
+    const totalRevenue = productRevenue + serviceRevenue + packageRevenue;
     const totalTransactions = sales.length + appointments.length;
     const averageTicket = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
 
@@ -178,7 +214,10 @@ export class PetshopService {
       totals: {
         totalRevenue,
         productRevenue,
-        serviceRevenue,
+        serviceRevenue: serviceRevenue + packageRevenue,
+        standaloneServiceRevenue: serviceRevenue,
+        packageSalesRevenue: packageRevenue,
+        packageCoveredSessionsCount,
         salesCount: sales.length,
         appointmentsCount: appointments.length,
         totalTransactions,
@@ -195,7 +234,14 @@ export class PetshopService {
     const query = String(search ?? '').trim();
     return prisma.customer.findMany({
       where: query ? { OR: [{ name: { contains: query } }, { phone: { contains: query } }, { cpfCnpj: { contains: query } }] } : undefined,
-      include: { pets: { where: { active: true }, orderBy: { name: 'asc' } } },
+      include: {
+        pets: { where: { active: true }, orderBy: { name: 'asc' } },
+        petPackages: {
+          where: { status: 'active' },
+          include: { items: true, pet: { select: { id: true, name: true } } },
+          orderBy: { expiresAt: 'asc' },
+        },
+      },
       orderBy: { name: 'asc' },
       take: 200,
     });
@@ -209,7 +255,11 @@ export class PetshopService {
       name: requiredText(data.name, 'Nome'), phone,
       cpfCnpj: optionalText(data.cpfCnpj), address: optionalText(data.address),
       reference: optionalText(data.reference), email: optionalText(data.email), notes: optionalText(data.notes), photoUrl: optionalText(data.photoUrl),
-    } });
+      whatsappOptIn: data.whatsappOptIn === undefined ? true : Boolean(data.whatsappOptIn),
+    } }).catch(error => {
+      if (error?.code === 'P2002') throw new ConflictException('Já existe um tutor com este telefone ou documento. Localize o cadastro existente.');
+      throw error;
+    });
   }
 
   async updateTutor(id: string, data: any) {
@@ -221,6 +271,7 @@ export class PetshopService {
       name: data.name === undefined ? undefined : requiredText(data.name, 'Nome'), phone,
       cpfCnpj: optionalText(data.cpfCnpj), address: optionalText(data.address), reference: optionalText(data.reference),
       email: optionalText(data.email), notes: optionalText(data.notes), photoUrl: optionalText(data.photoUrl),
+      whatsappOptIn: data.whatsappOptIn === undefined ? undefined : Boolean(data.whatsappOptIn),
     } });
   }
 
@@ -261,6 +312,11 @@ export class PetshopService {
       include: {
         customer: true,
         vaccinations: { orderBy: [{ nextDueAt: 'asc' }, { appliedAt: 'desc' }], take: 5 },
+        petPackages: {
+          where: { status: 'active' },
+          include: { items: true },
+          orderBy: { expiresAt: 'asc' },
+        },
         _count: { select: { appointments: true } },
       },
       orderBy: { name: 'asc' },
@@ -275,7 +331,22 @@ export class PetshopService {
       include: {
         customer: true,
         vaccinations: { orderBy: [{ nextDueAt: 'asc' }, { appliedAt: 'desc' }] },
-        appointments: { include: { services: true, professional: { select: { id: true, name: true } } }, orderBy: { startsAt: 'desc' }, take: 30 },
+        petPackages: {
+          include: { items: true },
+          orderBy: { createdAt: 'desc' },
+        },
+        appointments: {
+          include: {
+            services: {
+              include: {
+                customerPackage: { select: { id: true, planNameSnapshot: true } },
+              },
+            },
+            professional: { select: { id: true, name: true } },
+          },
+          orderBy: { startsAt: 'desc' },
+          take: 30,
+        },
       },
     });
     if (!pet) throw new NotFoundException('Pet não encontrado.');
@@ -305,7 +376,7 @@ export class PetshopService {
       name: data.name === undefined ? undefined : requiredText(data.name, 'Nome do pet'),
       species: data.species === undefined ? undefined : requiredText(data.species, 'Espécie'),
       breed: optionalText(data.breed), sex: optionalText(data.sex), birthDate: optionalDate(data.birthDate, 'Nascimento'),
-      size: optionalText(data.size), weight, color: optionalText(data.color), neutered: data.neutered === undefined ? undefined : Boolean(data.neutered),
+      size: optionalText(data.size), coatType: optionalText(data.coatType), weight, color: optionalText(data.color), neutered: data.neutered === undefined ? undefined : Boolean(data.neutered),
       microchip: optionalText(data.microchip), photoUrl: optionalText(data.photoUrl), allergies: optionalText(data.allergies),
       behavior: optionalText(data.behavior), notes: optionalText(data.notes), active: data.active === undefined ? undefined : Boolean(data.active),
     };
@@ -354,7 +425,123 @@ export class PetshopService {
 
   async listServices(includeInactive = false) {
     const prisma = await this.prisma();
-    return prisma.petService.findMany({ where: includeInactive ? undefined : { active: true }, orderBy: { name: 'asc' } });
+    const services = await prisma.petService.findMany({
+      where: includeInactive ? undefined : { active: true },
+      include: {
+        pricingRules: {
+          orderBy: [{ size: 'asc' }, { coatType: 'asc' }],
+        },
+        comboItems: {
+          include: {
+            componentService: {
+              include: {
+                pricingRules: true,
+              },
+            },
+          },
+          orderBy: { order: 'asc' },
+        },
+        _count: {
+          select: {
+            appointmentItems: true,
+            includedInCombos: true,
+          },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+
+    const componentsMap = new Map<string, any>(services.map(s => [s.id, s]));
+
+    return services.map(svc => {
+      const range = this.pricing.calculatePriceRange(svc, componentsMap);
+      return {
+        ...svc,
+        customStages: (svc as any).customStages || this.pricing.suggestStages(svc.name, svc.category),
+        priceRange: range,
+      };
+    });
+  }
+
+  async getService(id: string) {
+    const prisma = await this.prisma();
+    const svc = await prisma.petService.findUnique({
+      where: { id },
+      include: {
+        pricingRules: {
+          orderBy: [{ size: 'asc' }, { coatType: 'asc' }],
+        },
+        comboItems: {
+          include: {
+            componentService: {
+              include: {
+                pricingRules: true,
+              },
+            },
+          },
+          orderBy: { order: 'asc' },
+        },
+        _count: {
+          select: {
+            appointmentItems: true,
+            includedInCombos: true,
+          },
+        },
+      },
+    });
+    if (!svc) throw new NotFoundException('Serviço não encontrado.');
+
+    const range = this.pricing.calculatePriceRange(svc);
+    return {
+      ...svc,
+      customStages: (svc as any).customStages || this.pricing.suggestStages(svc.name, svc.category),
+      priceRange: range,
+    };
+  }
+
+  async calculateServicePrice(id: string, criteria: any) {
+    const prisma = await this.prisma();
+    const svc = await prisma.petService.findUnique({
+      where: { id },
+      include: {
+        pricingRules: true,
+        comboItems: {
+          include: {
+            componentService: {
+              include: {
+                pricingRules: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!svc) throw new NotFoundException('Serviço não encontrado.');
+
+    let species = criteria?.species;
+    let size = criteria?.size;
+    let coatType = criteria?.coatType;
+
+    if (criteria?.petId) {
+      const pet = await prisma.pet.findUnique({
+        where: { id: String(criteria.petId) },
+        select: { id: true, name: true, species: true, size: true, coatType: true },
+      });
+      if (pet) {
+        if (!species) species = pet.species;
+        if (!size) size = pet.size;
+        if (!coatType) coatType = pet.coatType;
+      }
+    }
+
+    const resolution = this.pricing.resolvePriceAndDuration(svc, { species, size, coatType });
+    return {
+      serviceId: svc.id,
+      serviceName: svc.name,
+      serviceType: svc.serviceType,
+      criteria: { species, size, coatType },
+      ...resolution,
+    };
   }
 
   async ensureServiceProductBacking(prisma: any, service: { id: string; name: string; price: number | any; active?: boolean }) {
@@ -363,7 +550,7 @@ export class PetshopService {
     });
     if (!servicosCat) {
       servicosCat = await prisma.category.create({
-        data: { name: 'Serviços', color: '#0d9488' },
+        data: { name: 'Serviços' },
       });
     }
 
@@ -402,6 +589,20 @@ export class PetshopService {
 
     if (!appointment) return null;
 
+    // Filtra apenas os serviços que NÃO estão cobertos por pacote E que não são componentes de combo (evitando dupla cobrança)
+    const payableServices = appointment.services.filter(
+      (svc: any) =>
+        svc.coverageStatus !== 'reserved' &&
+        svc.coverageStatus !== 'consumed' &&
+        svc.comboParentId === null &&
+        Number(svc.priceSnapshot) > 0,
+    );
+
+    // Se todos os serviços do agendamento já foram cobertos por pacote, não cria comanda de cobrança avulsa
+    if (payableServices.length === 0) {
+      return null;
+    }
+
     // Se já existe comanda aberta ou aguardando pagamento para este agendamento, promove para waiting_payment se necessário
     const existing = await prisma.comanda.findFirst({
       where: {
@@ -421,8 +622,8 @@ export class PetshopService {
       return existing;
     }
 
-    // Garante que todos os serviços do agendamento existam como produto no PDV
-    for (const svc of appointment.services) {
+    // Garante que todos os serviços cobráveis do agendamento existam como produto no PDV
+    for (const svc of payableServices) {
       await this.ensureServiceProductBacking(prisma, {
         id: svc.serviceId,
         name: svc.nameSnapshot,
@@ -431,10 +632,15 @@ export class PetshopService {
       });
     }
 
-    const total = appointment.services.reduce(
-      (sum: number, s: any) => sum + Number(s.priceSnapshot || 0),
+    const total = payableServices.reduce(
+      (sum: number, s: any) =>
+        sum + Math.max(0, Number(s.priceSnapshot || 0) - Number(s.coveredAmount || 0)),
       0,
     );
+
+    if (total <= 0) {
+      return null;
+    }
 
     const petName = (appointment.pet?.name || 'Pet').trim();
     let baseNumber = `Atendimento: ${petName}`;
@@ -454,7 +660,7 @@ export class PetshopService {
     }
 
     // Protocolo compacto PET2 que NUNCA excede os 191 caracteres da coluna notes do MySQL
-    const serviceName = appointment.services.map((s: any) => s.nameSnapshot).join(', ').slice(0, 24);
+    const serviceName = payableServices.map((s: any) => s.nameSnapshot).join(', ').slice(0, 24);
     const compactPayload: Record<string, any> = {
       v: 2,
       a: appointment.id,
@@ -465,15 +671,21 @@ export class PetshopService {
     const notesStr = `PET2:${JSON.stringify(compactPayload)}`;
     const safeNotes = notesStr.length <= 180 ? notesStr : `PET2:{"v":2,"a":"${appointment.id}"}`;
 
-    const itemsData = appointment.services.map((svc: any) => ({
-      productId: svc.serviceId,
-      quantity: new Prisma.Decimal(1),
-      unitPrice: new Prisma.Decimal(svc.priceSnapshot),
-      totalPrice: new Prisma.Decimal(svc.priceSnapshot),
-      notes: `Serviço Pet Shop`.slice(0, 50),
-      stockDeducted: true,
-      kdsStatus: 'READY',
-    }));
+    const itemsData = payableServices.map((svc: any) => {
+      const netPrice = Math.max(
+        0,
+        Number(svc.priceSnapshot || 0) - Number(svc.coveredAmount || 0),
+      );
+      return {
+        productId: svc.serviceId,
+        quantity: new Prisma.Decimal(1),
+        unitPrice: new Prisma.Decimal(netPrice),
+        totalPrice: new Prisma.Decimal(netPrice),
+        notes: `Serviço Pet Shop`.slice(0, 50),
+        stockDeducted: true,
+        kdsStatus: 'READY',
+      };
+    });
 
     const customerName = `${appointment.customer?.name || 'Tutor'} · ${appointment.pet?.name || 'Pet'}`;
 
@@ -507,32 +719,289 @@ export class PetshopService {
     }
   }
 
+  async getTenantStages(): Promise<PetshopStageItem[]> {
+    const prisma = await this.prisma();
+    try {
+      const row = await prisma.tenantSettings.findUnique({
+        where: { id: 'petshop_stages' },
+      });
+      const config = (row?.paymentMethodsConfig as any) || {};
+      if (Array.isArray(config.stages) && config.stages.length > 0) {
+        return this.pricing.normalizeStages(config.stages);
+      }
+    } catch {}
+    return this.pricing.getDefaultStageDefinitions();
+  }
+
+  async updateTenantStages(body: any, req?: any): Promise<PetshopStageItem[]> {
+    const prisma = await this.prisma();
+    const userRole = req?.user?.role;
+    if (req?.user?.type || !['admin', 'superadmin'].includes(userRole)) {
+      throw new ForbiddenException('Apenas administradores podem configurar as etapas do Pet Shop.');
+    }
+
+    const rawList = Array.isArray(body) ? body : body?.stages;
+    if (!Array.isArray(rawList) || rawList.length === 0) {
+      throw new BadRequestException('A lista de etapas deve ser um array não vazio.');
+    }
+
+    const validated = this.pricing.validateStages(rawList);
+    const normalized = this.pricing.normalizeStages(validated);
+    if (normalized.some(stage => stage.key === 'checked_in' && stage.trackProfessional)) throw new BadRequestException('Check-in não é uma execução comissionável.');
+    const requestedRules = Array.isArray(body?.commissionRules) ? body.commissionRules : [];
+    const generalRules = new Map<string, { kind: string; value: Prisma.Decimal }>();
+    for (const row of requestedRules) {
+      const stageKey = String(row?.stageKey || '');
+      const kind = String(row?.kind || 'NONE').toUpperCase();
+      const rawValue = String(row?.value ?? '0').trim();
+      if (!normalized.some(stage => stage.key === stageKey && stage.trackProfessional)) throw new BadRequestException('Regra de etapa não rastreada.');
+      if (!['NONE', 'PERCENT', 'FIXED'].includes(kind) || !/^\d+(\.\d{1,4})?$/.test(rawValue)) throw new BadRequestException('Regra de comissão inválida.');
+      const value = new Prisma.Decimal(rawValue);
+      if ((kind === 'NONE' && !value.isZero()) || (kind === 'PERCENT' && value.gt(100)) || (kind === 'FIXED' && value.decimalPlaces() > 2)) throw new BadRequestException('Valor de comissão inválido.');
+      if (generalRules.has(stageKey)) throw new BadRequestException('Etapa duplicada nas regras.');
+      generalRules.set(stageKey, { kind, value });
+    }
+
+    await prisma.$transaction(async tx => {
+      await tx.tenantSettings.upsert({
+        where: { id: 'petshop_stages' },
+        update: { paymentMethodsConfig: { stages: normalized } as any },
+        create: { id: 'petshop_stages', paymentMethodsConfig: { stages: normalized } as any },
+      });
+      for (const stage of normalized.filter(s => s.trackProfessional)) {
+        const existing = await tx.petCommissionRule.findFirst({ where: { stageKey: stage.key, serviceId: null, operatorId: null, active: true } });
+        const requested = generalRules.get(stage.key);
+        if (existing && requested && (existing.kind !== requested.kind || !existing.value.eq(requested.value))) {
+          await tx.petCommissionRule.update({ where: { id: existing.id }, data: { active: false } });
+        }
+        if (!existing || (requested && (existing.kind !== requested.kind || !existing.value.eq(requested.value)))) {
+          const latest = await tx.petCommissionRule.findFirst({ where: { stageKey: stage.key, serviceId: null, operatorId: null }, orderBy: { version: 'desc' } });
+          await tx.petCommissionRule.create({ data: { scopeKey: `${stage.key}:*:*`, stageKey: stage.key, kind: requested?.kind || 'NONE', value: requested?.value || new Prisma.Decimal(0), version: (latest?.version || 0) + 1, createdById: req.user.id } });
+        }
+      }
+    });
+
+    return normalized;
+  }
+
   async createService(data: any) {
     const prisma = await this.prisma();
-    const durationMinutes = Number(data.durationMinutes);
-    const price = Number(data.price);
-    if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 720) throw new BadRequestException('Duração deve ficar entre 5 e 720 minutos.');
-    if (!Number.isFinite(price) || price < 0) throw new BadRequestException('Preço inválido.');
-    const svc = await prisma.petService.create({ data: {
-      name: requiredText(data.name, 'Nome'), description: optionalText(data.description), durationMinutes, price,
-      color: optionalText(data.color) || '#0d9488', active: data.active === undefined ? true : Boolean(data.active),
-    } });
+    const name = requiredText(data.name, 'Nome do serviço');
+    const serviceType = data.serviceType === 'COMBO' ? 'COMBO' : 'INDIVIDUAL';
+    const category = optionalText(data.category) || 'Higiene e Estética';
+    const targetSpecies = optionalText(data.targetSpecies) || 'all';
+    const color = optionalText(data.color) || '#0d9488';
+    const active = data.active === undefined ? true : Boolean(data.active);
+    const description = optionalText(data.description);
+
+    let price = Number(data.price || 0);
+    let durationMinutes = Number(data.durationMinutes || 60);
+
+    let comboPricingType: string | null = null;
+    let comboDiscountValue: number | null = null;
+    let comboItemsData: any[] = [];
+
+    let customStages: any = undefined;
+    if (data.customStages !== undefined && data.customStages !== null) {
+      if (Array.isArray(data.customStages) && data.customStages.length > 0) {
+        customStages = this.pricing.validateStages(data.customStages);
+      }
+    } else {
+      customStages = this.pricing.suggestStages(name, category);
+    }
+
+    if (serviceType === 'COMBO') {
+      comboPricingType = data.comboPricingType || 'FIXED_PRICE';
+      comboDiscountValue = data.comboDiscountValue !== undefined ? Number(data.comboDiscountValue) : 0;
+      if (!Array.isArray(data.comboItems) || data.comboItems.length === 0) {
+        throw new BadRequestException('Um combo deve conter pelo menos um serviço individual.');
+      }
+
+      const componentIds = data.comboItems.map((ci: any) => String(ci.componentServiceId || ci.serviceId));
+      const components = await prisma.petService.findMany({
+        where: { id: { in: componentIds } },
+      });
+      const compMap = new Map<string, any>(components.map(c => [c.id, c]));
+
+      this.pricing.validateComboComposition(data.comboItems, compMap);
+
+      comboItemsData = data.comboItems.map((ci: any, idx: number) => ({
+        componentServiceId: String(ci.componentServiceId || ci.serviceId),
+        quantity: Math.max(1, Number(ci.quantity || 1)),
+        order: Number(ci.order ?? idx),
+      }));
+
+      // Se durationMinutes não foi especificado explicitamente, calcula da soma dos componentes
+      if (!Number.isInteger(durationMinutes) || durationMinutes < 5) {
+        const sumDuration = data.comboItems.reduce((acc: number, ci: any) => {
+          const comp = compMap.get(String(ci.componentServiceId || ci.serviceId));
+          return acc + (Number(comp?.durationMinutes || 30) * Math.max(1, Number(ci.quantity || 1)));
+        }, 0);
+        durationMinutes = Math.max(15, sumDuration);
+      }
+    } else {
+      if (!Number.isFinite(price) || price < 0) throw new BadRequestException('Preço inválido.');
+      if (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 720) {
+        throw new BadRequestException('Duração deve ficar entre 5 e 720 minutos.');
+      }
+    }
+
+    const pricingRulesData = Array.isArray(data.pricingRules)
+      ? data.pricingRules.map((r: any) => ({
+          species: optionalText(r.species) || 'all',
+          size: optionalText(r.size) || 'all',
+          coatType: optionalText(r.coatType) || 'all',
+          price: new Prisma.Decimal(Math.max(0, Number(r.price || 0))),
+          durationMinutes: Number(r.durationMinutes) > 0 ? Number(r.durationMinutes) : null,
+          label: optionalText(r.label),
+        }))
+      : [];
+
+    const svc = await prisma.$transaction(async tx => {
+      const created = await tx.petService.create({
+        data: {
+          name,
+          description,
+          serviceType,
+          category,
+          targetSpecies,
+          durationMinutes,
+          price: new Prisma.Decimal(price),
+          color,
+          active,
+          comboPricingType,
+          comboDiscountValue: comboDiscountValue !== null ? new Prisma.Decimal(comboDiscountValue) : null,
+          customStages: customStages || undefined,
+          pricingRules: pricingRulesData.length > 0 ? { create: pricingRulesData } : undefined,
+          comboItems: comboItemsData.length > 0 ? { create: comboItemsData } : undefined,
+        },
+        include: {
+          pricingRules: true,
+          comboItems: {
+            include: { componentService: true },
+          },
+        },
+      });
+
+      return created;
+    });
+
     await this.ensureServiceProductBacking(prisma, svc);
     return svc;
   }
 
   async updateService(id: string, data: any) {
     const prisma = await this.prisma();
-    const current = await prisma.petService.findUnique({ where: { id } });
+    const current = await prisma.petService.findUnique({
+      where: { id },
+      include: { comboItems: true, pricingRules: true },
+    });
     if (!current) throw new NotFoundException('Serviço não encontrado.');
-    const durationMinutes = data.durationMinutes === undefined ? undefined : Number(data.durationMinutes);
-    const price = data.price === undefined ? undefined : Number(data.price);
-    if (durationMinutes !== undefined && (!Number.isInteger(durationMinutes) || durationMinutes < 5 || durationMinutes > 720)) throw new BadRequestException('Duração inválida.');
-    if (price !== undefined && (!Number.isFinite(price) || price < 0)) throw new BadRequestException('Preço inválido.');
-    const updated = await prisma.petService.update({ where: { id }, data: {
-      name: data.name === undefined ? undefined : requiredText(data.name, 'Nome'), description: optionalText(data.description),
-      durationMinutes, price, color: data.color === undefined ? undefined : requiredText(data.color, 'Cor'), active: data.active === undefined ? undefined : Boolean(data.active),
-    } });
+
+    const name = data.name !== undefined ? requiredText(data.name, 'Nome do serviço') : current.name;
+    const category = data.category !== undefined ? optionalText(data.category) || 'Higiene e Estética' : current.category;
+    const targetSpecies = data.targetSpecies !== undefined ? optionalText(data.targetSpecies) || 'all' : current.targetSpecies;
+    const color = data.color !== undefined ? optionalText(data.color) || '#0d9488' : current.color;
+    const active = data.active !== undefined ? Boolean(data.active) : current.active;
+    const description = data.description !== undefined ? optionalText(data.description) : current.description;
+    const serviceType = data.serviceType !== undefined ? (data.serviceType === 'COMBO' ? 'COMBO' : 'INDIVIDUAL') : current.serviceType;
+
+    let price = data.price !== undefined ? Number(data.price) : Number(current.price);
+    let durationMinutes = data.durationMinutes !== undefined ? Number(data.durationMinutes) : current.durationMinutes;
+
+    let comboPricingType = current.comboPricingType;
+    let comboDiscountValue = current.comboDiscountValue ? Number(current.comboDiscountValue) : null;
+    let comboItemsData: any[] | null = null;
+
+    let customStages = (current as any).customStages;
+    if (data.customStages !== undefined) {
+      if (Array.isArray(data.customStages) && data.customStages.length > 0) {
+        customStages = this.pricing.validateStages(data.customStages);
+      } else if (data.customStages === null) {
+        customStages = this.pricing.suggestStages(name, category);
+      }
+    }
+
+    if (serviceType === 'COMBO') {
+      if (data.comboPricingType !== undefined) comboPricingType = data.comboPricingType;
+      if (data.comboDiscountValue !== undefined) comboDiscountValue = Number(data.comboDiscountValue);
+
+      if (Array.isArray(data.comboItems)) {
+        const componentIds = data.comboItems.map((ci: any) => String(ci.componentServiceId || ci.serviceId));
+        const components = await prisma.petService.findMany({
+          where: { id: { in: componentIds } },
+        });
+        const compMap = new Map<string, any>(components.map(c => [c.id, c]));
+
+        this.pricing.validateComboComposition(data.comboItems, compMap);
+
+        comboItemsData = data.comboItems.map((ci: any, idx: number) => ({
+          componentServiceId: String(ci.componentServiceId || ci.serviceId),
+          quantity: Math.max(1, Number(ci.quantity || 1)),
+          order: Number(ci.order ?? idx),
+        }));
+      }
+    }
+
+    const updated = await prisma.$transaction(async tx => {
+      await tx.petService.update({
+        where: { id },
+        data: {
+          name,
+          category,
+          targetSpecies,
+          color,
+          active,
+          description,
+          serviceType,
+          price: new Prisma.Decimal(price),
+          durationMinutes,
+          comboPricingType,
+          comboDiscountValue: comboDiscountValue !== null ? new Prisma.Decimal(comboDiscountValue) : null,
+          customStages: customStages !== undefined ? customStages : undefined,
+        },
+      });
+
+      if (Array.isArray(data.pricingRules)) {
+        await tx.petServicePricingRule.deleteMany({ where: { serviceId: id } });
+        if (data.pricingRules.length > 0) {
+          await tx.petServicePricingRule.createMany({
+            data: data.pricingRules.map((r: any) => ({
+              serviceId: id,
+              species: optionalText(r.species) || 'all',
+              size: optionalText(r.size) || 'all',
+              coatType: optionalText(r.coatType) || 'all',
+              price: new Prisma.Decimal(Math.max(0, Number(r.price || 0))),
+              durationMinutes: Number(r.durationMinutes) > 0 ? Number(r.durationMinutes) : null,
+              label: optionalText(r.label),
+            })),
+          });
+        }
+      }
+
+      if (comboItemsData !== null) {
+        await tx.petServiceComboItem.deleteMany({ where: { comboServiceId: id } });
+        if (comboItemsData.length > 0) {
+          await tx.petServiceComboItem.createMany({
+            data: comboItemsData.map(ci => ({
+              comboServiceId: id,
+              componentServiceId: ci.componentServiceId,
+              quantity: ci.quantity,
+              order: ci.order,
+            })),
+          });
+        }
+      }
+
+      return tx.petService.findUniqueOrThrow({
+        where: { id },
+        include: {
+          pricingRules: true,
+          comboItems: { include: { componentService: true } },
+        },
+      });
+    });
+
     await this.ensureServiceProductBacking(prisma, updated);
     return updated;
   }
@@ -541,12 +1010,31 @@ export class PetshopService {
     const prisma = await this.prisma();
     const found = await prisma.petService.findUnique({
       where: { id },
-      include: { _count: { select: { appointmentItems: true } } },
+      include: {
+        _count: { select: { appointmentItems: true } },
+        includedInCombos: {
+          include: {
+            comboService: { select: { id: true, name: true, active: true } },
+          },
+        },
+      },
     });
     if (!found) throw new NotFoundException('Serviço não encontrado.');
+
     if (found._count.appointmentItems > 0) {
-      throw new BadRequestException('Este serviço já possui atendimentos vinculados na agenda. Você pode inativá-lo para mantê-lo fora de novos agendamentos sem perder o histórico.');
+      throw new BadRequestException(
+        'Este serviço já possui atendimentos vinculados na agenda. Você pode inativá-lo para mantê-lo fora de novos agendamentos sem perder o histórico.',
+      );
     }
+
+    const activeCombosUsingThis = found.includedInCombos.filter(c => c.comboService?.active);
+    if (activeCombosUsingThis.length > 0) {
+      const comboNames = activeCombosUsingThis.map(c => `"${c.comboService.name}"`).join(', ');
+      throw new BadRequestException(
+        `Este serviço faz parte da composição dos combos ativos: ${comboNames}. Remova-o dos combos ou inative o serviço antes de excluí-lo.`,
+      );
+    }
+
     await prisma.petService.delete({ where: { id } });
     await prisma.product.updateMany({ where: { id }, data: { active: false } });
     return { success: true };
@@ -560,22 +1048,43 @@ export class PetshopService {
     if (!start || !end || start >= end) throw new BadRequestException('Período da agenda inválido.');
     const appointments = await prisma.petAppointment.findMany({
       where: { startsAt: { gte: start, lte: end } },
-      include: { pet: true, customer: true, professional: { select: { id: true, name: true } }, services: true },
+      include: {
+        pet: true,
+        customer: true,
+        professional: { select: { id: true, name: true } },
+        services: {
+          include: {
+            service: true,
+            customerPackage: {
+              select: { id: true, planNameSnapshot: true, expiresAt: true, status: true },
+            },
+            customerPackageItem: {
+              select: {
+                id: true,
+                totalQuantity: true,
+                usedQuantity: true,
+                reservedQuantity: true,
+                availableQuantity: true,
+              },
+            },
+            comboParent: true,
+            comboComponents: true,
+          },
+        },
+      },
       orderBy: { startsAt: 'asc' },
       take: 1000,
     });
 
-    // Se houver atendimentos no status 'ready' sem comanda ativa, cria em background
-    const readyOnes = appointments.filter((a: any) => a.status === 'ready');
-    for (const readyApp of readyOnes) {
-      this.ensureComandaForAppointment(prisma, readyApp.id).catch(() => {});
-    }
-
-    return appointments;
+    return appointments.map((apt: any) => ({
+      ...apt,
+      resolvedStages: this.pricing.resolveAppointmentStages(apt),
+    }));
   }
 
   async createAppointment(data: any) {
     const prisma = await this.prisma();
+    const { userId } = this.tenantContext.get();
     const petId = requiredText(data.petId, 'Pet');
     const serviceIds: string[] = Array.from(new Set<string>(Array.isArray(data.serviceIds) ? data.serviceIds.map(String) : []));
     if (!serviceIds.length) throw new BadRequestException('Selecione pelo menos um serviço.');
@@ -583,11 +1092,87 @@ export class PetshopService {
     if (!startsAt) throw new BadRequestException('Data e hora são obrigatórias.');
     const [pet, services] = await Promise.all([
       prisma.pet.findUnique({ where: { id: petId }, include: { customer: true } }),
-      prisma.petService.findMany({ where: { id: { in: serviceIds }, active: true } }),
+      prisma.petService.findMany({
+        where: { id: { in: serviceIds }, active: true },
+        include: {
+          pricingRules: true,
+          comboItems: {
+            include: {
+              componentService: {
+                include: { pricingRules: true },
+              },
+            },
+            orderBy: { order: 'asc' },
+          },
+        },
+      }),
     ]);
     if (!pet || !pet.active) throw new BadRequestException('Pet inválido.');
     if (services.length !== serviceIds.length) throw new BadRequestException('Um ou mais serviços são inválidos.');
-    const totalMinutes = services.reduce((sum, service) => sum + service.durationMinutes, 0);
+
+    const petChar = { species: pet.species, size: pet.size, coatType: pet.coatType };
+    let totalMinutes = 0;
+
+    interface PlannedAppService {
+      serviceId: string;
+      nameSnapshot: string;
+      priceSnapshot: Prisma.Decimal;
+      commissionWeightSnapshot: Prisma.Decimal;
+      durationMinutes: number;
+      isCombo: boolean;
+      comboParentIdx?: number;
+    }
+
+    const plannedServices: PlannedAppService[] = [];
+
+    for (const service of services) {
+      const resolved = this.pricing.resolvePriceAndDuration(service, petChar);
+      totalMinutes += resolved.durationMinutes;
+
+      if (service.serviceType === 'COMBO') {
+        const comboIdx = plannedServices.length;
+        plannedServices.push({
+          serviceId: service.id,
+          nameSnapshot: service.name,
+          priceSnapshot: new Prisma.Decimal(resolved.price),
+          commissionWeightSnapshot: new Prisma.Decimal(resolved.price),
+          durationMinutes: resolved.durationMinutes,
+          isCombo: true,
+        });
+
+        // Adiciona os serviços componentes do combo para controle operacional e relatórios
+        const items = Array.isArray(service.comboItems) ? service.comboItems : [];
+        for (const ci of items) {
+          const comp = ci.componentService;
+          const qty = Math.max(1, Number(ci.quantity || 1));
+          const compResolved = this.pricing.resolvePriceAndDuration(comp, petChar);
+
+          for (let q = 0; q < qty; q++) {
+            plannedServices.push({
+              serviceId: comp.id,
+              nameSnapshot: `${comp.name} (Combo: ${service.name})`,
+              priceSnapshot: new Prisma.Decimal(0),
+              commissionWeightSnapshot: new Prisma.Decimal(compResolved.price),
+              durationMinutes: compResolved.durationMinutes,
+              isCombo: false,
+              comboParentIdx: comboIdx,
+            });
+          }
+        }
+      } else {
+        const sizeLabel = resolved.matchedRule?.label || (resolved.matchedRule?.size && resolved.matchedRule.size !== 'all' ? `Porte ${resolved.matchedRule.size}` : null);
+        const nameWithVariant = sizeLabel ? `${service.name} (${sizeLabel})` : service.name;
+        plannedServices.push({
+          serviceId: service.id,
+          nameSnapshot: nameWithVariant,
+          priceSnapshot: new Prisma.Decimal(resolved.price),
+          commissionWeightSnapshot: new Prisma.Decimal(resolved.price),
+          durationMinutes: resolved.durationMinutes,
+          isCombo: false,
+        });
+      }
+    }
+
     const endsAt = new Date(startsAt.getTime() + totalMinutes * 60_000);
     const professionalId = optionalText(data.professionalId) ?? null;
 
@@ -600,13 +1185,120 @@ export class PetshopService {
       if (conflict) throw new ConflictException('Este profissional já possui um atendimento nesse horário.');
     }
 
-    return prisma.petAppointment.create({ data: {
-      customerId: pet.customerId, petId, professionalId, startsAt, endsAt,
-      status: data.status === 'requested' ? 'requested' : 'scheduled', source: data.source || 'internal', notes: optionalText(data.notes),
-      services: { create: services.map(service => ({
-        serviceId: service.id, nameSnapshot: service.name, priceSnapshot: service.price, durationMinutes: service.durationMinutes,
-      })) },
-    }, include: { pet: true, customer: true, professional: { select: { id: true, name: true } }, services: true } });
+    const packageSelections: Record<string, string> =
+      data.packageSelections && typeof data.packageSelections === 'object'
+        ? data.packageSelections
+        : {};
+
+    const stagesLists: any[][] = [];
+    for (const service of services) {
+      if ((service as any).customStages && Array.isArray((service as any).customStages) && (service as any).customStages.length > 0) {
+        try {
+          stagesLists.push(this.pricing.validateStages((service as any).customStages));
+          continue;
+        } catch {}
+      }
+      stagesLists.push(this.pricing.suggestStages(service.name, service.category));
+    }
+    const resolvedStages = this.pricing.consolidateStages(stagesLists);
+
+    let operatorName: string | null = null;
+    if (userId) {
+      try {
+        const op = await prisma.operator.findUnique({ where: { id: userId }, select: { name: true } });
+        if (op) operatorName = op.name;
+      } catch {}
+    }
+
+    const initialStatus = data.status === 'requested' ? 'requested' : 'scheduled';
+    const initialHistory = [
+      {
+        status: initialStatus,
+        at: new Date().toISOString(),
+        userId: userId || null,
+        userName: operatorName || null,
+      },
+    ];
+
+    const created = await prisma.$transaction(async tx => {
+      const app = await tx.petAppointment.create({
+        data: {
+          customerId: pet.customerId,
+          petId,
+          professionalId,
+          startsAt,
+          endsAt,
+          status: initialStatus,
+          source: data.source || 'internal',
+          notes: optionalText(data.notes),
+          customStages: resolvedStages,
+          stageHistory: initialHistory,
+        },
+      });
+
+      const insertedServices: any[] = [];
+      for (const planned of plannedServices) {
+        const comboParentId = planned.comboParentIdx !== undefined ? insertedServices[planned.comboParentIdx]?.id : null;
+        const inserted = await tx.petAppointmentService.create({
+          data: {
+            appointmentId: app.id,
+            serviceId: planned.serviceId,
+            nameSnapshot: planned.nameSnapshot,
+            priceSnapshot: planned.priceSnapshot,
+            commissionWeightSnapshot: planned.commissionWeightSnapshot,
+            durationMinutes: planned.durationMinutes,
+            isCombo: planned.isCombo,
+            comboParentId: comboParentId || null,
+          },
+        });
+        insertedServices.push(inserted);
+      }
+
+      if (Object.keys(packageSelections).length > 0) {
+        await this.packages.reserveSessionsForAppointmentInTx(tx, {
+          appointmentId: app.id,
+          petId,
+          customerId: pet.customerId,
+          startsAt,
+          packageSelections,
+          actor: { userId, operatorId: data.operatorId, name: data.operatorName },
+        });
+      }
+
+      return tx.petAppointment.findUnique({
+        where: { id: app.id },
+        include: {
+          pet: true,
+          customer: true,
+          professional: { select: { id: true, name: true } },
+          services: {
+            include: {
+              customerPackage: {
+                select: { id: true, planNameSnapshot: true, expiresAt: true, status: true },
+              },
+              customerPackageItem: {
+                select: {
+                  id: true,
+                  totalQuantity: true,
+                  usedQuantity: true,
+                  reservedQuantity: true,
+                  availableQuantity: true,
+                },
+              },
+            },
+          },
+        },
+      });
+    });
+
+    if (created && created.status === 'scheduled') {
+      this.whatsapp.enqueueAppointmentEvent('APPOINTMENT_CONFIRMED', created.id).catch(() => {});
+    }
+
+    return {
+      ...created,
+      resolvedStages,
+    };
   }
 
   async updateAppointment(id: string, data: any) {
@@ -642,26 +1334,123 @@ export class PetshopService {
       }
     }
 
-    return prisma.petAppointment.update({
+    const updated = await prisma.petAppointment.update({
       where: { id },
       data: {
         professionalId,
         notes: data.notes !== undefined ? optionalText(data.notes) : undefined,
       },
-      include: { pet: true, customer: true, professional: { select: { id: true, name: true } }, services: true },
+      include: {
+        pet: true,
+        customer: true,
+        professional: { select: { id: true, name: true } },
+        services: {
+          include: {
+            service: true,
+            customerPackage: {
+              select: { id: true, planNameSnapshot: true, expiresAt: true, status: true },
+            },
+            customerPackageItem: {
+              select: {
+                id: true,
+                totalQuantity: true,
+                usedQuantity: true,
+                reservedQuantity: true,
+                availableQuantity: true,
+              },
+            },
+            comboParent: true,
+            comboComponents: true,
+          },
+        },
+      },
+    });
+
+    return {
+      ...updated,
+      resolvedStages: this.pricing.resolveAppointmentStages(updated),
+    };
+  }
+
+  async receivePayment(id: string, body: any, req: any) {
+    const actor = req.headers?.['x-operator-token'] ? await this.commissions.sessionOperator(req) : null;
+    if (req.user.role === 'operator' && !actor) throw new ForbiddenException('Identifique o colaborador com PIN.');
+    const payments = Array.isArray(body.payments) ? body.payments : [{ method: body.method }];
+    if (!payments.length || payments.some(p => !['dinheiro', 'pix', 'credito', 'debito'].includes(p.method))) throw new BadRequestException('Forma de pagamento inválida.');
+    const comanda = await this.prepareCheckout(id);
+    if (!comanda) throw new BadRequestException('Atendimento sem valor avulso. Utilize Concluir (Pacote).');
+    const resolvedPayments = payments.map(p => ({ method: p.method, value: body.payments ? Number(p.value) : Number(comanda.total) }));
+    if (resolvedPayments.some(p => !Number.isFinite(p.value) || p.value <= 0) || !new Prisma.Decimal(comanda.total).eq(resolvedPayments.reduce((sum, p) => sum.plus(p.value), new Prisma.Decimal(0)))) throw new BadRequestException('A soma dos pagamentos deve ser igual ao total.');
+    return this.sales.checkout({
+      idempotencyKey: `petshop-receipt:${id}`, source: 'petshop', comandaId: comanda.id,
+      petshopAppointmentId: id, operatorId: actor?.id, items: [], extraItems: [],
+      payments: resolvedPayments, emitirNfce: false,
+    }, true);
+  }
+
+  async pendingReservations() {
+    const prisma = await this.prisma();
+    return prisma.petAppointment.findMany({ where: { status: 'requested' }, include: {
+      pet: true, customer: true, services: true, professional: { select: { id: true, name: true } },
+    }, orderBy: { startsAt: 'asc' } });
+  }
+
+  async prepareCheckout(id: string) {
+    const prisma = await this.prisma();
+    return prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${id} FOR UPDATE`;
+      const appointment = await tx.petAppointment.findUnique({ where: { id } });
+      if (!appointment) throw new NotFoundException('Atendimento não encontrado.');
+      if (appointment.status === 'delivered' || appointment.completedAt) throw new ConflictException('Atendimento já cobrado e concluído.');
+      if (appointment.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes de cobrar.');
+      return this.ensureComandaForAppointment(tx, id);
     });
   }
 
-  async updateAppointmentStatus(id: string, data: any) {
+  async updateAppointmentStatus(id: string, data: any, req?: any) {
     const prisma = await this.prisma();
+    const { userId } = this.tenantContext.get();
     const current = await prisma.petAppointment.findUnique({
       where: { id },
-      select: { id: true, status: true, stagePhotoUrl: true, stageNotes: true, stageHistory: true },
+      include: {
+        services: {
+          include: {
+            service: true,
+          },
+        },
+      },
     });
     if (!current) throw new NotFoundException('Agendamento não encontrado.');
 
+    let operatorName: string | null = null;
+    if (userId) {
+      try {
+        const op = await prisma.operator.findUnique({ where: { id: userId }, select: { name: true } });
+        if (op) operatorName = op.name;
+      } catch {}
+    }
+
+    const resolvedStages = this.pricing.resolveAppointmentStages(current);
+    const resolvedKeys = resolvedStages.map((s: any) => (typeof s === 'string' ? s : s.key));
     const status = data.status ? requiredText(data.status, 'Status') : current.status;
-    if (!APPOINTMENT_STATUSES.has(status)) throw new BadRequestException('Status inválido.');
+    if (!APPOINTMENT_STATUSES.has(status) && !resolvedKeys.includes(status)) {
+      throw new BadRequestException('Status inválido.');
+    }
+    if (['delivered', 'cancelled', 'no_show'].includes(current.status) || current.completedAt) {
+      throw new ConflictException('Atendimento finalizado. Não é permitido reabrir ou cobrar novamente.');
+    }
+    if (status === 'delivered') {
+      if (current.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes da retirada.');
+      const payable = current.services.some(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus) && Number(s.priceSnapshot) > Number(s.coveredAmount || 0));
+      if (payable) throw new BadRequestException('Há serviços a cobrar. Finalize o pagamento no PDV.');
+    }
+
+    const getStageLabel = (stKey: string) => {
+      const match = resolvedStages.find((s: any) => (typeof s === 'string' ? s : s.key) === stKey);
+      if (match && typeof match === 'object' && match.label) return match.label;
+      const def = DEFAULT_STAGE_DEFINITIONS.find(d => d.key === stKey);
+      return def?.label || (stKey.startsWith('custom_') ? stKey.replace(/^custom_/, '') : stKey);
+    };
 
     const now = new Date();
     const nextPhotoUrl = data.stagePhotoUrl !== undefined ? optionalText(data.stagePhotoUrl) : undefined;
@@ -669,45 +1458,156 @@ export class PetshopService {
 
     const existingHistory = Array.isArray(current.stageHistory) ? (current.stageHistory as any[]) : [];
     const statusChanged = status !== current.status;
+    const configuredStages = await this.getTenantStages();
+    const trackedStage = configuredStages.find(s => s.key === status && s.trackProfessional);
+    const actor = req?.headers?.['x-operator-token'] || (statusChanged && trackedStage)
+      ? await this.commissions.sessionOperator(req) : null;
     const photoAdded = Boolean(nextPhotoUrl && nextPhotoUrl !== current.stagePhotoUrl);
     const notesAdded = Boolean(nextStageNotes && nextStageNotes !== current.stageNotes);
 
-    const updatedHistory = (statusChanged || photoAdded || notesAdded)
-      ? [
-          ...existingHistory,
-          {
-            status,
+    let updatedHistory = existingHistory;
+    if (statusChanged || photoAdded || notesAdded) {
+      const newEntries: any[] = [];
+      if (statusChanged) {
+        // Identifica e registra etapas puladas no fluxo para auditoria completa
+        const skipped = this.pricing.getSkippedStages(current.status, status, resolvedStages);
+        for (const skippedItem of skipped) {
+          const skippedKey = typeof skippedItem === 'string' ? skippedItem : skippedItem.key;
+          const skippedLabel = typeof skippedItem === 'object' && skippedItem.label ? skippedItem.label : getStageLabel(skippedKey);
+          newEntries.push({
+            status: skippedKey,
+            label: skippedLabel,
             at: now.toISOString(),
-            photoUrl: nextPhotoUrl !== undefined ? nextPhotoUrl : current.stagePhotoUrl ?? null,
-            notes: nextStageNotes !== undefined ? nextStageNotes : null,
-          },
-        ]
-      : existingHistory;
+            skipped: true,
+            reason: 'Etapa ignorada no fluxo para avançar diretamente',
+            userId: actor?.id || userId || null,
+            userName: actor?.name || operatorName || req?.user?.email || null,
+          });
+        }
+      }
 
-    const updatedAppointment = await prisma.petAppointment.update({
-      where: { id },
-      data: {
+      newEntries.push({
         status,
-        professionalId: data.professionalId !== undefined ? (!data.professionalId || data.professionalId === 'none' ? null : String(data.professionalId)) : undefined,
-        checkInNotes: optionalText(data.checkInNotes),
-        stagePhotoUrl: nextPhotoUrl,
-        stageNotes: nextStageNotes,
-        stageHistory: updatedHistory,
-        checkedInAt: status === 'checked_in' ? now : undefined,
-        readyAt: status === 'ready' ? now : undefined,
-        completedAt: status === 'delivered' ? now : undefined,
-      },
-      include: { pet: true, customer: true, professional: { select: { id: true, name: true } }, services: true },
+        label: getStageLabel(status),
+        at: now.toISOString(),
+        photoUrl: nextPhotoUrl !== undefined ? nextPhotoUrl : null,
+        notes: nextStageNotes !== undefined ? nextStageNotes : null,
+        userId: actor?.id || userId || null,
+        userName: actor?.name || operatorName || req?.user?.email || null,
+        skipped: false,
+      });
+
+      updatedHistory = [...existingHistory, ...newEntries];
+    }
+
+    let consumedInfo: Array<{
+      customerPackageId: string;
+      remainingAvailable: number;
+    }> = [];
+
+    const updatedAppointment = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${id} FOR UPDATE`;
+      const locked = await tx.petAppointment.findUnique({ where: { id }, select: { status: true, updatedAt: true } });
+      if (locked?.status !== current.status || locked?.updatedAt.getTime() !== current.updatedAt.getTime()) throw new ConflictException('Atendimento alterado por outra sessão. Atualize a agenda.');
+      // Efetiva consumo de sessão do pacote somente quando o serviço é concluído (ready ou delivered)
+      if (status === 'ready' || status === 'delivered') {
+        const res = await this.packages.consumeReservedSessionsForAppointmentInTx(tx, id, {
+          userId,
+          operatorId: data.operatorId,
+          name: data.operatorName,
+        });
+        consumedInfo = res.consumedItems;
+      }
+
+      // Se o agendamento for cancelado ou falta (no_show) antes do consumo, libera as sessões reservadas
+      if (status === 'cancelled' || status === 'no_show') {
+        await this.packages.releaseReservedSessionsForAppointmentInTx(
+          tx,
+          id,
+          data.stageNotes || `Atendimento marcado como ${status}`,
+          {
+            userId,
+            operatorId: data.operatorId,
+            name: data.operatorName,
+          },
+        );
+        await this.commissions.reverseAppointmentInTx(tx, id, req?.user?.id || userId || 'system', `Atendimento marcado como ${status}`);
+      }
+
+      if (actor && statusChanged && trackedStage) {
+        const execution = await tx.petAppointment.findUnique({ where: { id }, include: { services: { include: { service: true, customerPackageItem: true } } } });
+        if (execution) await this.commissions.recordExecution(tx, execution, status, actor.id, now);
+      }
+
+      return tx.petAppointment.update({
+        where: { id },
+        data: {
+          status,
+          customStages: (current as any).customStages || resolvedStages,
+          professionalId:
+            data.professionalId !== undefined
+              ? !data.professionalId || data.professionalId === 'none'
+                ? null
+                : String(data.professionalId)
+              : undefined,
+          checkInNotes: data.checkInNotes === undefined ? undefined : optionalText(data.checkInNotes),
+          stagePhotoUrl: nextPhotoUrl,
+          stageNotes: nextStageNotes,
+          stageHistory: updatedHistory,
+          checkedInAt: status === 'checked_in' && !current.checkedInAt ? now : undefined,
+          readyAt: status === 'ready' && !current.readyAt ? now : undefined,
+          completedAt: status === 'delivered' ? now : undefined,
+        },
+        include: {
+          pet: true,
+          customer: true,
+          professional: { select: { id: true, name: true } },
+          services: {
+            include: {
+              customerPackage: {
+                select: { id: true, planNameSnapshot: true, expiresAt: true, status: true },
+              },
+              customerPackageItem: {
+                select: {
+                  id: true,
+                  totalQuantity: true,
+                  usedQuantity: true,
+                  reservedQuantity: true,
+                  availableQuantity: true,
+                },
+              },
+            },
+          },
+        },
+      });
     });
 
     if (status === 'ready') {
       try {
-        await this.ensureComandaForAppointment(prisma, id);
+        await this.prepareCheckout(id);
       } catch (comandaErr: any) {
         console.error('[PetshopService] Falha ao criar comanda automática para pronto para buscar:', comandaErr?.message || comandaErr);
       }
+      if (statusChanged) {
+        this.whatsapp.enqueueAppointmentEvent('PET_READY', id).catch(() => {});
+      }
     }
 
-    return updatedAppointment;
+    // Se algum pacote consumido atingiu a última sessão ou zerou, dispara alerta de renovação
+    for (const item of consumedInfo) {
+      if (item.remainingAvailable <= 1) {
+        this.whatsapp
+          .enqueuePackageLastSessionAlert({
+            customerPackageId: item.customerPackageId,
+            remainingAvailable: item.remainingAvailable,
+          })
+          .catch(() => {});
+      }
+    }
+
+    return {
+      ...updatedAppointment,
+      resolvedStages,
+    };
   }
 }

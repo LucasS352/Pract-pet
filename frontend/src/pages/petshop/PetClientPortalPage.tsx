@@ -1,3 +1,4 @@
+import { uniqueStagePhotos } from './appointment-media';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BellRing,
@@ -17,7 +18,7 @@ import {
 import { useParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
-import { money, type StageHistoryEntry } from './types';
+import { money, resolveAppointmentStages, resolveAppointmentSteps, type StageHistoryEntry } from './types';
 import { inputClass, labelClass, PetAvatar, PetHeroShowcase, primaryButton } from './ui';
 import './petshop.css';
 
@@ -268,12 +269,21 @@ export default function PetClientPortalPage() {
         {liveAppointments.length > 0 && (
           <section className="mb-8 space-y-5" aria-label="Acompanhamento em tempo real">
             {liveAppointments.map((appointment: any) => {
-              const currentStepIndex = trackerSteps.findIndex(s => s.key === appointment.status);
+              const rawSteps = resolveAppointmentSteps(appointment);
+              const appointmentSteps = rawSteps.map(s => {
+                const defaultTrack = trackerSteps.find(t => t.key === s.key);
+                return {
+                  key: s.key,
+                  label: s.label || defaultTrack?.label || s.key,
+                  shortDesc: defaultTrack?.shortDesc || 'Etapa do atendimento',
+                };
+              });
+              const currentStepIndex = appointmentSteps.findIndex(s => s.key === appointment.status);
               const isReady = appointment.status === 'ready';
               const history: StageHistoryEntry[] = Array.isArray(appointment.stageHistory)
                 ? appointment.stageHistory
                 : [];
-              const photosFromHistory = history.filter(h => h.photoUrl);
+              const photosFromHistory = uniqueStagePhotos(history);
 
               return (
                 <article
@@ -349,8 +359,11 @@ export default function PetClientPortalPage() {
                       <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--pc-text-muted)]">
                         Progresso do Atendimento
                       </p>
-                      <ol className="grid gap-2.5 sm:grid-cols-5">
-                        {trackerSteps.map((step, index) => {
+                      <ol
+                        className="grid gap-2.5"
+                        style={{ gridTemplateColumns: `repeat(${appointmentSteps.length}, minmax(0, 1fr))` }}
+                      >
+                        {appointmentSteps.map((step, index) => {
                           const completed = index < currentStepIndex || isReady;
                           const active = index === currentStepIndex;
                           const historyEntry = [...history].reverse().find(h => h.status === step.key);
@@ -496,13 +509,19 @@ export default function PetClientPortalPage() {
                                       petName: appointment.pet.name,
                                     })
                                   }
-                                  className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-[var(--pc-border-strong)] bg-white"
+                                  className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-[var(--pc-border-strong)] bg-white shadow-xs"
+                                  title={entry.label || 'Foto da etapa'}
                                 >
                                   <img
                                     src={getFullUrl(entry.photoUrl!)}
                                     alt=""
                                     className="h-full w-full object-cover transition group-hover:scale-105"
                                   />
+                                  {entry.label && (
+                                    <span className="absolute bottom-0 inset-x-0 bg-black/65 text-[8px] text-white text-center py-0.5 truncate px-0.5 font-semibold">
+                                      {entry.label}
+                                    </span>
+                                  )}
                                 </button>
                               ))}
                             </div>
@@ -519,10 +538,10 @@ export default function PetClientPortalPage() {
 
         <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
           <div className="min-w-0 space-y-6">
-            {/* Meus Pets e Carteira de Vacinação */}
+            {/* Meus Pets */}
             <section aria-labelledby="pets-title">
               <h2 id="pets-title" className="mb-3 text-base font-semibold">
-                Meus pets e carteira de vacinação
+                {data?.shop?.modulos?.petshopVacinas !== false ? 'Meus pets e carteira de vacinação' : 'Meus pets cadastrados'}
               </h2>
               <div className="grid gap-3 sm:grid-cols-2">
                 {data.customer.pets.map((pet: any) => (
@@ -537,28 +556,30 @@ export default function PetClientPortalPage() {
                         </p>
                       </div>
                     </div>
-                    <div className="mt-4 border-t border-[var(--pc-border)] pt-4">
-                      <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--pc-text-secondary)]">
-                        <Syringe aria-hidden="true" size={15} className="text-[var(--pc-action)]" />
-                        Carteira de vacinação
-                      </p>
-                      {pet.vaccinations.length ? (
-                        pet.vaccinations.slice(0, 4).map((vaccine: any) => (
-                          <div key={vaccine.id} className="flex items-start justify-between gap-3 py-1.5 text-xs">
-                            <span className="font-medium">{vaccine.vaccineName}</span>
-                            <span className="shrink-0 text-right text-[var(--pc-text-muted)]">
-                              {vaccine.nextDueAt
-                                ? `Próxima: ${new Date(vaccine.nextDueAt).toLocaleDateString('pt-BR')}`
-                                : vaccine.appliedAt
-                                  ? new Date(vaccine.appliedAt).toLocaleDateString('pt-BR')
-                                  : 'Registrada'}
-                            </span>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-xs leading-5 text-[var(--pc-text-muted)]">Nenhuma vacina registrada.</p>
-                      )}
-                    </div>
+                    {data?.shop?.modulos?.petshopVacinas !== false && (
+                      <div className="mt-4 border-t border-[var(--pc-border)] pt-4">
+                        <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--pc-text-secondary)]">
+                          <Syringe aria-hidden="true" size={15} className="text-[var(--pc-action)]" />
+                          Carteira de vacinação
+                        </p>
+                        {pet.vaccinations.length ? (
+                          pet.vaccinations.slice(0, 4).map((vaccine: any) => (
+                            <div key={vaccine.id} className="flex items-start justify-between gap-3 py-1.5 text-xs">
+                              <span className="font-medium">{vaccine.vaccineName}</span>
+                              <span className="shrink-0 text-right text-[var(--pc-text-muted)]">
+                                {vaccine.nextDueAt
+                                  ? `Próxima: ${new Date(vaccine.nextDueAt).toLocaleDateString('pt-BR')}`
+                                  : vaccine.appliedAt
+                                    ? new Date(vaccine.appliedAt).toLocaleDateString('pt-BR')
+                                    : 'Registrada'}
+                              </span>
+                            </div>
+                          ))
+                        ) : (
+                          <p className="text-xs leading-5 text-[var(--pc-text-muted)]">Nenhuma vacina registrada.</p>
+                        )}
+                      </div>
+                    )}
                   </article>
                 ))}
               </div>

@@ -21,6 +21,7 @@ export function allowedStations(modules: Record<string, boolean>) {
 export function operatorAllowed(op: { active?: boolean; jobTitle?: string | null; isManager?: boolean }, context: string, isolated: boolean) {
   if (op.active === false) return false;
   const title = (op.jobTitle || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase();
+  if (context === 'petshop') return true;
   if (context === 'waiter') return title === 'garcom';
   if (context === 'cashier') return isolated
     ? ['caixa', 'gerente', 'admin'].includes(title) || (!title && op.isManager === true)

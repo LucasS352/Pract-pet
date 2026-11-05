@@ -7,11 +7,16 @@ const request = { idempotencyKey: key, operatorId: 'op', items: [{ productId: 'p
 const sale = () => ({ id: key, requestFingerprint: computeSaleFingerprint(request), total: 10 });
 
 function service(db: any) {
-  return new SalesService({ getTenantClient: async () => db } as any, {} as any, {} as any,
+  return new SalesService({ getTenantClient: async () => db } as any, { tenant: { findUnique: async () => ({ modulos: {} }) } } as any, {} as any,
     { get: () => ({ tenantId: 'tenant', userId: 'op' }) } as any, {} as any, {} as any, {} as any);
 }
 
 describe('transactional sale identity', () => {
+  it('bloqueia PDV desativado antes de consultar ou cobrar uma venda', async () => {
+    const target = service({});
+    (target as any).heartPrisma = { tenant: { findUnique: async () => ({ modulos: { pdv: false } }) } };
+    await expect(target.checkout(request)).rejects.toThrow('PDV desabilitado');
+  });
   it('busca apenas itens ativos ao fechar uma comanda, antes de calcular ou cobrar', async () => {
     const stop = new Error('consulta conferida');
     const tx = {

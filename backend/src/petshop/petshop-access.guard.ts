@@ -1,9 +1,10 @@
 import { CanActivate, ExecutionContext, ForbiddenException, Injectable } from '@nestjs/common';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
+import { PetshopCommissionsService } from './petshop-commissions.service';
 
 @Injectable()
 export class PetshopAccessGuard implements CanActivate {
-  constructor(private readonly heart: HeartPrismaService) {}
+  constructor(private readonly heart: HeartPrismaService, private readonly commissions: PetshopCommissionsService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -14,7 +15,7 @@ export class PetshopAccessGuard implements CanActivate {
 
     const tenant = await this.heart.tenant.findUnique({
       where: { id: tenantId },
-      select: { modulos: true, status: true },
+      select: { modulos: true, status: true, databaseUrl: true },
     });
     const modules = (tenant?.modulos && typeof tenant.modulos === 'object')
       ? tenant.modulos as Record<string, unknown>
@@ -22,6 +23,18 @@ export class PetshopAccessGuard implements CanActivate {
 
     if (!tenant || tenant.status !== 'active' || modules.petshop === false) {
       throw new ForbiddenException('O módulo Pet Shop não está ativo para esta empresa.');
+    }
+    const operator = request.headers?.['x-operator-token'] ? await this.commissions.sessionOperator(request, tenant.databaseUrl) : null;
+    const restricted = request.user?.role === 'operator' || (operator && !operator.isManager);
+    if (restricted) {
+      const path = (request.originalUrl || request.url || '').split('?')[0].replace(/^\/api/, '');
+      const method = request.method;
+      const allowed = method === 'GET'
+        ? /^\/petshop\/(overview|appointments|pending-reservations|pets|services|stages)$/.test(path) || /^\/petshop\/packages\/available\/[^/]+$/.test(path)
+        : method === 'POST'
+          ? path === '/petshop/appointments' || /^\/petshop\/appointments\/[^/]+\/(receive|checkout)$/.test(path) || path === '/petshop/uploads/photo' || /^\/petshop\/tutors\/[^/]+\/portal-link$/.test(path)
+          : method === 'PATCH' && /^\/petshop\/appointments\/[^/]+(?:\/status)?$/.test(path);
+      if (!allowed) throw new ForbiddenException('Acesso restrito ao perfil operacional. Identifique um administrador.');
     }
     return true;
   }

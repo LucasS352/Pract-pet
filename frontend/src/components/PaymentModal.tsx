@@ -36,6 +36,7 @@ const METHOD_NAMES: Record<string, string> = { dinheiro: 'Dinheiro', pix: 'Pix',
 const TPAG_MAP: Record<string, string> = { dinheiro: '01', credito: '03', debito: '04', pix: '17', consumo_funcionario: '99', outros: '99' };
 
 interface PaymentModalProps {
+  petshopReceipt?: { customer: string; total: number; submit: (payments: { method: string; value: number }[]) => Promise<any> };
   experience?: 'food';
   isOpen: boolean;
   onClose: () => void;
@@ -46,9 +47,9 @@ interface PaymentModalProps {
   initialOpenComanda?: boolean;
 }
 
-export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, tenantConfig, onSuccess, initialOpenComanda, experience }: PaymentModalProps) {
+export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, tenantConfig, onSuccess, initialOpenComanda, experience, petshopReceipt }: PaymentModalProps) {
   const {
-    total,
+    total: cartTotal,
     items,
     clearCart,
     activeComandaId,
@@ -58,6 +59,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
     getOrCreateOperationId,
     setOperationLocked,
   } = useCartStore();
+  const total = petshopReceipt?.total ?? cartTotal;
   const { user } = useAuthStore();
   const { cashRegister, operator } = useShift();
 
@@ -141,6 +143,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
     appointmentId?: string;
   } | null>(null);
   const handleOpenComandaPicker = useCallback(() => {
+    if (petshopReceipt) return;
     if (items.length === 0) {
       toast.error('O carrinho está vazio.');
       return;
@@ -499,7 +502,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
     if (isOpen) {
       setPayments([]); setMethod('dinheiro'); setInputValue('');
       setPayMode('simple'); setShowConsumerForm(false); setCustomerCpf('');
-      const cachedCustomer = sessionStorage.getItem('petshop_checkout_customer_name');
+      const cachedCustomer = petshopReceipt?.customer || sessionStorage.getItem('petshop_checkout_customer_name');
       if (cachedCustomer) {
         setCustomerName(cachedCustomer);
         setShowConsumerForm(true);
@@ -510,7 +513,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
       setDiscountValue(0); setDiscountPinInput(''); setPinVerified(false); setPendingDiscountStr('');
       setSelectedOperatorId(''); setAdvancedOpen(false);
       if (!isNfceEnabled) setAutoNfce(false);
-      
+
       api.get('/operators')
         .then(res => setOperatorsList(res.data || []))
         .catch(console.error);
@@ -518,9 +521,9 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
       api.get('/payment-methods')
         .then(res => {
           const standardKeys = ['dinheiro', 'pix', 'crédito', 'credito', 'débito', 'debito', 'consumo colaborador', 'consumo_funcionario'];
-          setCustomMethods((res.data || []).filter((m: any) => 
-            m.active && 
-            !standardKeys.includes((m.name || '').toLowerCase().trim()) && 
+          setCustomMethods((res.data || []).filter((m: any) =>
+            m.active && !petshopReceipt &&
+            !standardKeys.includes((m.name || '').toLowerCase().trim()) &&
             !standardKeys.includes((m.id || '').toLowerCase().trim())
           ));
         })
@@ -541,7 +544,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
-  useEffect(() => { 
+  useEffect(() => {
     if (method === 'dinheiro') {
       setInputValue('');
     } else {
@@ -743,6 +746,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
   };
 
   const handleApplyDiscount = () => {
+    if (petshopReceipt) { toast.info('O valor é definido pelos serviços contratados.'); return; }
     const val = parseFloat(pendingDiscountStr);
     if (isNaN(val) || val < 0) { toast.error('Valor inválido.'); return; }
     if (val >= total) { toast.error('Desconto não pode ser igual ou maior que o total.'); return; }
@@ -756,6 +760,15 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
   };
 
   const handleConfirm = async (mode: PayMode, offlineOnly = false) => {
+    if (petshopReceipt) {
+      if (isSubmittingRef.current) return;
+      if (remaining > 0 || !payments.length) { toast.error('Complete os pagamentos para finalizar.'); return; }
+      isSubmittingRef.current = true; setLoading(true);
+      try { const receipt = await petshopReceipt.submit(payments.map(p => ({ method: p.method, value: p.value }))); if (autoPrint) printReceipt(receipt); onSuccess?.(); onClose(); }
+      catch (error: any) { toast.error(error.response?.data?.message || 'Falha ao registrar pagamento.'); }
+      finally { isSubmittingRef.current = false; setLoading(false); }
+      return;
+    }
     const releaseOwnCart = () => {
       const cart = useCartStore.getState();
       if (cart.cartOperationId === operationId && cart.scope === `7bar-cart-v2:${user?.tenant}:${operator?.id}`) cart.setOperationLocked(false);
@@ -767,15 +780,15 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
     const selectedCustom = customMethods.find(cm => cm.id === method);
     const isVariablePricingActive = selectedCustom?.hasVariablePricing;
 
-    if (!isVariablePricingActive && remaining > 0) { 
-      toast.error(`Falta R$ ${remaining.toFixed(2)} para finalizar.`); 
-      return; 
+    if (!isVariablePricingActive && remaining > 0) {
+      toast.error(`Falta R$ ${remaining.toFixed(2)} para finalizar.`);
+      return;
     }
     if (isVariablePricingActive && payments.length > 0) {
       toast.error('Pagamentos parciais não são permitidos usando Preços na Plataforma. Limpe os pagamentos e tente novamente.');
       return;
     }
-    
+
     let finalPayments = [...payments];
     if (isVariablePricingActive) {
       const val = items.reduce((acc, item) => acc + (variablePrices[item.id] || Number(item.priceSell)) * item.quantity, 0);
@@ -812,9 +825,9 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
     setPayMode(actualMode);
     try {
       const body = {
-        items: items.map(i => ({ 
-          productId: i.id, 
-          quantity: i.quantity, 
+        items: items.map(i => ({
+          productId: i.id,
+          quantity: i.quantity,
           // Quando há preço variável (ex: iFood), usa o preço da plataforma configurado;
           // caso contrário, usa o preço efetivo/normal do produto.
           priceUnit: isVariablePricingActive
@@ -1185,7 +1198,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
           </div>
 
           <div className={`flex items-center gap-2.5 ${isPetshopTheme ? 'relative z-10 shrink-0' : ''}`}>
-            {modules?.comandas === true && (
+            {!petshopReceipt && modules?.comandas === true && (
               <button
                 type="button"
                 onClick={handleOpenComandaPicker}
@@ -1295,7 +1308,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
           {/* Painel Direito: Resumo */}
           <div className={`bg-zinc-950 border border-zinc-800 rounded-2xl p-5 flex flex-col justify-between relative shrink-0 h-fit md:h-auto ${isPetshopTheme ? 'petcare-payment-summary' : ''}`}>
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-500 to-indigo-500 rounded-t-2xl" />
-            
+
             {customMethods.find(cm => cm.id === method)?.hasVariablePricing ? (
               <div className="flex flex-col h-full">
                 <label className="text-amber-400 text-sm font-bold flex items-center gap-2 mb-3"><Tag size={16}/> Preços na Plataforma</label>
@@ -1344,7 +1357,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
                   <div className="space-y-2 mb-4 max-h-40 overflow-y-auto custom-scrollbar">
                     {payments.length === 0 && <p className="text-zinc-600 text-sm text-center py-4 border border-dashed border-zinc-800 rounded-lg">Nenhum pagamento lançado</p>}
                     {payments.map(p => (
-                      <div key={p.id} className="flex justify-between items-center p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-sm group">
+                      <div key={p.id} className="petcare-payment-entry flex justify-between items-center p-2.5 bg-zinc-900 border border-zinc-800 rounded-lg text-sm group">
                         <span className="font-semibold text-zinc-300 flex items-center gap-2">
                           {p.method === 'dinheiro' ? <Banknote size={14} className="text-emerald-500" /> :
                            p.method === 'consumo_funcionario' ? <User size={14} className="text-amber-400" /> :
@@ -1383,7 +1396,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
         <div className={`p-4 md:p-6 border-t border-zinc-800 bg-zinc-900/50 flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0 ${isPetshopTheme ? 'petcare-payment-footer' : ''}`}>
           <div className="flex-1 w-full flex flex-col gap-2">
             {isMobile && (
-              <button 
+              <button
                 onClick={() => setAdvancedOpen(!advancedOpen)}
                 className="flex items-center justify-between w-full p-3 bg-zinc-950 border border-zinc-800 rounded-xl text-sm font-semibold text-zinc-300"
               >
@@ -1399,28 +1412,28 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
               <div className="flex flex-col gap-2 p-3 md:p-0 bg-zinc-950 md:bg-transparent border md:border-none border-zinc-800 rounded-xl mt-1 md:mt-0 animate-in fade-in slide-in-from-top-2 duration-200">
                 {isNfceEnabled && (
                   <label className={`flex items-center gap-2 font-medium transition ${isOnline ? 'cursor-pointer text-zinc-300 hover:text-white' : 'cursor-not-allowed text-zinc-600'}`}>
-                    <input 
-                      type="checkbox" 
-                      className="w-5 h-5 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500 accent-blue-600 disabled:opacity-50" 
-                      checked={autoNfce} 
+                    <input
+                      type="checkbox"
+                      className="w-5 h-5 rounded border-zinc-700 bg-zinc-950 text-blue-500 focus:ring-blue-500 accent-blue-600 disabled:opacity-50"
+                      checked={autoNfce}
                       onChange={(e) => {
                           setAutoNfce(e.target.checked);
                           localStorage.setItem('7bar_auto_nfce', String(e.target.checked));
-                      }} 
+                      }}
                       disabled={!isOnline}
                     />
                     Emitir NFC-e automaticamente
                   </label>
                 )}
                 <label className="flex items-center gap-2 font-medium cursor-pointer text-zinc-300 hover:text-white transition">
-                  <input 
-                    type="checkbox" 
-                    className="w-5 h-5 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-600" 
-                    checked={autoPrint} 
+                  <input
+                    type="checkbox"
+                    className="w-5 h-5 rounded border-zinc-700 bg-zinc-950 text-emerald-500 focus:ring-emerald-500 accent-emerald-600"
+                    checked={autoPrint}
                     onChange={(e) => {
                         setAutoPrint(e.target.checked);
                         localStorage.setItem('7bar_auto_print', String(e.target.checked));
-                    }} 
+                    }}
                   />
                   <Printer size={15} className="text-emerald-400" />
                   Imprimir Cupom automaticamente
@@ -1429,7 +1442,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
               </div>
             )}
           </div>
-          
+
           <div className="w-full sm:w-auto">
             {isOnline ? (
               <button type="button" onClick={() => handleConfirm(isNfceEnabled && autoNfce ? 'nfce' : 'simple')} disabled={loading || !(customMethods.find(cm => cm.id === method)?.hasVariablePricing ? payments.length === 0 : remaining <= 0)}

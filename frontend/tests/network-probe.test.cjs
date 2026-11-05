@@ -77,7 +77,7 @@ test('old /api clients are internally rewritten without a redirect or TLS change
   const exact = nginx.match(/location = \/api\s*\{([^}]+)\}/)?.[1];
   assert.ok(exact); assert.match(exact, /rewrite \^ \/api\/ last;/);
   assert.doesNotMatch(exact, /return 30|redirect|permanent|https?:\/\//);
-  assert.match(nginx, /proxy_pass http:\/\/backend:3520;/);
+  assert.match(nginx, /proxy_pass http:\/\/backend:3530;/);
 });
 
 test('real Nginx: /api and /api/ preserve queries/methods, return JSON with no HTTP redirect', { skip: !process.env.PDV_TEST_NGINX_IMAGE, timeout: 30000 }, () => {
@@ -93,7 +93,7 @@ test('real Nginx: /api and /api/ preserve queries/methods, return JSON with no H
     docker(['exec', id, 'nginx', '-t']);
     for (const route of ['/api', '/api/', '/api?probe=1', '/api/?probe=1', '/api/products?limit=1']) {
       const request = `GET ${route} HTTP/1.1\r\nHost: pdv.example.test\r\nX-Forwarded-Proto: https\r\nConnection: close\r\n\r\n`;
-      const result = execFileSync('docker', ['exec', '-i', id, 'nc', '-w', '3', '127.0.0.1', '3521'], { input: request, encoding: 'utf8', timeout: 5000 });
+      const result = execFileSync('docker', ['exec', '-i', id, 'nc', '-w', '3', '127.0.0.1', '3531'], { input: request, encoding: 'utf8', timeout: 5000 });
       assert.match(result, /HTTP\/1.1 200 OK/); assert.doesNotMatch(result, /\r\nLocation:/i);
       const body = JSON.parse(result.split('\r\n\r\n')[1]);
       assert.equal(body.status, 'ok'); assert.equal(body.method, 'GET');

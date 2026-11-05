@@ -49,6 +49,7 @@ import PetshopTutorsPage from './pages/petshop/PetshopTutorsPage';
 import PetshopServicesPage from './pages/petshop/PetshopServicesPage';
 import PetshopProductsPage from './pages/petshop/PetshopProductsPage';
 import PetshopTeamPage from './pages/petshop/PetshopTeamPage';
+import PetshopCommissionsPage from './pages/petshop/PetshopCommissionsPage';
 import PetClientPortalPage from './pages/petshop/PetClientPortalPage';
 import PetshopMassEditPage from './pages/petshop/PetshopMassEditPage';
 import PetshopStockEntryPage from './pages/petshop/PetshopStockEntryPage';
@@ -56,6 +57,8 @@ import PetshopExpiryPage from './pages/petshop/PetshopExpiryPage';
 import PetshopSuppliersPage from './pages/petshop/PetshopSuppliersPage';
 import PetshopPurchaseOrdersPage from './pages/petshop/PetshopPurchaseOrdersPage';
 import PetshopMetricsPage from './pages/petshop/PetshopMetricsPage';
+import PetshopPackagesPage from './pages/petshop/PetshopPackagesPage';
+import PetshopWhatsappPage from './pages/petshop/PetshopWhatsappPage';
 import ExpiryAlertsPage from './app/dashboard/inventory/expiry-alerts/page';
 
 // Stores
@@ -71,15 +74,11 @@ import { OverduePaymentBanner } from './components/OverduePaymentBanner';
 import { NetworkStatusBanner } from './components/NetworkStatusBanner';
 
 // ── PWA Service Worker ──────────────────────────────────────────────────────
-// O vite-plugin-pwa injeta automaticamente o registro do SW.
-// O arquivo 'virtual:pwa-register' é gerado pelo plugin em tempo de build.
-// Em desenvolvimento (npm run dev), o SW roda em modo simulado se devOptions.enabled=true
 import { registerSW } from 'virtual:pwa-register';
 
 const updateSW = registerSW({
-  // Quando uma nova versão do SW estiver disponível, recarrega silenciosamente
   onNeedRefresh() {
-    updateSW(true); // força atualização imediata sem prompt
+    updateSW(true);
   },
   onOfflineReady() {
     console.log('[7bar PWA] App pronto para uso offline!');
@@ -88,8 +87,15 @@ const updateSW = registerSW({
 
 import { recordTelemetry } from './lib/telemetry';
 
-// Emite telemetria com a versão/script do Service Worker ativo
 if ('serviceWorker' in navigator) {
+  let refreshing = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!refreshing) {
+      refreshing = true;
+      window.location.reload();
+    }
+  });
+
   navigator.serviceWorker.ready.then((reg) => {
     const swFileName = reg.active?.scriptURL ? reg.active.scriptURL.split('/').pop() : 'sw.js';
     const swVersionId = `pwa-v1.3.0#${swFileName}`;
@@ -100,10 +106,9 @@ if ('serviceWorker' in navigator) {
   }).catch(() => {});
 }
 
-// Verifica por atualizações sempre que o usuário retorna ao app (troca de aba, desbloqueia celular, etc.)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    updateSW(); // checa se há nova versão do SW disponível
+    updateSW();
   }
 });
 
@@ -116,7 +121,8 @@ function PrivateRoute({ children }: { children: React.ReactNode }) {
   if (!token) return <Navigate to={IS_DEMO ? '/demo' : '/login'} replace />;
   if (user?.station) return <Navigate to={user.station === 'WAITER' ? '/garcom' : '/kds'} replace />;
   if (waiterSession) return <Navigate to="/garcom" replace />;
-  if (user?.role === 'stockist') return <Navigate to="/dashboard/inventory" replace />;  return <><NetworkStatusBanner /><OverduePaymentBanner />{children}</>;
+  if (user?.role === 'stockist') return <Navigate to="/dashboard/inventory" replace />;
+  return <><NetworkStatusBanner /><OverduePaymentBanner />{children}</>;
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
@@ -145,6 +151,7 @@ function App() {
         <Route path="/vitrine/:tvPublicId" element={<VitrineTvPage />} />
         <Route path="/v/:tvPublicId" element={<VitrineTvPage />} />
         <Route path="/cliente-pet/:shopId" element={<PetClientPortalPage />} />
+
         {/* PDV — rota raiz protegida */}
         <Route
           path="/"
@@ -180,11 +187,15 @@ function App() {
         >
           <Route index element={<PetshopDashboardPage />} />
           <Route path="agenda" element={<PetshopAgendaPage />} />
+          <Route path="pacotes" element={<PetshopPackagesPage />} />
           <Route path="pets" element={<PetshopPetsPage />} />
           <Route path="tutores" element={<PetshopTutorsPage />} />
           <Route path="servicos" element={<PetshopServicesPage />} />
           <Route path="produtos" element={<PetshopProductsPage />} />
+          <Route path="whatsapp" element={<PetshopWhatsappPage />} />
           <Route path="equipe" element={<PetshopTeamPage />} />
+          <Route path="equipe/comissoes" element={<PetshopCommissionsPage />} />
+          <Route path="comissoes" element={<PetshopCommissionsPage />} />
           <Route path="fornecedores" element={<PetshopSuppliersPage />} />
           <Route path="pedidos-compra" element={<PetshopPurchaseOrdersPage />} />
           <Route path="edicao-massa" element={<PetshopMassEditPage />} />

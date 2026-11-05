@@ -173,23 +173,26 @@ model Product {
 //  Customer — consumidor (destinatário da NFC-e)
 // ------------------------------------------------------------
 model Customer {
-  id        String  @id @default(uuid())
-  name      String
-  phone     String  @unique
-  cpfCnpj   String? // CPF ou CNPJ (identificação na NFC-e)
-  address   String?
-  reference String?
-  email     String?
-  notes     String? @db.Text
-  photoUrl  String? @db.Text
+  id            String  @id @default(uuid())
+  name          String
+  phone         String  @unique
+  cpfCnpj       String? // CPF ou CNPJ (identificação na NFC-e)
+  address       String?
+  reference     String?
+  email         String?
+  notes         String? @db.Text
+  photoUrl      String? @db.Text
+  whatsappOptIn Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  sales           Sale[]
-  pets            Pet[]
-  petAppointments PetAppointment[]
-  petPortalTokens PetPortalAccessToken[]
+  sales                 Sale[]
+  pets                  Pet[]
+  petAppointments       PetAppointment[]
+  petPortalTokens       PetPortalAccessToken[]
+  petPackages           CustomerPetPackage[]
+  petNotificationJobs   PetshopNotificationJob[]
 
   @@map("customers")
 }
@@ -213,6 +216,7 @@ model Operator {
   comandasResponsible Comanda[]             @relation("ComandaResponsibleWaiter") // Módulo Restaurante V1
   comandaItemsCreated ComandaItem[]         @relation("ComandaItemCreatedBy") // Auditoria de Itens V2
   petAppointments     PetAppointment[]      @relation("PetAppointmentProfessional")
+  petCommissions       PetCommission[]
 
   @@map("operators")
 }
@@ -230,6 +234,7 @@ model Pet {
   sex        String?
   birthDate  DateTime?
   size       String?
+  coatType   String?   // short, medium, long, double
   weight     Decimal?  @db.Decimal(8, 3)
   color      String?
   neutered   Boolean   @default(false)
@@ -242,8 +247,11 @@ model Pet {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
-  vaccinations PetVaccination[]
-  appointments PetAppointment[]
+  vaccinations        PetVaccination[]
+  appointments        PetAppointment[]
+  petPackages         CustomerPetPackage[]
+  packageLedgerEvents CustomerPetPackageLedger[]
+  notificationJobs    PetshopNotificationJob[]
 
   @@index([customerId, name])
   @@index([active])
@@ -273,20 +281,66 @@ model PetVaccination {
 }
 
 model PetService {
-  id              String   @id @default(uuid())
-  name            String
-  description     String?  @db.Text
-  durationMinutes Int      @default(60)
-  price           Decimal  @db.Decimal(10, 2)
-  color           String   @default("#0d9488")
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                 String   @id @default(uuid())
+  name               String
+  description        String?  @db.Text
+  serviceType        String   @default("INDIVIDUAL") // INDIVIDUAL, COMBO
+  category           String   @default("Higiene e Estética")
+  targetSpecies      String   @default("all") // dog, cat, all
+  durationMinutes    Int      @default(60)
+  price              Decimal  @db.Decimal(10, 2)
+  color              String   @default("#0d9488")
+  active             Boolean  @default(true)
+  comboPricingType   String?  // FIXED_PRICE, PERCENT_DISCOUNT, FIXED_DISCOUNT
+  comboDiscountValue Decimal? @db.Decimal(10, 2)
+  customStages       Json?    // ["checked_in", "bathing", "grooming", "finishing", "ready"]
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 
-  appointmentItems PetAppointmentService[]
+  pricingRules         PetServicePricingRule[]
+  comboItems           PetServiceComboItem[]    @relation("ComboParent")
+  includedInCombos     PetServiceComboItem[]    @relation("ComboComponent")
+  appointmentItems     PetAppointmentService[]
+  packagePlanItems     PetPackagePlanItem[]
+  customerPackageItems CustomerPetPackageItem[]
+  commissionRules      PetCommissionRule[]
 
   @@index([active, name])
+  @@index([serviceType, active])
   @@map("pet_services")
+}
+
+model PetServicePricingRule {
+  id              String     @id @default(uuid())
+  serviceId       String
+  service         PetService @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  species         String     @default("all") // dog, cat, all
+  size            String     @default("all") // mini, small, medium, large, giant, all
+  coatType        String     @default("all") // short, medium, long, double, all
+  price           Decimal    @db.Decimal(10, 2)
+  durationMinutes Int?       // Sobrescrita opcional de duração para esta variação
+  label           String?
+  createdAt       DateTime   @default(now())
+
+  @@unique([serviceId, species, size, coatType])
+  @@index([serviceId])
+  @@map("pet_service_pricing_rules")
+}
+
+model PetServiceComboItem {
+  id                 String     @id @default(uuid())
+  comboServiceId     String
+  comboService       PetService @relation("ComboParent", fields: [comboServiceId], references: [id], onDelete: Cascade)
+  componentServiceId String
+  componentService   PetService @relation("ComboComponent", fields: [componentServiceId], references: [id], onDelete: Restrict)
+  quantity           Int        @default(1)
+  order              Int        @default(0)
+  createdAt          DateTime   @default(now())
+
+  @@unique([comboServiceId, componentServiceId])
+  @@index([comboServiceId])
+  @@index([componentServiceId])
+  @@map("pet_service_combo_items")
 }
 
 model PetAppointment {
@@ -309,10 +363,14 @@ model PetAppointment {
   stagePhotoUrl  String?   @db.Text
   stageNotes     String?   @db.Text
   stageHistory   Json?
+  customStages   Json?     // Snapshot das etapas ativas resolvidas para este atendimento específico
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
-  services PetAppointmentService[]
+  services            PetAppointmentService[]
+  packageLedgerEvents CustomerPetPackageLedger[]
+  notificationJobs    PetshopNotificationJob[]
+  commissions         PetCommission[]
 
   @@index([startsAt, status])
   @@index([professionalId, startsAt, endsAt])
@@ -321,18 +379,131 @@ model PetAppointment {
 }
 
 model PetAppointmentService {
-  id              String         @id @default(uuid())
-  appointmentId   String
-  appointment     PetAppointment @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
-  serviceId       String
-  service         PetService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
-  nameSnapshot    String
-  priceSnapshot   Decimal        @db.Decimal(10, 2)
-  durationMinutes Int
+  id                    String                  @id @default(uuid())
+  appointmentId         String
+  appointment           PetAppointment          @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  serviceId             String
+  service               PetService              @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  nameSnapshot          String
+  priceSnapshot         Decimal                 @db.Decimal(10, 2)
+  commissionWeightSnapshot Decimal?             @db.Decimal(10, 2)
+  durationMinutes       Int
+  customerPackageId     String?
+  customerPackage       CustomerPetPackage?     @relation(fields: [customerPackageId], references: [id], onDelete: SetNull)
+  customerPackageItemId String?
+  customerPackageItem   CustomerPetPackageItem? @relation(fields: [customerPackageItemId], references: [id], onDelete: SetNull)
+  coverageStatus        String                  @default("none") // none, reserved, consumed, released, refunded
+  coveredAmount         Decimal                 @default(0) @db.Decimal(10, 2)
 
-  @@unique([appointmentId, serviceId])
+  isCombo               Boolean                 @default(false)
+  comboParentId         String?
+  comboParent           PetAppointmentService?  @relation("ComboComponents", fields: [comboParentId], references: [id], onDelete: Cascade)
+  comboComponents       PetAppointmentService[] @relation("ComboComponents")
+  commissions           PetCommission[]
+
+  @@index([appointmentId, serviceId])
   @@index([serviceId])
+  @@index([customerPackageId])
+  @@index([customerPackageItemId])
+  @@index([comboParentId])
   @@map("pet_appointment_services")
+}
+
+// Regra versionada: uma alteração cria uma nova linha e preserva o cálculo histórico.
+model PetCommissionRule {
+  id             String   @id @default(uuid())
+  scopeKey       String   @db.VarChar(191)
+  stageKey       String
+  serviceId      String?
+  service        PetService? @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  operatorId     String?
+  kind           String   // NONE, PERCENT, FIXED
+  value          Decimal  @db.Decimal(12, 4)
+  version        Int
+  active         Boolean  @default(true)
+  createdById    String?
+  createdAt      DateTime @default(now())
+  commissions    PetCommission[]
+
+  @@unique([scopeKey, version])
+  @@index([stageKey, serviceId, operatorId, active])
+  @@map("pet_commission_rules")
+}
+
+model PetCommission {
+  id                   String   @id @default(uuid())
+  tenantId             String
+  appointmentId        String
+  appointment          PetAppointment @relation(fields: [appointmentId], references: [id], onDelete: Restrict)
+  appointmentServiceId String
+  appointmentService   PetAppointmentService @relation(fields: [appointmentServiceId], references: [id], onDelete: Restrict)
+  operatorId           String
+  operator             Operator @relation(fields: [operatorId], references: [id], onDelete: Restrict)
+  stageKey             String
+  executedAt           DateTime
+  baseAmount           Decimal @db.Decimal(12, 2)
+  ruleId               String
+  rule                 PetCommissionRule @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  ruleVersion          Int
+  ruleKind             String
+  ruleValue            Decimal @db.Decimal(12, 4)
+  amount               Decimal @db.Decimal(12, 2)
+  state                String @default("PENDING") // PENDING, APPROVED, PAID, REVERSED
+  closingId            String?
+  closing              PetCommissionClosing? @relation(fields: [closingId], references: [id], onDelete: Restrict)
+  approvedAt           DateTime?
+  approvedById         String?
+  paidAt               DateTime?
+  paidById             String?
+  reversedAt           DateTime?
+  reversedById         String?
+  reversalReason       String? @db.Text
+  createdAt            DateTime @default(now())
+  adjustments          PetCommissionAdjustment[]
+
+  @@unique([appointmentServiceId, stageKey])
+  @@index([operatorId, executedAt])
+  @@index([tenantId, executedAt])
+  @@index([state, executedAt])
+  @@map("pet_commissions")
+}
+
+model PetCommissionClosing {
+  id             String   @id @default(uuid())
+  period         String   @unique // YYYY-MM
+  state          String   @default("DRAFT") // DRAFT, APPROVED, PAID
+  approvedAt     DateTime?
+  approvedById   String?
+  paidAt         DateTime?
+  paidById       String?
+  paymentRef     String?
+  approvedAmount Decimal? @db.Decimal(12, 2)
+  paidAmount     Decimal? @db.Decimal(12, 2)
+  createdAt      DateTime @default(now())
+  commissions    PetCommission[]
+  adjustments    PetCommissionAdjustment[]
+
+  @@map("pet_commission_closings")
+}
+
+model PetCommissionAdjustment {
+  id            String @id @default(uuid())
+  commissionId  String
+  commission    PetCommission @relation(fields: [commissionId], references: [id], onDelete: Restrict)
+  amount        Decimal @db.Decimal(12, 2)
+  state         String @default("PENDING") // PENDING, APPROVED, PAID
+  closingId     String?
+  closing       PetCommissionClosing? @relation(fields: [closingId], references: [id], onDelete: Restrict)
+  approvedAt    DateTime?
+  approvedById  String?
+  paidAt        DateTime?
+  paidById      String?
+  reason        String @db.Text
+  actorId       String
+  createdAt     DateTime @default(now())
+
+  @@index([commissionId, createdAt])
+  @@map("pet_commission_adjustments")
 }
 
 model PetPortalAccessToken {
@@ -348,6 +519,220 @@ model PetPortalAccessToken {
   @@index([customerId, revokedAt])
   @@index([expiresAt])
   @@map("pet_portal_access_tokens")
+}
+
+// ------------------------------------------------------------
+//  Pacotes Recorrentes de Banho & Tosa
+// ------------------------------------------------------------
+model PetPackagePlan {
+  id              String   @id @default(uuid())
+  name            String
+  description     String?  @db.Text
+  basePrice       Decimal  @db.Decimal(10, 2)
+  validityDays    Int      @default(30)
+  allowSharedPets Boolean  @default(false)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  items        PetPackagePlanItem[]
+  pricingRules PetPackagePricingRule[]
+  contracts    CustomerPetPackage[]
+
+  @@index([active, name])
+  @@map("pet_package_plans")
+}
+
+model PetPackagePlanItem {
+  id            String         @id @default(uuid())
+  packagePlanId String
+  packagePlan   PetPackagePlan @relation(fields: [packagePlanId], references: [id], onDelete: Cascade)
+  serviceId     String
+  service       PetService     @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  quantity      Int            @default(1)
+
+  @@unique([packagePlanId, serviceId])
+  @@index([serviceId])
+  @@map("pet_package_plan_items")
+}
+
+model PetPackagePricingRule {
+  id            String         @id @default(uuid())
+  packagePlanId String
+  packagePlan   PetPackagePlan @relation(fields: [packagePlanId], references: [id], onDelete: Cascade)
+  species       String         @default("all") // dog, cat, all
+  size          String         @default("all") // small, medium, large, giant, all
+  coatType      String         @default("all") // short, medium, long, double, all
+  price         Decimal        @db.Decimal(10, 2)
+  label         String?
+  createdAt     DateTime       @default(now())
+
+  @@unique([packagePlanId, species, size, coatType])
+  @@index([packagePlanId])
+  @@map("pet_package_pricing_rules")
+}
+
+model CustomerPetPackage {
+  id                    String          @id @default(uuid())
+  customerId            String
+  customer              Customer        @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  packagePlanId         String?
+  packagePlan           PetPackagePlan? @relation(fields: [packagePlanId], references: [id], onDelete: SetNull)
+  petId                 String?
+  pet                   Pet?            @relation(fields: [petId], references: [id], onDelete: SetNull)
+  isShared              Boolean         @default(false)
+  planNameSnapshot      String
+  speciesSnapshot       String?
+  sizeSnapshot          String?
+  coatTypeSnapshot      String?
+  basePriceSnapshot     Decimal         @db.Decimal(10, 2)
+  discountAmount        Decimal         @default(0) @db.Decimal(10, 2)
+  finalPrice            Decimal         @db.Decimal(10, 2)
+  validityDays          Int             @default(30)
+  startDate             DateTime        @default(now())
+  expiresAt             DateTime
+  status                String          @default("active") // active, completed, expired, cancelled
+  paymentStatus         String          @default("paid")   // paid, pending, cancelled
+  paymentMethod         String?         // pix, credito, debito, dinheiro, comanda
+  saleId                String?
+  comandaId             String?
+  createdByOperatorId   String?
+  createdByOperatorName String?
+  notes                 String?         @db.Text
+  cancelledAt           DateTime?
+  cancelReason          String?         @db.Text
+  cancelledByName       String?
+  createdAt             DateTime        @default(now())
+  updatedAt             DateTime        @updatedAt
+
+  items               CustomerPetPackageItem[]
+  ledgerEvents        CustomerPetPackageLedger[]
+  appointmentServices PetAppointmentService[]
+  notificationJobs    PetshopNotificationJob[]
+
+  @@index([customerId, status])
+  @@index([petId, status])
+  @@index([expiresAt, status])
+  @@map("customer_pet_packages")
+}
+
+model CustomerPetPackageItem {
+  id                  String             @id @default(uuid())
+  customerPackageId   String
+  customerPackage     CustomerPetPackage @relation(fields: [customerPackageId], references: [id], onDelete: Cascade)
+  serviceId           String
+  service             PetService         @relation(fields: [serviceId], references: [id], onDelete: Restrict)
+  serviceNameSnapshot String
+  unitValueSnapshot   Decimal            @default(0) @db.Decimal(10, 2)
+  totalQuantity       Int
+  reservedQuantity    Int                @default(0)
+  usedQuantity        Int                @default(0)
+  availableQuantity   Int
+
+  ledgerEvents        CustomerPetPackageLedger[]
+  appointmentServices PetAppointmentService[]
+
+  @@unique([customerPackageId, serviceId])
+  @@index([customerPackageId])
+  @@map("customer_pet_package_items")
+}
+
+model CustomerPetPackageLedger {
+  id                    String                 @id @default(uuid())
+  idempotencyKey        String                 @unique @db.VarChar(191)
+  customerPackageId     String
+  customerPackage       CustomerPetPackage     @relation(fields: [customerPackageId], references: [id], onDelete: Cascade)
+  customerPackageItemId String
+  customerPackageItem   CustomerPetPackageItem @relation(fields: [customerPackageItemId], references: [id], onDelete: Cascade)
+  appointmentId         String?
+  appointment           PetAppointment?        @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  petId                 String?
+  pet                   Pet?                   @relation(fields: [petId], references: [id], onDelete: SetNull)
+  eventType             String                 // CONTRACT_CREATED, RESERVE, CONSUME, RELEASE_RESERVATION, REFUND, CANCEL
+  quantityDelta         Int                    // +1 ou -1
+  balanceAfter          Int
+  usedAfter             Int
+  reservedAfter         Int
+  operatorId            String?
+  operatorName          String?
+  reason                String?                @db.Text
+  createdAt             DateTime               @default(now())
+
+  @@index([customerPackageId, createdAt])
+  @@index([customerPackageItemId, createdAt])
+  @@index([appointmentId])
+  @@map("customer_pet_package_ledger")
+}
+
+// ------------------------------------------------------------
+//  Central WhatsApp & Régua de Disparos Programáveis
+// ------------------------------------------------------------
+model PetshopWhatsappSession {
+  id                   String    @id @default("singleton")
+  status               String    @default("DISCONNECTED") // DISCONNECTED, CONNECTING, QR_READY, CONNECTED
+  connectedPhone       String?
+  connectedName        String?
+  lastConnectedAt      DateTime?
+  lastDisconnectedAt   DateTime?
+  lastDisconnectReason String?   @db.Text
+  updatedAt            DateTime  @updatedAt
+
+  @@map("petshop_whatsapp_sessions")
+}
+
+model PetshopNotificationRule {
+  id                   String   @id @default(uuid())
+  name                 String
+  triggerType          String   // APPOINTMENT_CONFIRMED, BEFORE_APPOINTMENT, PET_READY, PACKAGE_EXPIRING, PACKAGE_LAST_SESSION
+  triggerMinutesBefore Int?
+  messageTemplate      String   @db.Text
+  includePhoto         Boolean  @default(false)
+  active               Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  jobs                 PetshopNotificationJob[]
+
+  @@index([triggerType, active])
+  @@map("petshop_notification_rules")
+}
+
+model PetshopNotificationJob {
+  id                String                   @id @default(uuid())
+  idempotencyKey    String                   @unique @db.VarChar(191)
+  ruleId            String?
+  rule              PetshopNotificationRule? @relation(fields: [ruleId], references: [id], onDelete: SetNull)
+  triggerType       String
+  customerId        String
+  customer          Customer                 @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  petId             String?
+  pet               Pet?                     @relation(fields: [petId], references: [id], onDelete: SetNull)
+  appointmentId     String?
+  appointment       PetAppointment?          @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  customerPackageId String?
+  customerPackage   CustomerPetPackage?      @relation(fields: [customerPackageId], references: [id], onDelete: SetNull)
+  recipientPhone    String
+  recipientName     String
+  petName           String?
+  messageContent    String                   @db.Text
+  mediaUrl          String?                  @db.Text
+  status            String                   @default("PENDING") // PENDING, PROCESSING, SENT, FAILED, CANCELLED_STALE
+  attempts          Int                      @default(0)
+  maxAttempts       Int                      @default(3)
+  scheduledFor      DateTime                 @default(now())
+  expiresAt         DateTime?
+  nextAttemptAt     DateTime                 @default(now())
+  sentAt            DateTime?
+  providerMessageId String?
+  lastError         String?                  @db.Text
+  attemptHistory    Json?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([customerId, createdAt])
+  @@index([appointmentId])
+  @@map("petshop_notification_jobs")
 }
 
 // ------------------------------------------------------------

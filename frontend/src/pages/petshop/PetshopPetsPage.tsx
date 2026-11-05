@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
   CalendarDays,
+  Cat,
+  Dog,
   Camera,
   CheckCircle2,
   ChevronRight,
@@ -11,11 +13,13 @@ import {
   FileText,
   Info,
   MoreVertical,
+  PackageCheck,
   PawPrint,
   Pencil,
   Phone,
   Plus,
   RotateCcw,
+  Scale,
   Search,
   ShieldAlert,
   ShieldCheck,
@@ -27,9 +31,10 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { usePetshopContext } from '@/layouts/PetshopLayout';
 import { getFullUrl } from '@/lib/getFullUrl';
 import type { Appointment, Pet, Tutor, Vaccination } from './types';
-import { money } from './types';
+import { coatLabels, money } from './types';
 import {
   EmptyState,
   inputClass,
@@ -51,6 +56,7 @@ const emptyPet = {
   breed: '',
   sex: '',
   size: '',
+  coatType: '',
   weight: '',
   birthDate: '',
   color: '',
@@ -79,16 +85,55 @@ const quickVaccines = ['V8', 'V10', 'Antirrábica', 'Gripe Canina', 'Giárdia', 
 const speciesLabel = (species: string) =>
   species === 'cat' ? 'Gato' : species === 'dog' ? 'Cachorro' : 'Outro';
 
+const shortSizeLabel = (size?: string | null) => {
+  if (!size) return 'Porte não informado';
+  const map: Record<string, string> = {
+    mini: 'Porte Mini',
+    small: 'Porte Pequeno',
+    medium: 'Porte Médio',
+    large: 'Porte Grande',
+    giant: 'Porte Gigante',
+    p: 'Porte Pequeno',
+    m: 'Porte Médio',
+    g: 'Porte Grande',
+    gg: 'Porte Gigante',
+  };
+  return map[size.toLowerCase()] || map[size] || `Porte ${size}`;
+};
+
+const sizeBadgeStyle = (size?: string | null) => {
+  switch ((size || '').toLowerCase()) {
+    case 'mini':
+      return 'bg-purple-50 text-purple-700 border-purple-200/90';
+    case 'small':
+    case 'p':
+      return 'bg-sky-50 text-sky-700 border-sky-200/90';
+    case 'medium':
+    case 'm':
+      return 'bg-teal-50 text-teal-700 border-teal-200/90';
+    case 'large':
+    case 'g':
+      return 'bg-amber-50 text-amber-700 border-amber-200/90';
+    case 'giant':
+    case 'gg':
+      return 'bg-rose-50 text-rose-700 border-rose-200/90';
+    default:
+      return 'bg-zinc-100 text-zinc-700 border-zinc-200/90';
+  }
+};
+
 const sizeLabel = (size?: string | null) => {
   if (!size) return 'Porte não informado';
   const map: Record<string, string> = {
-    small: 'Pequeno (small)',
-    medium: 'Médio (medium)',
-    large: 'Grande (large)',
-    giant: 'Gigante (giant)',
+    mini: 'Mini (< 5kg)',
+    small: 'Pequeno (5-10kg)',
+    medium: 'Médio (10-20kg)',
+    large: 'Grande (20-35kg)',
+    giant: 'Gigante (> 35kg)',
     M: 'Médio',
     P: 'Pequeno',
     G: 'Grande',
+    GG: 'Gigante',
   };
   return map[size] || size;
 };
@@ -113,12 +158,14 @@ const formatTime = (val: string) => {
 
 function PetRowActionsMenu({
   pet,
+  hasVaccines = true,
   onOpenDetails,
   onOpenVaccines,
   onOpenEdit,
   onOpenNewAppointment,
 }: {
   pet: Pet;
+  hasVaccines?: boolean;
   onOpenDetails: () => void;
   onOpenVaccines: () => void;
   onOpenEdit: () => void;
@@ -202,17 +249,19 @@ function PetRowActionsMenu({
               <CalendarDays size={14} className="text-teal-700" />
               Ver Ficha e Histórico
             </button>
-            <button
-              type="button"
-              onClick={() => {
-                setIsOpen(false);
-                onOpenVaccines();
-              }}
-              className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-zinc-100 text-zinc-800 transition cursor-pointer"
-            >
-              <Syringe size={14} className="text-teal-700" />
-              Carteirinha de Vacinação
-            </button>
+            {hasVaccines && (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsOpen(false);
+                  onOpenVaccines();
+                }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 hover:bg-zinc-100 text-zinc-800 transition cursor-pointer"
+              >
+                <Syringe size={14} className="text-teal-700" />
+                Carteirinha de Vacinação
+              </button>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -245,6 +294,7 @@ function PetRowActionsMenu({
 
 export default function PetshopPetsPage() {
   const navigate = useNavigate();
+  const { hasVaccines } = usePetshopContext();
   const [items, setItems] = useState<Pet[]>([]);
   const [tutors, setTutors] = useState<Tutor[]>([]);
   const [loading, setLoading] = useState(true);
@@ -254,6 +304,7 @@ export default function PetshopPetsPage() {
   const [search, setSearch] = useState('');
   const [speciesFilter, setSpeciesFilter] = useState('all');
   const [sizeFilter, setSizeFilter] = useState('all');
+  const [sexFilter, setSexFilter] = useState('all');
   const [vaccineStatusFilter, setVaccineStatusFilter] = useState('all');
 
   // Modais de Criação e Edição de Pet
@@ -332,6 +383,7 @@ export default function PetshopPetsPage() {
       breed: pet.breed || '',
       sex: pet.sex || '',
       size: pet.size || '',
+      coatType: pet.coatType || '',
       weight: pet.weight ? String(pet.weight) : '',
       birthDate: pet.birthDate ? pet.birthDate.slice(0, 10) : '',
       color: pet.color || '',
@@ -452,8 +504,15 @@ export default function PetshopPetsPage() {
     let overdueCount = 0;
     let dueSoonCount = 0;
     let withoutVaccinesCount = 0;
+    let dogsCount = 0;
+    let catsCount = 0;
+    let specialCareCount = 0;
 
     for (const pet of items) {
+      if (pet.species === 'dog') dogsCount++;
+      if (pet.species === 'cat') catsCount++;
+      if (pet.allergies || pet.behavior || pet.notes) specialCareCount++;
+
       const vacs = pet.vaccinations || [];
       if (vacs.length === 0) {
         withoutVaccinesCount++;
@@ -479,14 +538,26 @@ export default function PetshopPetsPage() {
     }
 
     return {
-      total: totalPets || 28,
-      overdue: overdueCount || 4,
-      overduePct: totalPets ? Math.round((overdueCount / totalPets) * 100) : 14,
-      dueSoon: dueSoonCount || 3,
-      without: withoutVaccinesCount || 2,
-      withoutPct: totalPets ? Math.round((withoutVaccinesCount / totalPets) * 100) : 7,
+      total: totalPets,
+      dogs: dogsCount,
+      dogsPct: totalPets ? Math.round((dogsCount / totalPets) * 100) : 0,
+      cats: catsCount,
+      catsPct: totalPets ? Math.round((catsCount / totalPets) * 100) : 0,
+      specialCare: specialCareCount,
+      specialCarePct: totalPets ? Math.round((specialCareCount / totalPets) * 100) : 0,
+      overdue: overdueCount,
+      overduePct: totalPets ? Math.round((overdueCount / totalPets) * 100) : 0,
+      dueSoon: dueSoonCount,
+      without: withoutVaccinesCount,
+      withoutPct: totalPets ? Math.round((withoutVaccinesCount / totalPets) * 100) : 0,
     };
   }, [items]);
+
+  useEffect(() => {
+    if (!hasVaccines && activeTab === 'vaccines') {
+      setActiveTab('info');
+    }
+  }, [hasVaccines, activeTab]);
 
   // Lista Filtrada
   const filteredPets = useMemo(() => {
@@ -499,6 +570,11 @@ export default function PetshopPetsPage() {
       // Porte
       if (sizeFilter !== 'all') {
         if ((pet.size || '').toLowerCase() !== sizeFilter.toLowerCase()) return false;
+      }
+
+      // Sexo (Macho / Fêmea - Brinde e Adereços)
+      if (sexFilter !== 'all') {
+        if (pet.sex !== sexFilter) return false;
       }
 
       // Status da vacina
@@ -522,7 +598,7 @@ export default function PetshopPetsPage() {
 
       return true;
     });
-  }, [items, speciesFilter, sizeFilter, vaccineStatusFilter]);
+  }, [items, speciesFilter, sizeFilter, sexFilter, vaccineStatusFilter]);
 
   return (
     <div className={pageClass}>
@@ -530,7 +606,7 @@ export default function PetshopPetsPage() {
       <PageHeader
         eyebrow="Cadastro e saúde"
         title="Pets"
-        description="Fichas, alertas importantes e carteira de vacinação."
+        description={hasVaccines ? "Fichas, alertas importantes e carteira de vacinação." : "Fichas cadastrais, histórico de atendimentos e perfil dos pets."}
         action={
           <button
             type="button"
@@ -569,7 +645,9 @@ export default function PetshopPetsPage() {
           </div>
         </div>
 
-        {/* KPI 2: Vacinas atrasadas */}
+        {hasVaccines ? (
+          <>
+            {/* KPI 2: Vacinas atrasadas */}
         <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
           <div className="flex items-center gap-3.5">
             <div className="grid h-11 w-11 place-items-center rounded-xl bg-rose-50 text-rose-700">
@@ -616,6 +694,58 @@ export default function PetshopPetsPage() {
             </div>
           </div>
         </div>
+          </>
+        ) : (
+          <>
+            {/* KPI 2: Cães Cadastrados */}
+            <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
+              <div className="flex items-center gap-3.5">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-sky-50 text-sky-700">
+                  <Dog size={22} />
+                </div>
+                <div>
+                  <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
+                    {kpis.dogs}
+                  </span>
+                  <p className="text-xs font-semibold text-zinc-700">Cães cadastrados</p>
+                  <p className="text-[11px] text-zinc-400">{kpis.dogsPct}% da base de pets</p>
+                </div>
+              </div>
+            </div>
+
+            {/* KPI 3: Gatos Cadastrados */}
+            <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
+              <div className="flex items-center gap-3.5">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-violet-50 text-violet-700">
+                  <Cat size={22} />
+                </div>
+                <div>
+                  <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
+                    {kpis.cats}
+                  </span>
+                  <p className="text-xs font-semibold text-zinc-700">Gatos cadastrados</p>
+                  <p className="text-[11px] text-zinc-400">{kpis.catsPct}% da base de pets</p>
+                </div>
+              </div>
+            </div>
+
+            {/* KPI 4: Cuidados Especiais / Alergias */}
+            <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
+              <div className="flex items-center gap-3.5">
+                <div className="grid h-11 w-11 place-items-center rounded-xl bg-amber-50 text-amber-700">
+                  <AlertTriangle size={22} />
+                </div>
+                <div>
+                  <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
+                    {kpis.specialCare}
+                  </span>
+                  <p className="text-xs font-semibold text-zinc-700">Alergias & Cuidados</p>
+                  <p className="text-[11px] text-zinc-400">{kpis.specialCarePct}% requerem atenção</p>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </section>
 
       {/* 3. Barra de Busca e Filtros */}
@@ -652,7 +782,7 @@ export default function PetshopPetsPage() {
             onChange={e => setSpeciesFilter(e.target.value)}
             className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
           >
-            <option value="all">🐾 Espécie</option>
+            <option value="all">Espécie</option>
             <option value="dog">Cachorro</option>
             <option value="cat">Gato</option>
             <option value="other">Outro</option>
@@ -664,35 +794,50 @@ export default function PetshopPetsPage() {
             onChange={e => setSizeFilter(e.target.value)}
             className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
           >
-            <option value="all">🐕 Porte</option>
+            <option value="all">Porte</option>
             <option value="small">Pequeno (small)</option>
             <option value="medium">Médio (medium)</option>
             <option value="large">Grande (large)</option>
             <option value="giant">Gigante (giant)</option>
           </select>
 
-          {/* Status da Vacina */}
+          {/* Sexo (Brindes: Laços & Gravatas) */}
           <select
+            value={sexFilter}
+            onChange={e => setSexFilter(e.target.value)}
+            className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            title="Filtrar por sexo (auxílio para separação de brindes)"
+          >
+            <option value="all">Sexo (Brindes)</option>
+            <option value="male">♂ Macho (Gravatas)</option>
+            <option value="female">♀ Fêmea (Laços)</option>
+          </select>
+
+          {/* Status da Vacina */}
+          {hasVaccines && (
+            <select
             value={vaccineStatusFilter}
             onChange={e => setVaccineStatusFilter(e.target.value)}
             className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
           >
-            <option value="all">🛡️ Status da vacina</option>
+            <option value="all">Status da vacina</option>
             <option value="up_to_date">Em dia</option>
             <option value="overdue">Vacina atrasada</option>
             <option value="due_soon">Próximos 30 dias</option>
             <option value="none">Sem vacina registrada</option>
             <option value="alerts">Com atenção / alergias</option>
           </select>
+          )}
 
           {/* Botão Limpar Filtros */}
-          {(search || speciesFilter !== 'all' || sizeFilter !== 'all' || vaccineStatusFilter !== 'all') && (
+          {(search || speciesFilter !== 'all' || sizeFilter !== 'all' || sexFilter !== 'all' || vaccineStatusFilter !== 'all') && (
             <button
               type="button"
               onClick={() => {
                 setSearch('');
                 setSpeciesFilter('all');
                 setSizeFilter('all');
+                setSexFilter('all');
                 setVaccineStatusFilter('all');
               }}
               className="flex h-10 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs font-semibold text-teal-800 hover:bg-teal-100 transition cursor-pointer"
@@ -732,13 +877,23 @@ export default function PetshopPetsPage() {
         ) : (
           <div className="divide-y divide-zinc-200">
             {/* Cabeçalho da Tabela em Telas Grandes */}
-            <div className="hidden lg:grid grid-cols-[minmax(220px,1.2fr)_minmax(240px,1.4fr)_130px_110px_200px] gap-4 px-5 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider bg-zinc-50/70 border-b border-zinc-200 rounded-t-2xl">
-              <div>Pet / Tutor</div>
-              <div>Status / Vacinação</div>
-              <div>Porte / Peso</div>
-              <div>Atendimentos</div>
-              <div className="text-right">Ações</div>
-            </div>
+            {hasVaccines ? (
+              <div className="hidden lg:grid grid-cols-[minmax(200px,1.1fr)_minmax(210px,1.1fr)_170px_170px_160px] gap-4 px-5 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider bg-zinc-50/70 border-b border-zinc-200 rounded-t-2xl">
+                <div>Pet & Tutor</div>
+                <div>Status / Vacinação</div>
+                <div>Porte & Peso</div>
+                <div>Atendimentos & Pacotes</div>
+                <div className="text-right">Ações</div>
+              </div>
+            ) : (
+              <div className="hidden lg:grid grid-cols-[minmax(220px,1.2fr)_minmax(210px,1.1fr)_180px_180px_100px] gap-4 px-5 py-3 text-xs font-bold text-zinc-500 uppercase tracking-wider bg-zinc-50/70 border-b border-zinc-200 rounded-t-2xl">
+                <div>Pet & Tutor</div>
+                <div>Cuidados & Observações</div>
+                <div>Porte & Peso</div>
+                <div>Atendimentos & Pacotes</div>
+                <div className="text-right">Ações</div>
+              </div>
+            )}
 
             {filteredPets.map(pet => {
               const vacs = pet.vaccinations || [];
@@ -749,104 +904,191 @@ export default function PetshopPetsPage() {
               return (
                 <article
                   key={pet.id}
-                  className="grid gap-3 px-4 py-3.5 sm:px-5 lg:grid-cols-[minmax(220px,1.2fr)_minmax(240px,1.4fr)_130px_110px_200px] lg:items-center hover:bg-zinc-50/60 transition"
+                  className={`grid gap-3 px-4 py-3.5 sm:px-5 ${
+                    hasVaccines
+                      ? 'lg:grid-cols-[minmax(200px,1.1fr)_minmax(210px,1.1fr)_170px_170px_160px]'
+                      : 'lg:grid-cols-[minmax(220px,1.2fr)_minmax(210px,1.1fr)_180px_180px_100px]'
+                  } lg:items-center hover:bg-zinc-50/60 transition`}
                 >
                   {/* Coluna 1: Pet / Tutor */}
                   <div
                     onClick={() => openPetDetails(pet, 'info')}
-                    className="flex items-center gap-3 cursor-pointer min-w-0"
+                    className="flex items-center gap-3.5 cursor-pointer min-w-0 group"
                   >
                     <PetAvatar pet={pet} size="md" alt={`Foto de ${pet.name}`} />
                     <div className="min-w-0 flex-1">
-                      <h2 className="text-sm font-bold text-zinc-900 truncate hover:text-teal-700 transition">
-                        {pet.name}
-                      </h2>
-                      <p className="text-xs text-zinc-500 truncate">
-                        {speciesLabel(pet.species)}{pet.breed ? ` · ${pet.breed}` : ''}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <h2 className="text-sm font-bold text-zinc-900 truncate group-hover:text-teal-700 transition">
+                          {pet.name}
+                        </h2>
+                        {pet.sex === 'male' && (
+                          <span
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200"
+                            title="Macho (adereços e gravatinhas)"
+                          >
+                            ♂ Macho
+                          </span>
+                        )}
+                        {pet.sex === 'female' && (
+                          <span
+                            className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200"
+                            title="Fêmea (adereços e lacinhos)"
+                          >
+                            ♀ Fêmea
+                          </span>
+                        )}
+                        <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold bg-zinc-100 text-zinc-600 border border-zinc-200/60">
+                          {speciesLabel(pet.species)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 truncate mt-0.5">
+                        {pet.breed || 'Raça não informada'}
                       </p>
-                      <p className="text-[11px] text-zinc-400 truncate">
-                        Tutor: <strong className="font-medium text-zinc-600">{pet.customer?.name}</strong>
+                      <p className="text-[11px] text-zinc-400 truncate mt-0.5 flex items-center gap-1">
+                        <UserRound size={11} className="text-zinc-400 shrink-0" />
+                        <span>Tutor: <strong className="font-semibold text-zinc-700">{pet.customer?.name}</strong></span>
                       </p>
                     </div>
                   </div>
 
-                  {/* Coluna 2: Status / Vacinação */}
+                  {/* Coluna 2: Status / Vacinação OU Cuidados & Observações */}
                   <div className="min-w-0">
-                    {pet.allergies ? (
-                      <div className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-800">
-                        <AlertTriangle size={13} className="shrink-0 text-rose-600" />
-                        <span className="truncate max-w-[280px]">
-                          <strong>Atenção:</strong> {pet.allergies}
+                    {hasVaccines ? (
+                      pet.allergies ? (
+                        <div className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800">
+                          <AlertTriangle size={13} className="shrink-0 text-rose-600" />
+                          <span className="truncate max-w-[260px]">
+                            <strong>Atenção:</strong> {pet.allergies}
+                          </span>
+                        </div>
+                      ) : overdue ? (
+                        <div className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800">
+                          <ShieldAlert size={14} className="shrink-0 text-rose-600" />
+                          <span className="truncate">
+                            Vacina atrasada: <strong>{next?.vaccineName}</strong> ({formatDate(next?.nextDueAt)})
+                          </span>
+                        </div>
+                      ) : next ? (
+                        <div className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${
+                          dueSoon ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                        }`}>
+                          <ShieldCheck size={14} className="shrink-0 text-emerald-600" />
+                          <span className="truncate">
+                            Próxima vacina: <strong>{next.vaccineName}</strong> ({formatDate(next.nextDueAt)})
+                          </span>
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
+                          <Pencil size={12} />
+                          Sem próxima vacina registrada
                         </span>
-                      </div>
-                    ) : overdue ? (
-                      <div className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800">
-                        <ShieldAlert size={14} className="shrink-0 text-rose-600" />
-                        <span className="truncate">
-                          Vacina atrasada: <strong>{next?.vaccineName}</strong> ({formatDate(next?.nextDueAt)})
-                        </span>
-                      </div>
-                    ) : next ? (
-                      <div className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold ${
-                        dueSoon ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      }`}>
-                        <ShieldCheck size={14} className="shrink-0 text-emerald-600" />
-                        <span className="truncate">
-                          Próxima vacina: <strong>{next.vaccineName}</strong> ({formatDate(next.nextDueAt)})
-                        </span>
-                      </div>
+                      )
                     ) : (
-                      <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
-                        <Pencil size={12} />
-                        Sem próxima vacina registrada
-                      </span>
+                      pet.allergies ? (
+                        <div className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-semibold text-rose-800">
+                          <AlertTriangle size={13} className="shrink-0 text-rose-600" />
+                          <span className="truncate max-w-[260px]">
+                            <strong>Alergia:</strong> {pet.allergies}
+                          </span>
+                        </div>
+                      ) : pet.behavior ? (
+                        <div className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-800">
+                          <Info size={13} className="shrink-0 text-amber-600" />
+                          <span className="truncate max-w-[260px]">
+                            <strong>Comportamento:</strong> {pet.behavior}
+                          </span>
+                        </div>
+                      ) : pet.notes ? (
+                        <div className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs text-zinc-600">
+                          <FileText size={13} className="shrink-0 text-zinc-400" />
+                          <span className="truncate max-w-[260px]">{pet.notes}</span>
+                        </div>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200/70 bg-emerald-50/60 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                          <CheckCircle2 size={13} className="text-emerald-600 shrink-0" />
+                          Sem restrições no atendimento
+                        </span>
+                      )
                     )}
                   </div>
 
-                  {/* Coluna 3: Porte / Peso */}
-                  <div className="flex items-center gap-3 lg:flex-col lg:items-start lg:gap-0.5 text-xs text-zinc-600">
-                    <span className="inline-block rounded-md bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-700">
-                      {pet.size || 'small'}
-                    </span>
-                    <span className="tabular-nums font-medium text-zinc-500 text-[11px]">
-                      {pet.weight ? `${Number(pet.weight).toLocaleString('pt-BR')} kg` : '—'}
-                    </span>
+                  {/* Coluna 3: Porte & Características */}
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className={`inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold ${sizeBadgeStyle(pet.size)}`}>
+                        {shortSizeLabel(pet.size)}
+                      </span>
+                      {pet.coatType && (
+                        <span className="inline-flex items-center rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+                          {coatLabels[pet.coatType] || pet.coatType}
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1 text-[11px] text-zinc-500 font-medium">
+                      <Scale size={12} className="text-zinc-400 shrink-0" />
+                      <span>{pet.weight ? `${Number(pet.weight).toLocaleString('pt-BR')} kg` : 'Peso não informado'}</span>
+                    </div>
                   </div>
 
-                  {/* Coluna 4: Atendimentos */}
-                  <div>
-                    <span className="inline-flex items-center gap-1 text-xs font-semibold text-zinc-700 bg-zinc-50 border border-zinc-200/80 px-2.5 py-1 rounded-lg tabular-nums">
-                      <CalendarDays size={13} className="text-zinc-400" />
-                      {pet._count?.appointments || pet.appointments?.length || 0} atend.
-                    </span>
+                  {/* Coluna 4: Atendimentos & Pacotes */}
+                  <div className="flex flex-col gap-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <CalendarDays size={13} className="text-zinc-400 shrink-0" />
+                      <span className="text-xs font-semibold text-zinc-800 tabular-nums">
+                        {(pet._count?.appointments || pet.appointments?.length || 0) > 0
+                          ? `${pet._count?.appointments || pet.appointments?.length} ${
+                              (pet._count?.appointments || pet.appointments?.length) === 1 ? 'atendimento' : 'atendimentos'
+                            }`
+                          : 'Nenhum atendimento'}
+                      </span>
+                    </div>
+                    {pet.petPackages && pet.petPackages.length > 0 ? (
+                      <div className="flex items-center">
+                        <span
+                          title={`${pet.petPackages.length} pacote(s) ativo(s)`}
+                          className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-800"
+                        >
+                          <PackageCheck size={12} className="shrink-0 text-teal-600" />
+                          <span>
+                            {pet.petPackages.length} {pet.petPackages.length === 1 ? 'pacote ativo' : 'pacotes ativos'}
+                          </span>
+                        </span>
+                      </div>
+                    ) : (
+                      <span className="text-[11px] text-zinc-400 pl-4.5">Sem pacote ativo</span>
+                    )}
                   </div>
 
                   {/* Coluna 5: Ações */}
                   <div className="flex items-center justify-end gap-1.5 relative">
-                    {/* Botão Registrar Vacina */}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenAddVaccine(pet)}
-                      className="flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:border-teal-500 hover:text-teal-700 hover:bg-teal-50/50 transition cursor-pointer"
-                      title="Registrar nova vacina na carteirinha"
-                    >
-                      <Syringe size={13} className="text-teal-700" />
-                      <span>Registrar vacina</span>
-                    </button>
+                    {/* Botão Registrar Vacina (só se módulo estiver ativo) */}
+                    {hasVaccines && (
+                      <button
+                        type="button"
+                        onClick={() => handleOpenAddVaccine(pet)}
+                        className="flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:border-teal-500 hover:text-teal-700 hover:bg-teal-50/50 transition cursor-pointer"
+                        title="Registrar nova vacina na carteirinha"
+                      >
+                        <Syringe size={13} className="text-teal-700" />
+                        <span>Registrar vacina</span>
+                      </button>
+                    )}
 
                     {/* Botão Ver Ficha / Histórico */}
                     <button
                       type="button"
                       onClick={() => openPetDetails(pet, 'info')}
-                      className="grid h-8 w-8 place-items-center rounded-xl border border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 transition cursor-pointer"
-                      title="Ver ficha completa, histórico e carteirinha"
+                      className="flex items-center gap-1 rounded-xl border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:border-teal-500 hover:text-teal-700 hover:bg-teal-50/40 transition cursor-pointer shadow-2xs"
+                      title="Ver ficha completa e histórico"
                     >
-                      <ChevronRight size={16} />
+                      <span>Ficha</span>
+                      <ChevronRight size={14} className="text-zinc-400" />
                     </button>
 
-                    {/* Menu Dropdown de Opções em Portal Suspenso (Nunca corta) */}
+                    {/* Menu Dropdown de Opções */}
                     <PetRowActionsMenu
                       pet={pet}
+                      hasVaccines={hasVaccines}
                       onOpenDetails={() => openPetDetails(pet, 'info')}
                       onOpenVaccines={() => openPetDetails(pet, 'vaccines')}
                       onOpenEdit={() => handleOpenEditPet(pet)}
@@ -911,7 +1153,7 @@ export default function PetshopPetsPage() {
                   activeTab === 'info' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
                 }`}
               >
-                📋 Ficha Geral & Saúde
+                Ficha Geral & Saúde
               </button>
               <button
                 type="button"
@@ -920,17 +1162,19 @@ export default function PetshopPetsPage() {
                   activeTab === 'history' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
                 }`}
               >
-                🗓️ Histórico de Atendimentos ({selectedPet.appointments?.length || 0})
+                Histórico de Atendimentos ({selectedPet.appointments?.length || 0})
               </button>
-              <button
-                type="button"
-                onClick={() => setActiveTab('vaccines')}
-                className={`flex-1 rounded-lg py-2 text-xs font-semibold transition cursor-pointer ${
-                  activeTab === 'vaccines' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
-                }`}
-              >
-                💉 Carteirinha de Vacinação ({selectedPet.vaccinations?.length || 0})
-              </button>
+              {hasVaccines && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('vaccines')}
+                  className={`flex-1 rounded-lg py-2 text-xs font-semibold transition cursor-pointer ${
+                    activeTab === 'vaccines' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+                  }`}
+                >
+                  Carteirinha de Vacinação ({selectedPet.vaccinations?.length || 0})
+                </button>
+              )}
             </div>
 
             {/* ABA 1: Ficha Geral & Saúde */}
@@ -942,21 +1186,61 @@ export default function PetshopPetsPage() {
                     <strong className="text-zinc-800 font-semibold">{sizeLabel(selectedPet.size)}</strong>
                   </div>
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-2.5">
+                    <span className="text-zinc-400 block text-[11px] mb-0.5">Tipo de Pelagem</span>
+                    <strong className="text-zinc-800 font-semibold">
+                      {selectedPet.coatType ? coatLabels[selectedPet.coatType] || selectedPet.coatType : 'Não informada'}
+                    </strong>
+                  </div>
+                  <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-2.5">
                     <span className="text-zinc-400 block text-[11px] mb-0.5">Peso</span>
                     <strong className="text-zinc-800 font-semibold tabular-nums">
                       {selectedPet.weight ? `${Number(selectedPet.weight).toLocaleString('pt-BR')} kg` : 'Não informado'}
                     </strong>
                   </div>
                   <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-2.5">
-                    <span className="text-zinc-400 block text-[11px] mb-0.5">Sexo</span>
+                    <span className="text-zinc-400 block text-[11px] mb-0.5">Castrado / Sexo</span>
                     <strong className="text-zinc-800 font-semibold">
-                      {selectedPet.sex === 'male' ? 'Macho' : selectedPet.sex === 'female' ? 'Fêmea' : 'Não informado'}
+                      {selectedPet.sex === 'male' ? 'Macho' : selectedPet.sex === 'female' ? 'Fêmea' : '—'} · {selectedPet.neutered ? 'Castrado' : 'Inteiro'}
                     </strong>
                   </div>
-                  <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-2.5">
-                    <span className="text-zinc-400 block text-[11px] mb-0.5">Castrado</span>
-                    <strong className="text-zinc-800 font-semibold">{selectedPet.neutered ? 'Sim' : 'Não'}</strong>
+                </div>
+
+                {/* Pacotes Contratados Ativos */}
+                <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 text-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="font-bold text-teal-900 flex items-center gap-1.5">
+                      <PackageCheck size={14} className="text-teal-700" />
+                      Pacotes de Banho e Tosa Ativos
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/petshop/pacotes?petId=${selectedPet.id}`)}
+                      className="text-teal-700 font-bold hover:underline cursor-pointer"
+                    >
+                      + Contratar / Ver pacotes
+                    </button>
                   </div>
+                  {selectedPet.petPackages && selectedPet.petPackages.length > 0 ? (
+                    <div className="space-y-1.5">
+                      {selectedPet.petPackages.map(pkg => (
+                        <div key={pkg.id} className="flex items-center justify-between rounded-lg bg-white border border-teal-100 px-3 py-2">
+                          <div>
+                            <strong className="font-semibold text-zinc-900">{pkg.planNameSnapshot}</strong>
+                            <p className="text-[11px] text-zinc-500">
+                              {pkg.items?.map(it => `${it.serviceNameSnapshot}: ${it.availableQuantity}/${it.totalQuantity} disp.`).join(' · ')}
+                            </p>
+                          </div>
+                          <span className="text-[11px] text-teal-800 font-semibold">
+                            Até {formatDate(pkg.expiresAt)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-zinc-500 text-[11px]">
+                      Este pet não possui pacotes recorrentes ativos no momento.
+                    </p>
+                  )}
                 </div>
 
                 {/* Microchip e Cor */}
@@ -1038,7 +1322,7 @@ export default function PetshopPetsPage() {
 
                           {app.stageNotes && (
                             <p className="mt-1 text-[11px] text-teal-900 bg-teal-50/70 border border-teal-200/80 rounded-md p-1.5">
-                              💬 “{app.stageNotes}”
+                              Recado: “{app.stageNotes}”
                             </p>
                           )}
 
@@ -1061,7 +1345,7 @@ export default function PetshopPetsPage() {
             )}
 
             {/* ABA 3: Carteirinha de Vacinação Completa */}
-            {activeTab === 'vaccines' && (
+            {activeTab === 'vaccines' && hasVaccines && (
               <div className="space-y-3 pt-1">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-zinc-800 uppercase tracking-wider">
@@ -1260,10 +1544,26 @@ export default function PetshopPetsPage() {
                 onChange={event => setPetForm({ ...petForm, size: event.target.value })}
               >
                 <option value="">Não informado</option>
-                <option value="small">Pequeno (small)</option>
-                <option value="medium">Médio (medium)</option>
-                <option value="large">Grande (large)</option>
-                <option value="giant">Gigante (giant)</option>
+                <option value="mini">Mini (até 5kg)</option>
+                <option value="small">Pequeno (5 a 10kg)</option>
+                <option value="medium">Médio (10 a 20kg)</option>
+                <option value="large">Grande (20 a 35kg)</option>
+                <option value="giant">Gigante (acima de 35kg)</option>
+              </select>
+            </label>
+
+            <label>
+              <span className={labelClass}>Tipo de Pelagem (precificação de pacotes)</span>
+              <select
+                className={inputClass}
+                value={petForm.coatType}
+                onChange={event => setPetForm({ ...petForm, coatType: event.target.value })}
+              >
+                <option value="">Não informada</option>
+                <option value="short">Pelo Curto (short)</option>
+                <option value="medium">Pelo Médio (medium)</option>
+                <option value="long">Pelo Longo (long)</option>
+                <option value="double">Pelagem Dupla / Densa (double)</option>
               </select>
             </label>
 
@@ -1360,7 +1660,7 @@ export default function PetshopPetsPage() {
       )}
 
       {/* 7. MODAL DE REGISTRAR OU EDITAR VACINA */}
-      {vaccineModalOpen && vaccineTargetPet && (
+      {hasVaccines && vaccineModalOpen && vaccineTargetPet && (
         <Modal
           title={editingVaccineId ? `Editar vacina · ${vacForm.vaccineName}` : `Registrar vacina · ${vaccineTargetPet.name}`}
           onClose={() => setVaccineModalOpen(false)}

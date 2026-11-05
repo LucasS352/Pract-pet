@@ -1640,8 +1640,18 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
   );
 }
 
+
+
+
 export function PosPage({ experience }: { experience?: 'food' }) {
+  const navigate = useNavigate();
+  const [allowed, setAllowed] = useState<boolean | null>(null);
+  useEffect(() => { api.get('/tenants/me').then(({ data }) => {
+    const modules = typeof data.modulos === 'string' ? JSON.parse(data.modulos) : data.modulos || {};
+    if (modules.pdv === false) { navigate('/petshop', { replace: true }); return; }
+    setAllowed(true);
+  }).catch(() => setAllowed(false)); }, [navigate]);
+  if (allowed === null) return <div className="p-6">Carregando módulos…</div>;
+  if (!allowed) return <div className="p-6">Não foi possível verificar o acesso ao PDV. Atualize a página.</div>;
   return <PosPageContent experience={experience} />;
 }
-
-

@@ -469,7 +469,7 @@ export class TenantsService {
         databaseName: sanitizedDbName,
         databaseUrl: tenantDbUrl,
         status: 'active',
-        modulos: { petshop: true, nfce: true, estoque: true, dashboardMobile: true, comandas: true },
+        modulos: { petshop: true, petshopVacinas: true, nfce: true, estoque: true, dashboardMobile: true, comandas: true },
         tvPublicId: generateTvPublicId(),
         mensalidadeValor: mensalidadeValor != null ? Number(mensalidadeValor) : 0,
         mensalidadeVencimento: mensalidadeVencimento ? new Date(mensalidadeVencimento) : null,

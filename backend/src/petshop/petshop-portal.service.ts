@@ -63,7 +63,17 @@ export class PetshopPortalService {
       }),
     ]);
     if (!customer) throw new UnauthorizedException('Tutor não encontrado.');
-    return { shop: { name: tenant.nomeFantasia || tenant.name, logoUrl: tenant.logoUrl }, customer, services, appointments, recentHistory };
+    return {
+      shop: {
+        name: tenant.nomeFantasia || tenant.name,
+        logoUrl: tenant.logoUrl,
+        modulos: tenant.modulos && typeof tenant.modulos === 'object' ? tenant.modulos : {},
+      },
+      customer,
+      services,
+      appointments,
+      recentHistory,
+    };
   }
 
   async requestAppointment(shopId: string, token: string, data: any) {

@@ -14,5 +14,6 @@ import { IntegrationsModule } from '../integrations/integrations.module';
   imports: [NfceModule, PrismaModule, ProductsModule, MailModule, IntegrationsModule],
   providers: [SalesService, SalesCronService, SalesDeliveryService],
   controllers: [SalesController],
+  exports: [SalesService],
 })
 export class SalesModule {}

@@ -1,4 +1,5 @@
 .petcare-pos-theme,
+.petcare-payment-theme,
 .petcare-operator-modal {
   --pet-pos-canvas: #f6f7f9;
   --pet-pos-surface: #ffffff;
@@ -1558,4 +1559,34 @@
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.petcare-payment-theme .petcare-payment-summary .text-white { color: #18333b !important; }
+.petcare-payment-theme .petcare-payment-summary .text-zinc-400,
+.petcare-payment-theme .petcare-payment-footer label { color: #52636c !important; }
+
+/* Pagamentos já adicionados no tema claro. */
+.petcare-payment-theme .petcare-payment-entry {
+  background: #ffffff !important;
+  border-color: #cfe5df !important;
+  color: #18333b !important;
+}
+.petcare-payment-theme .petcare-payment-entry > span {
+  color: #344b54 !important;
+}
+.petcare-payment-theme .petcare-payment-entry .font-bold {
+  color: #18333b !important;
+  font-variant-numeric: tabular-nums;
+}
+.petcare-payment-theme .petcare-payment-entry button {
+  color: #647780 !important;
+  opacity: 1 !important;
+}
+.petcare-payment-theme .petcare-payment-entry button:hover {
+  color: #be123c !important;
+  background: #fff1f2;
+  border-radius: 6px;
+}
+.petcare-payment-theme .petcare-payment-entry svg {
+  color: #0f766e;
 }

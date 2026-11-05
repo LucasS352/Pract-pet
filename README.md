@@ -1,64 +1,18 @@
-# 7Bar PDV — Sistema de Ponto de Venda
+# Pract Pet
 
-Sistema SaaS de PDV (Ponto de Venda) multi-tenant com backend NestJS e frontend Next.js.
+Gestão de pet shops com agenda, tutores e pets, etapas com fotos, portal do tutor, pacotes, comissões e recebimento dentro do Pet Shop. O PDV é opcional por cliente. Frontend React com Vite; backend NestJS e MySQL.
 
-## 🚀 Deploy via Portainer (Produção)
+## Ambiente local
 
-### Pré-requisitos no servidor
-- Docker + Docker Compose instalados
-- Portainer rodando: `http://179.127.59.225:9000`
+Use `docker compose up -d --build`. Frontend em http://localhost:3531 e API em http://localhost:3530/api. MySQL local na porta 3309. As variáveis locais ficam no `.env`, fora do Git.
 
-### 📦 Portas utilizadas
-| Serviço     | Porta |
-|-------------|-------|
-| Backend API | 3520  |
-| Frontend    | 3521  |
-| MySQL       | 3307  |
+## Produção
 
-### 🔧 Passo a passo no Portainer
+Consulte [o procedimento de publicação](docs/PRODUCAO.md). A stack dedicada está em `docker-compose.production.yml`. Ela utiliza volumes `practpet_mysql_data` e `practpet_uploads_data`, que devem ser preservados nas atualizações.
 
-1. Acesse o Portainer: `http://179.127.59.225:9000`
-2. Vá em **Stacks → Add Stack**
-3. Dê o nome: `7bar`
-4. Selecione **Repository** como método de build
-5. Informe a URL do repositório Git
-6. Path do compose: `docker-compose.yml`
-7. Em **Environment variables**, adicione:
-   ```
-   MYSQL_ROOT_PASSWORD=7bar@2025
-   JWT_SECRET=7bar_jwt_super_secret_2025
-   SERVER_IP=179.127.59.225
-   ```
-8. Clique em **Deploy the stack**
+## Testes
 
-### 🌐 Acesso após deploy
-- **Frontend**: http://179.127.59.225:3521
-- **Backend API**: http://179.127.59.225:3520
+Backend: `cd backend && npm ci && npm test -- --runInBand`.
+Frontend: `cd frontend && npm ci && npm run build && node --test tests/*.test.cjs`.
 
----
-
-## 💻 Desenvolvimento Local
-
-### Backend
-```bash
-cd backend
-cp .env.example .env  # edite com suas configs locais
-npm install
-npm run start:dev
-```
-
-### Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-### Banco de dados local (Docker)
-```bash
-docker run -d --name mysql_local \
-  -e MYSQL_ROOT_PASSWORD=root \
-  -e MYSQL_DATABASE=7bar \
-  -p 3307:3306 \
-  mysql:8.0
-```
+As rotinas locais de homologação que gravam dados fictícios devem ser usadas exclusivamente em ambiente de teste. Elas, as evidências e os backups locais não são publicados no Git.

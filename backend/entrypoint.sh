@@ -1,14 +1,7 @@
 #!/bin/sh
 
-# Nunca atualizar schemas dos tenants na inicialização.
-# Se o banco Heart (master) estiver sem tabelas (banco novo/volume novo), inicializa as tabelas do Heart
-PASS="${MYSQL_ROOT_PASSWORD:-7bar@2025}"
-HEART_TABLE=$(mysql -h mysql -u root -p"$PASS" heart_practpet -N -e "SHOW TABLES LIKE 'tenants';" 2>/dev/null || echo "")
-if [ -z "$HEART_TABLE" ]; then
-  echo "🌱 Inicializando estrutura do banco Heart mestre..."
-  npx prisma db push --schema=prisma/heart.schema.prisma --skip-generate || true
-  echo "✅ Estrutura do banco Heart inicializada com sucesso!"
-fi
+# Schemas são inicializados explicitamente no provisionamento ou pelo Sys-Init.
+# Nunca alterar bancos de clientes ou Heart automaticamente ao reiniciar.
 
 # ── Modo Demo: importar demo-seed.sql se o banco demo estiver sem produtos ──
 if [ "$APP_MODE" = "demo" ] && [ -f "/app/demo-seed.sql" ]; then

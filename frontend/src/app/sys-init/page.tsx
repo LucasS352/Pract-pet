@@ -61,6 +61,7 @@ const MODULE_BADGES: Record<string, { label: string; color: string }> = {
   digitalSignage: { label: 'Signage',     color: 'bg-rose-500/20 text-rose-300 border-rose-500/30' },
   restaurante:    { label: 'Restaurante', color: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
   petshop:        { label: 'Pet Shop', color: 'bg-teal-500/20 text-teal-300 border-teal-500/30' },
+  petshopVacinas: { label: 'Vacinas',  color: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
 };
 
 function ModuleBadges({ modulosRaw }: { modulosRaw: any }) {
@@ -529,10 +530,14 @@ export default function SysInitPage() {
 
   const openEdit = (tenant: any) => {
     setEditingTenant(tenant); setLogoFile(null);
-    let parsedModulos = { petshop: true, nfce: true, estoque: true, dashboardMobile: true, comandas: true };
+    let parsedModulos = { pdv: true, petshop: true, petshopVacinas: true, nfce: true, estoque: true, dashboardMobile: true, comandas: true };
     try {
       if (tenant.modulos) parsedModulos = typeof tenant.modulos === 'string' ? JSON.parse(tenant.modulos) : tenant.modulos;
     } catch (e) { console.error("Erro ao fazer parse dos módulos:", e); }
+    if (parsedModulos.pdv === undefined) parsedModulos.pdv = true;
+    if (parsedModulos.petshopVacinas === undefined) {
+      parsedModulos.petshopVacinas = parsedModulos.petshop === true;
+    }
     setModulos(parsedModulos);
     setEditTab("identidade");
     setPaymentHistory([]);
@@ -2022,12 +2027,16 @@ export default function SysInitPage() {
                 {editTab === 'modulos' && (
                   <div className="space-y-4">
                     <p className="text-zinc-400 text-sm mb-4">Habilite ou desabilite os recursos (Feature Flags) para este cliente.</p>
-                    {[                      { id: 'nfce', title: 'NFC-e / Emissão Fiscal', desc: 'Permite a emissão de cupons fiscais eletrÃ´nicos (NFC-e).', badge: MODULE_BADGES.nfce },
+                    {[
+                      { id: 'nfce', title: 'NFC-e / Emissão Fiscal', desc: 'Permite a emissão de cupons fiscais eletrÃ´nicos (NFC-e).', badge: MODULE_BADGES.nfce },
                       { id: 'importacaoXml', title: 'Entrada por XML (Upload Manual)', desc: 'Permite a importação manual de arquivos XML de NF-e.', badge: MODULE_BADGES.importacaoXml },
                       { id: 'estoque', title: 'Estoque', desc: 'Módulo completo de controle de produtos e inventário.', badge: MODULE_BADGES.estoque },
                       { id: 'dashboardMobile', title: 'Dashboard Mobile', desc: 'Acesso ao painel resumido em dispositivos móveis.', badge: MODULE_BADGES.dashboardMobile },
                       { id: 'comandas', title: 'Comandas & Mesas', desc: 'Permite o lançamento, abertura e consumo em comandas/mesas.', badge: MODULE_BADGES.comandas },
-                      { id: 'vitrineDigital', title: '▪ Vitrine Digital TV', desc: 'Exibe promoções e produtos em uma TV/tela secundária via URL pública.', badge: MODULE_BADGES.vitrineDigital },                      { id: 'petshop', title: '🐾 Gestão Pet Shop', desc: 'Ativa o ambiente exclusivo de tutores, pets, vacinas, serviços e agenda. O PDV atual permanece preservado.', badge: MODULE_BADGES.petshop },
+                      { id: 'vitrineDigital', title: '▪ Vitrine Digital TV', desc: 'Exibe promoções e produtos em uma TV/tela secundária via URL pública.', badge: MODULE_BADGES.vitrineDigital },
+                      { id: 'pdv', title: 'PDV Caixa', desc: 'Desative para clientes que utilizam somente o Pet Shop.', badge: MODULE_BADGES.estoque },
+                      { id: 'petshop', title: '🐾 Gestão Pet Shop', desc: 'Ativa o ambiente exclusivo de tutores, pets, serviços e agenda. O PDV atual permanece preservado.', badge: MODULE_BADGES.petshop },
+                      { id: 'petshopVacinas', title: '💉 Carteirinha & Controle de Vacinas', desc: 'Ativa controle sanitário de vacinas, doses atrasadas e vencimentos dos pets. Desative para estabelecimentos exclusivos de banho e tosa.', badge: MODULE_BADGES.petshopVacinas },
                     ].map(item => (
                       <div key={item.id} className="flex items-center justify-between p-4 bg-zinc-950 border border-zinc-800 rounded-xl hover:border-zinc-700 transition">
                         <div className="flex items-center gap-3">

@@ -1,3 +1,6 @@
+import { PaymentModal } from '@/components/PaymentModal';
+import { buildWhatsAppMessage } from './appointment-media';
+import { usePetshopContext } from '@/layouts/PetshopLayout';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -16,8 +19,10 @@ import {
   Clock3,
   CreditCard,
   Filter,
+  History,
   Loader2,
   MessageCircle,
+  PackageCheck,
   PawPrint,
   Plus,
   RotateCcw,
@@ -27,14 +32,15 @@ import {
   Sparkles,
   UserRound,
   X,
+  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
-import { useCartStore } from '@/store/cart';
-import { syncLoadedComanda } from '@/lib/comanda-cart';
-import type { Appointment, Pet, PetService } from './types';
-import { money } from './types';
+
+
+import type { Appointment, CustomerPetPackage, Pet, PetService } from './types';
+import { money, resolveAppointmentStages, resolveAppointmentSteps, getStageLabel } from './types';
 import {
   EmptyState,
   inputClass,
@@ -73,33 +79,58 @@ const stageProgressSteps = [
   { key: 'ready', label: 'Pronto' },
 ] as const;
 
-function buildWhatsAppMessage(item: Appointment, portalUrl: string, customNotes?: string | null) {
-  const firstName = item.customer.name.split(' ')[0];
-  const petName = item.pet.name;
-  const noteLine = customNotes ? `\n💬 *"${customNotes}"*\n` : '';
-  const photoLine = item.stagePhotoUrl ? `\n📸 *Enviamos uma foto dessa etapa para você ver no painel!*` : '';
+const STAGE_LABELS: Record<string, string> = {
+  checked_in: 'Check-in',
+  bathing: 'Banho',
+  grooming: 'Tosa',
+  finishing: 'Finalização',
+  ready: 'Pronto',
+};
 
-  if (item.status === 'ready') {
-    return (
-      `🐾 Olá *${firstName}*! Tudo bem?\n\n` +
-      `✨ O(a) *${petName}* já está *PRONTO(A) PARA RETIRADA* e esperando por você!${photoLine}${noteLine}\n\n` +
-      `📲 Acompanhe os detalhes e veja como ficou por aqui:\n${portalUrl}`
-    );
+function getAppointmentSteps(apt: Appointment) {
+  return resolveAppointmentSteps(apt);
+}
+
+function normalizeSizeKey(rawSize?: string | null): string {
+  if (!rawSize) return 'small';
+  const s = rawSize.toLowerCase().trim();
+  if (s.includes('mini')) return 'mini';
+  if (s.includes('pequeno') || s === 'small' || s === 'p') return 'small';
+  if (s.includes('médio') || s.includes('medio') || s === 'medium' || s === 'm') return 'medium';
+  if (s.includes('grande') || s === 'large' || s === 'g') return 'large';
+  if (s.includes('gigante') || s === 'giant' || s === 'gg') return 'giant';
+  return s;
+}
+
+function sizeLabel(size?: string | null): string {
+  if (!size) return 'Não informado';
+  const s = normalizeSizeKey(size);
+  const map: Record<string, string> = {
+    mini: 'Mini (< 5kg)',
+    small: 'Pequeno (5-10kg)',
+    medium: 'Médio (10-20kg)',
+    large: 'Grande (20-35kg)',
+    giant: 'Gigante (> 35kg)',
+  };
+  return map[s] || size;
+}
+
+function getEffectiveServicePrice(svc: PetService, pet?: Pet | null): { price: number; duration: number; variantLabel?: string } {
+  if (!pet || !svc.pricingRules || svc.pricingRules.length === 0) {
+    return { price: Number(svc.price), duration: svc.durationMinutes };
   }
+  const rules = svc.pricingRules;
+  const petSize = normalizeSizeKey(pet.size);
+  const match1 = rules.find(r => r.size === petSize && r.coatType === pet.coatType);
+  if (match1) return { price: Number(match1.price), duration: match1.durationMinutes || svc.durationMinutes, variantLabel: match1.label || sizeLabel(petSize) };
 
-  if (item.status === 'checked_in') {
-    return (
-      `🐾 Olá *${firstName}*! Recebemos o(a) *${petName}* com muito carinho para o atendimento de hoje.${noteLine}\n\n` +
-      `📲 Você pode acompanhar cada etapa em tempo real por este link:\n${portalUrl}`
-    );
-  }
+  const match2 = rules.find(r => r.size === petSize && (!r.coatType || r.coatType === 'all'));
+  if (match2) return { price: Number(match2.price), duration: match2.durationMinutes || svc.durationMinutes, variantLabel: match2.label || sizeLabel(petSize) };
 
-  const stageLabel = statusLabelMap[item.status] || 'Em atendimento';
-  return (
-    `🐾 Olá *${firstName}*! Atualização sobre o(a) *${petName}*:\n\n` +
-    `📍 Etapa atual: *${stageLabel}*${photoLine}${noteLine}\n\n` +
-    `📲 Acompanhe ao vivo e veja as fotos por aqui:\n${portalUrl}`
-  );
+  const match3 = rules.find(r => (!r.size || r.size === 'all') && r.coatType === pet.coatType);
+  if (match3) return { price: Number(match3.price), duration: match3.durationMinutes || svc.durationMinutes, variantLabel: match3.label || `Pelo ${pet.coatType}` };
+
+  return { price: Number(svc.price), duration: svc.durationMinutes };
 }
 
 // Helpers de data e semana
@@ -168,14 +199,17 @@ const timeStr = (value: string) => {
 
 export default function PetshopAgendaPage() {
   const navigate = useNavigate();
+  const { tenant } = usePetshopContext();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Estados principais
   const [viewMode, setViewMode] = useState<ViewMode>('week');
   const [anchorDate, setAnchorDate] = useState<Date>(() => {
+    const linkedDate = searchParams.get('date');
+    if (linkedDate && /^\d{4}-\d{2}-\d{2}$/.test(linkedDate)) return new Date(`${linkedDate}T12:00:00`);
     // Se a data do sistema for 2026, usa a data atual, se não, 24 Outubro 2026
     const now = new Date();
-    return now.getFullYear() === 2026 ? now : new Date(2026, 9, 24);
+    return now;
   });
 
   const [items, setItems] = useState<Appointment[]>([]);
@@ -190,12 +224,16 @@ export default function PetshopAgendaPage() {
   const [selectedProfessional, setSelectedProfessional] = useState('all');
   const [selectedService, setSelectedService] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [hideCompleted, setHideCompleted] = useState(false);
 
   // Modais e ações
   const [openNew, setOpenNew] = useState(searchParams.get('new') === '1');
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [updatingId, setUpdatingId] = useState('');
   const [notifyingId, setNotifyingId] = useState('');
+  const [paymentItem, setPaymentItem] = useState<Appointment | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState('pix');
+  const [receiving, setReceiving] = useState(false);
   const [chargingId, setChargingId] = useState('');
   const [saving, setSaving] = useState(false);
 
@@ -217,7 +255,7 @@ export default function PetshopAgendaPage() {
     status: 'bathing',
     stagePhotoUrl: '',
     stageNotes: '',
-    notifyTutor: true,
+    notifyTutor: false,
   });
   const [savingStage, setSavingStage] = useState(false);
 
@@ -229,6 +267,43 @@ export default function PetshopAgendaPage() {
     serviceIds: [] as string[],
     notes: '',
   });
+  const [availablePackages, setAvailablePackages] = useState<CustomerPetPackage[]>([]);
+  const [loadingPackages, setLoadingPackages] = useState(false);
+  const [packageSelections, setPackageSelections] = useState<Record<string, string>>({});
+
+  // Carregar pacotes disponíveis quando o pet ou data do novo agendamento mudar
+  useEffect(() => {
+    if (!openNew || !form.petId) {
+      setAvailablePackages([]);
+      setPackageSelections({});
+      return;
+    }
+    setLoadingPackages(true);
+    const dateParam = form.startsAt ? new Date(form.startsAt).toISOString() : undefined;
+    api
+      .get(`/petshop/packages/available/${form.petId}`, { params: { date: dateParam } })
+      .then(res => {
+        const pkgs: CustomerPetPackage[] = Array.isArray(res.data) ? res.data : [];
+        setAvailablePackages(pkgs);
+        // Auto-seleciona pacote se houver saldo para o serviço selecionado
+        setPackageSelections(prev => {
+          const next: Record<string, string> = {};
+          for (const svcId of form.serviceIds) {
+            if (prev[svcId] && pkgs.some(p => p.id === prev[svcId])) {
+              next[svcId] = prev[svcId];
+            } else {
+              const matchingPkg = pkgs.find(p =>
+                p.items?.some(it => it.serviceId === svcId && it.availableQuantity > 0),
+              );
+              if (matchingPkg) next[svcId] = matchingPkg.id;
+            }
+          }
+          return next;
+        });
+      })
+      .catch(() => setAvailablePackages([]))
+      .finally(() => setLoadingPackages(false));
+  }, [openNew, form.petId, form.startsAt]);
 
   // Cálculo da semana ativa
   const monday = useMemo(() => getMonday(anchorDate), [anchorDate]);
@@ -285,6 +360,12 @@ export default function PetshopAgendaPage() {
   }, [monday, anchorDate, viewMode]);
 
   useEffect(() => {
+    const targetId = searchParams.get('appointment');
+    const found = targetId && items.find(item => item.id === targetId);
+    if (found) { setSelectedAppointment(found); const next = new URLSearchParams(searchParams); next.delete('appointment'); setSearchParams(next, { replace: true }); }
+  }, [items, searchParams]);
+
+  useEffect(() => {
     if (searchParams.get('new') === '1') {
       setOpenNew(true);
       setSearchParams({}, { replace: true });
@@ -310,7 +391,7 @@ export default function PetshopAgendaPage() {
 
   const handleToday = () => {
     const now = new Date();
-    setAnchorDate(now.getFullYear() === 2026 ? now : new Date(2026, 9, 24));
+    setAnchorDate(now);
   };
 
   // Filtragem dos atendimentos
@@ -339,6 +420,11 @@ export default function PetshopAgendaPage() {
         if (!hasSvc) return false;
       }
 
+      // Ocultar concluídos e cancelados
+      if (hideCompleted && (item.status === 'delivered' || item.status === 'cancelled')) {
+        return false;
+      }
+
       // Status
       if (selectedStatus !== 'all') {
         if (selectedStatus === 'in_progress') {
@@ -350,16 +436,21 @@ export default function PetshopAgendaPage() {
 
       return true;
     });
-  }, [items, searchTerm, selectedProfessional, selectedService, selectedStatus]);
+  }, [items, searchTerm, selectedProfessional, selectedService, selectedStatus, hideCompleted]);
 
   // Agrupamento por dia (para visualização em colunas na semana)
+  const completedCount = useMemo(
+    () => items.filter(i => i.status === 'delivered' || i.status === 'cancelled').length,
+    [items]
+  );
+
   const appointmentsByDay = useMemo(() => {
     const map = new Map<string, Appointment[]>();
     for (const d of weekDays) {
       map.set(formatISOYMD(d), []);
     }
     for (const item of filteredItems) {
-      const dayKey = item.startsAt.slice(0, 10);
+      const dayKey = formatISOYMD(new Date(item.startsAt));
       if (map.has(dayKey)) {
         map.get(dayKey)!.push(item);
       }
@@ -378,18 +469,7 @@ export default function PetshopAgendaPage() {
     const pending = items.filter(i => i.status === 'requested').length;
     const ready = items.filter(i => i.status === 'ready').length;
 
-    // Estimativa de taxa de ocupação (capacidade 36 slots por semana)
-    const capacity = 36;
-    const occupancyRate = Math.min(100, Math.round((total / capacity) * 100));
-
-    return {
-      total: total || 28,
-      inCare: inCare || 12,
-      pending: pending || 5,
-      occupancy: occupancyRate || 78,
-      returns: 6,
-      ready,
-    };
+    return { total, inCare, pending, ready };
   }, [items]);
 
   // Dia mais movimentado
@@ -406,8 +486,8 @@ export default function PetshopAgendaPage() {
     const dayNames = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
     return {
       dayName: dayNames[maxDay.getDay()],
-      count: maxCount || 6,
-      occupancyPct: Math.round(((maxCount || 6) / 7) * 100),
+      count: maxCount,
+
     };
   }, [weekDays, appointmentsByDay]);
 
@@ -429,13 +509,21 @@ export default function PetshopAgendaPage() {
     event.preventDefault();
     setSaving(true);
     try {
+      const activeSelections: Record<string, string> = {};
+      for (const svcId of form.serviceIds) {
+        if (packageSelections[svcId]) {
+          activeSelections[svcId] = packageSelections[svcId];
+        }
+      }
       await api.post('/petshop/appointments', {
         ...form,
         startsAt: new Date(form.startsAt).toISOString(),
+        packageSelections: Object.keys(activeSelections).length > 0 ? activeSelections : undefined,
       });
       toast.success('Agendamento criado com sucesso!');
       setOpenNew(false);
       setForm({ petId: '', startsAt: '', professionalId: '', serviceIds: [], notes: '' });
+      setPackageSelections({});
       loadAppointments(false);
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Erro ao criar agendamento.');
@@ -471,84 +559,36 @@ export default function PetshopAgendaPage() {
 
   // Cobrar Atendimento (Valida caixa aberto e carrega no PDV)
   const handleChargeAppointment = async (item: Appointment) => {
+    if (item.status === 'delivered') {
+      toast.info('Atendimento já foi cobrado e concluído!', {
+        description: `O atendimento de ${item.pet?.name} já foi finalizado. Não é permitida cobrança em duplicidade.`,
+      });
+      return;
+    }
     setChargingId(item.id);
     try {
-      // 1. Verifica se há caixa aberto
-      let isBoxOpen = false;
-      try {
-        const currentRes = await api.get('/cash-registers/current');
-        if (currentRes.data && currentRes.data.status === 'open') {
-          isBoxOpen = true;
-        } else {
-          const listRes = await api.get('/cash-registers');
-          if (Array.isArray(listRes.data) && listRes.data.some((r: any) => r.status === 'open')) {
-            isBoxOpen = true;
-          }
-        }
-      } catch {
-        isBoxOpen = false;
-      }
+      // Filtra apenas os serviços que NÃO estão cobertos por pacote (avulsos/extras)
+      const billableServices = (item.services || []).filter(
+        s => !s.comboParentId && s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed',
+      );
+      const hasCoveredServices = (item.services || []).some(
+        s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed',
+      );
 
-      if (!isBoxOpen) {
-        toast.error('O caixa está fechado!', {
-          description: 'Não é possível realizar a cobrança com o caixa fechado. Abra o caixa no Frente de Caixa (PDV) antes de prosseguir.',
-          duration: 6000,
+      // Se TODOS os serviços do agendamento são cobertos por pacote e o valor adicional é R$ 0,00:
+      if (billableServices.length === 0 && hasCoveredServices) {
+        const { data: completed } = await api.patch(`/petshop/appointments/${item.id}/status`, { status: 'delivered' });
+        setItems(curr => curr.map(row => row.id === item.id ? completed : row));
+        setSelectedAppointment(completed);
+        toast.success('Atendimento concluído via pacote!', {
+          description: `Sessão abatida do pacote de ${item.pet?.name}. Nenhum valor avulso adicional a cobrar.`,
         });
         return;
       }
 
-      // 2. Prepara os serviços no carrinho do PDV
-      const cart = useCartStore.getState();
-      cart.clearCart();
-
-      let linkedComanda = null;
-      try {
-        const comandasRes = await api.get('/v1/comandas');
-        if (Array.isArray(comandasRes.data)) {
-          linkedComanda = comandasRes.data.find(
-            c => ['open', 'waiting_payment'].includes(c.status) && c.notes && c.notes.includes(item.id)
-          );
-        }
-      } catch {
-        // silencioso
-      }
-
-      if (linkedComanda) {
-        cart.setActiveComanda(linkedComanda.id, linkedComanda.number);
-        syncLoadedComanda(linkedComanda);
-      } else {
-        const serviceList = item.services && item.services.length > 0
-          ? item.services
-          : [{
-              id: 'srv-petshop',
-              serviceId: 'srv-petshop',
-              nameSnapshot: 'Atendimento Pet',
-              priceSnapshot: 0,
-              durationMinutes: 30,
-            }];
-
-        serviceList.forEach(svc => {
-          cart.addItem({
-            id: svc.serviceId || svc.id,
-            name: `${svc.nameSnapshot} — ${item.pet?.name || 'Pet'} (${item.customer?.name || 'Tutor'})`,
-            priceSell: Number(svc.priceSnapshot || 0),
-            stock: 99999,
-            barcode: null,
-            shortCode: null,
-            active: true,
-          }, 1);
-        });
-      }
-
-      // 3. Salva identificação do atendimento para auto-finalização no pagamento
-      sessionStorage.setItem('petshop_checkout_appointment_id', item.id);
-      sessionStorage.setItem('petshop_checkout_customer_name', item.customer?.name || '');
-      sessionStorage.setItem('petshop_checkout_customer_phone', item.customer?.phone || '');
-
-      toast.success('Serviços carregados no Caixa!', {
-        description: `Abrindo finalização de pagamento para ${item.pet?.name}...`,
-      });
-      navigate('/?checkout=1');
+      setSelectedAppointment(null);
+      setPaymentItem(item);
+      setPaymentMethod('pix');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao preparar cobrança no caixa.');
     } finally {
@@ -556,7 +596,7 @@ export default function PetshopAgendaPage() {
     }
   };
 
-  // Alterar etapa / status
+  //Alterar etapa / status
   const changeStatus = async (item: Appointment, newStatus: string) => {
     setUpdatingId(item.id);
     try {
@@ -567,8 +607,8 @@ export default function PetshopAgendaPage() {
       }
 
       if (newStatus === 'ready') {
-        toast.success(`✨ ${item.pet.name} está pronto(a) para retirada!`, {
-          description: `Clique em "Avisar Tutor" para chamar ${item.customer.name.split(' ')[0]} no WhatsApp.`,
+        toast.success(`${item.pet.name} está pronto(a) para retirada!`, {
+          description: `Clique em "Avisar Tutor" para preparar a mensagem. Automações dependem da configuração da loja.`,
           duration: 5000,
         });
       } else {
@@ -620,7 +660,7 @@ export default function PetshopAgendaPage() {
       status: item.status === 'scheduled' || item.status === 'requested' ? 'bathing' : item.status,
       stagePhotoUrl: item.stagePhotoUrl || '',
       stageNotes: item.stageNotes || '',
-      notifyTutor: true,
+      notifyTutor: false,
     });
   };
 
@@ -855,7 +895,7 @@ export default function PetshopAgendaPage() {
               onChange={e => setSelectedBranch(e.target.value)}
               className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
             >
-              <option value="all">🏢 Unidade</option>
+              <option value="all">Unidade</option>
               <option value="main">Unidade Principal</option>
             </select>
           </div>
@@ -867,7 +907,7 @@ export default function PetshopAgendaPage() {
               onChange={e => setSelectedProfessional(e.target.value)}
               className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
             >
-              <option value="all">👤 Profissional</option>
+              <option value="all">Profissional</option>
               {operators.map(op => (
                 <option key={op.id} value={op.id}>
                   {op.name}
@@ -883,7 +923,7 @@ export default function PetshopAgendaPage() {
               onChange={e => setSelectedService(e.target.value)}
               className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
             >
-              <option value="all">✂️ Serviço</option>
+              <option value="all">Serviço</option>
               {services.map(svc => (
                 <option key={svc.id} value={svc.id}>
                   {svc.name}
@@ -899,7 +939,7 @@ export default function PetshopAgendaPage() {
               onChange={e => setSelectedStatus(e.target.value)}
               className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
             >
-              <option value="all">⭕ Status</option>
+              <option value="all">Status</option>
               <option value="scheduled">Agendado</option>
               <option value="in_progress">Em atendimento</option>
               <option value="ready">Pronto p/ buscar</option>
@@ -908,6 +948,28 @@ export default function PetshopAgendaPage() {
               <option value="cancelled">Cancelado</option>
             </select>
           </div>
+
+          {/* Alternar Ocultar Concluídos */}
+          <button
+            type="button"
+            onClick={() => setHideCompleted(prev => !prev)}
+            className={`h-10 px-3 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer select-none ${
+              hideCompleted
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
+            }`}
+            title="Ocultar atendimentos já entregues/concluídos para despoluir a agenda"
+          >
+            <CheckCircle2 size={14} className={hideCompleted ? 'text-emerald-600' : 'text-zinc-400'} />
+            <span>{hideCompleted ? 'Concluídos ocultos' : 'Ocultar concluídos'}</span>
+            {completedCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                hideCompleted ? 'bg-emerald-200/80 text-emerald-900' : 'bg-zinc-100 text-zinc-600'
+              }`}>
+                {completedCount}
+              </span>
+            )}
+          </button>
 
           {/* Botão de Ajustes / Limpar Filtros */}
           {(searchTerm || selectedProfessional !== 'all' || selectedService !== 'all' || selectedStatus !== 'all') && (
@@ -928,121 +990,26 @@ export default function PetshopAgendaPage() {
         </div>
       </section>
 
-      {/* 3. Faixa de Indicadores / KPIs (5 Cards Horizontais) */}
-      <section
-        className="mb-5 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3.5"
-        aria-label="Indicadores operacionais"
-      >
-        {/* Card 1: Agendamentos */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
-              <CalendarDays size={20} />
-            </div>
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                  {metrics.total}
-                </span>
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700">
-                  <ArrowUp size={11} /> 12%
-                </span>
-              </div>
-              <p className="text-xs font-semibold text-zinc-700">Agendamentos</p>
-              <p className="text-[11px] text-zinc-400">na semana anterior</p>
-            </div>
+      <section className="mb-5 grid grid-cols-2 lg:grid-cols-4 gap-3.5" aria-label="Indicadores operacionais">
+        {[
+          { label: 'Agendamentos', value: metrics.total, icon: CalendarDays },
+          { label: 'Em atendimento', value: metrics.inCare, icon: Clock3 },
+          { label: 'Confirmações pendentes', value: metrics.pending, icon: AlertCircle },
+          { label: 'Prontos para retirada', value: metrics.ready, icon: CheckCircle2 },
+        ].map(metric => (
+          <div key={metric.label} className="rounded-2xl border border-zinc-200 bg-white p-4 flex items-center gap-3">
+            <metric.icon size={22} className="shrink-0 text-teal-700" />
+            <div className="min-w-0"><strong className="text-2xl tabular-nums">{metric.value}</strong><p className="text-xs text-zinc-600">{metric.label}</p></div>
           </div>
-        </div>
-
-        {/* Card 2: Pets em atendimento */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700">
-              <PawPrint size={20} />
-            </div>
-            <div>
-              <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                {metrics.inCare}
-              </span>
-              <p className="text-xs font-semibold text-zinc-700">Pets em atendimento</p>
-              <p className="text-[11px] text-zinc-400">agora neste momento</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 3: Confirmações pendentes */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-amber-50 text-amber-700">
-              <Clock size={20} />
-            </div>
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                  {metrics.pending}
-                </span>
-                <span className="text-xs font-bold text-rose-600 flex items-center">
-                  ↑ 2
-                </span>
-              </div>
-              <p className="text-xs font-semibold text-zinc-700">Confirmações pendentes</p>
-              <p className="text-[11px] text-zinc-400">em relação à semana anterior</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 4: Taxa de ocupação */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-purple-50 text-purple-700">
-              <BarChart3 size={20} />
-            </div>
-            <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                  {metrics.occupancy}%
-                </span>
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700">
-                  <ArrowUp size={11} /> 8%
-                </span>
-              </div>
-              <p className="text-xs font-semibold text-zinc-700">Taxa de ocupação</p>
-              <p className="text-[11px] text-zinc-400">da capacidade da agenda</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Card 5: Retornos previstos / Ocupação média */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between col-span-2 sm:col-span-1">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-teal-50 text-teal-700">
-              <RotateCcw size={20} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-baseline justify-between gap-3">
-                <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                  {metrics.returns}
-                </span>
-                <span className="text-xs font-bold text-teal-800 tabular-nums">
-                  {metrics.occupancy}%
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="font-semibold text-zinc-700 truncate">Retornos previstos</span>
-                <span className="text-[10px] text-zinc-400">ocupação média</span>
-              </div>
-              <p className="text-[11px] text-zinc-400">esta semana</p>
-            </div>
-          </div>
-        </div>
+        ))}
       </section>
 
       {/* 4. Conteúdo Principal da Agenda (Semana + Sidebar lateral direita) */}
       {viewMode === 'week' && (
-        <div className="flex flex-col xl:flex-row gap-4 items-start">
+        <div className="flex flex-col 2xl:flex-row gap-4 items-start">
           {/* Grade de 7 Colunas (Segunda a Domingo) */}
           <div className="flex-1 min-w-0 w-full overflow-x-auto pb-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3 min-w-[900px] lg:min-w-0">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3">
               {weekDays.map(dayDate => {
                 const dayKey = formatISOYMD(dayDate);
                 const dayList = appointmentsByDay.get(dayKey) || [];
@@ -1059,7 +1026,7 @@ export default function PetshopAgendaPage() {
                   >
                     {/* Cabeçalho do Dia */}
                     <div
-                      className={`flex items-center justify-between p-3 border-b rounded-t-2xl ${
+                      className={`sticky top-0 z-10 flex items-center justify-between p-3 border-b rounded-t-2xl backdrop-blur-xs ${
                         isTodayActive
                           ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
                           : 'border-zinc-200/70 bg-white text-zinc-800'
@@ -1090,7 +1057,7 @@ export default function PetshopAgendaPage() {
                     </div>
 
                     {/* Lista de Atendimentos do Dia */}
-                    <div className="p-2.5 flex-1 space-y-2.5 min-h-[350px]">
+                    <div className="p-2.5 flex-1 space-y-2 min-h-[100px] xl:min-h-[350px] max-h-[660px] overflow-y-auto overscroll-contain pr-1.5 focus:outline-none custom-scrollbar">
                       {loading ? (
                         <div className="space-y-2 py-4">
                           <div className="h-20 bg-zinc-200/60 rounded-xl animate-pulse" />
@@ -1125,9 +1092,17 @@ export default function PetshopAgendaPage() {
                                 <span className="text-xs font-extrabold text-zinc-900 tabular-nums">
                                   {timeStr(item.startsAt)}
                                 </span>
-                                <h4 className="text-xs font-bold text-zinc-900 truncate flex-1 text-right">
-                                  {item.pet?.name}
-                                </h4>
+                                <div className="flex items-center gap-1.5 flex-1 justify-end min-w-0">
+                                  <h4 className="text-xs font-bold text-zinc-900 truncate">
+                                    {item.pet?.name}
+                                  </h4>
+                                  {item.pet?.sex === 'male' && (
+                                    <span className="text-[9px] font-bold text-sky-700 bg-sky-50 border border-sky-200/80 rounded px-1 py-0.2 shrink-0" title="Macho (Gravatinha)">♂</span>
+                                  )}
+                                  {item.pet?.sex === 'female' && (
+                                    <span className="text-[9px] font-bold text-rose-700 bg-rose-50 border border-rose-200/80 rounded px-1 py-0.2 shrink-0" title="Fêmea (Lacinho)">♀</span>
+                                  )}
+                                </div>
                               </div>
 
                               {/* Centro: Avatar + Serviço + Profissional */}
@@ -1146,22 +1121,33 @@ export default function PetshopAgendaPage() {
                                 </div>
                               </div>
 
-                              {/* Rodapé: Badge de Status */}
-                              <div className="flex items-center justify-between pt-0.5 border-t border-zinc-100">
-                                {renderStatusBadge(item.status)}
-                                {item.stagePhotoUrl && (
-                                  <span
-                                    title="Foto da etapa registrada"
-                                    className="text-teal-700 text-[10px] flex items-center gap-0.5"
-                                  >
-                                    <Camera size={11} />
-                                  </span>
-                                )}
-                              </div>
+                                {/* Rodapé: Badge de Status + Pacote */}
+                                <div className="flex items-center justify-between pt-0.5 border-t border-zinc-100">
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    {renderStatusBadge(item.status)}
+                                    {item.services?.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && (
+                                      <span
+                                        title="Serviço coberto por pacote de cliente"
+                                        className="inline-flex items-center gap-0.5 rounded-md border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[9px] font-bold text-teal-800"
+                                      >
+                                        <PackageCheck size={9} /> Pacote
+                                      </span>
+                                    )}
+                                  </div>
+                                  {item.stagePhotoUrl && (
+                                    <span
+                                      title="Foto da etapa registrada"
+                                      className="text-teal-700 text-[10px] flex items-center gap-0.5"
+                                    >
+                                      <Camera size={11} />
+                                    </span>
+                                  )}
+                                </div>
                             </article>
                           );
                         })
                       )}
+                      {!loading && dayList.length > 0 && <p className="py-2 text-center text-[10px] text-zinc-500">Exibindo todos os {dayList.length} agendamentos ↕</p>}
                     </div>
                   </div>
                 );
@@ -1170,7 +1156,7 @@ export default function PetshopAgendaPage() {
           </div>
 
           {/* Barra Lateral Direita: Insights, Visão da Semana e Horários Livres */}
-          <aside className="w-full xl:w-72 shrink-0 space-y-4">
+          <aside className="w-full 2xl:w-72 shrink-0 space-y-4">
             {/* Widget 1: Visão da semana (Mini Gráfico de Barras) */}
             <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
               <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider mb-3">
@@ -1182,7 +1168,7 @@ export default function PetshopAgendaPage() {
                   const dayKey = formatISOYMD(d);
                   const count = appointmentsByDay.get(dayKey)?.length || 0;
                   const isPeak = isCurrentDay(d);
-                  const heightPct = Math.max(15, Math.min(100, (count / (busiestDayInsight.count || 6)) * 100));
+                  const heightPct = Math.min(100, (count / (busiestDayInsight.count || 1)) * 100);
 
                   return (
                     <div key={dayKey} className="flex-1 flex flex-col items-center gap-1.5 h-full justify-end">
@@ -1220,22 +1206,8 @@ export default function PetshopAgendaPage() {
                       {busiestDayInsight.dayName} é o dia mais movimentado
                     </p>
                     <p className="text-[11px] text-zinc-500">
-                      {busiestDayInsight.count} agendamentos ({busiestDayInsight.occupancyPct}% de ocupação)
+                      {busiestDayInsight.count} agendamentos no período selecionado
                     </p>
-                  </div>
-                  <ChevronRight size={14} className="text-zinc-400 mt-1" />
-                </div>
-
-                {/* Item 2: Horários disponíveis */}
-                <div className="flex items-start gap-2.5 p-2 rounded-xl hover:bg-zinc-50 transition cursor-pointer">
-                  <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700 mt-0.5">
-                    <Clock3 size={14} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-zinc-800 truncate">
-                      3 horários disponíveis
-                    </p>
-                    <p className="text-[11px] text-zinc-500">Amanhã, entre 15h e 18h</p>
                   </div>
                   <ChevronRight size={14} className="text-zinc-400 mt-1" />
                 </div>
@@ -1249,7 +1221,7 @@ export default function PetshopAgendaPage() {
                     <p className="text-xs font-semibold text-zinc-800 truncate">
                       {metrics.pending} confirmações pendentes
                     </p>
-                    <p className="text-[11px] text-zinc-500">Entre hoje e quarta-feira</p>
+                    <p className="text-[11px] text-zinc-500">No período selecionado</p>
                   </div>
                   <ChevronRight size={14} className="text-zinc-400 mt-1" />
                 </div>
@@ -1261,105 +1233,20 @@ export default function PetshopAgendaPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-zinc-800 truncate">
-                      {metrics.ready || 2} pets prontos para buscar
+                      {metrics.ready} pets prontos para buscar
                     </p>
-                    <p className="text-[11px] text-zinc-500">Nina e Max</p>
+                    <p className="text-[11px] text-zinc-500">{items.filter(i => i.status === 'ready').map(i => i.pet.name).join(', ') || 'Nenhum pet aguardando retirada'}</p>
                   </div>
                   <ChevronRight size={14} className="text-zinc-400 mt-1" />
                 </div>
 
-                {/* Item 5: Retornos previstos */}
-                <div className="flex items-start gap-2.5 p-2 rounded-xl hover:bg-zinc-50 transition cursor-pointer">
-                  <div className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-purple-50 text-purple-700 mt-0.5">
-                    <RotateCcw size={14} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-xs font-semibold text-zinc-800 truncate">
-                      6 retornos previstos esta semana
-                    </p>
-                    <p className="text-[11px] text-zinc-500">Clientes recorrentes</p>
-                  </div>
-                  <ChevronRight size={14} className="text-zinc-400 mt-1" />
-                </div>
               </div>
             </div>
 
-            {/* Widget 3: Próximos Horários Livres */}
-            <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-bold text-zinc-800 uppercase tracking-wider">
-                  Próximos horários livres
-                </h3>
-                <button
-                  type="button"
-                  onClick={() => handleOpenNewForDay(anchorDate)}
-                  className="text-xs font-semibold text-teal-700 hover:underline cursor-pointer"
-                >
-                  Ver todos
-                </button>
-              </div>
-
-              <div className="space-y-3">
-                {/* Linha 1: Hoje */}
-                <div>
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-700 mb-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
-                    <span>Hoje, 24 Out</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {['14:30', '15:00', '17:30'].map(slot => (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => handleOpenNewForDay(anchorDate, slot)}
-                        className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800 transition cursor-pointer"
-                      >
-                        {slot}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Linha 2: Amanhã */}
-                <div>
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-700 mb-1.5">
-                    <span className="h-2 w-2 rounded-full bg-emerald-500 inline-block" />
-                    <span>Amanhã, 25 Out</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {['15:00', '16:00'].map(slot => (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => handleOpenNewForDay(addDays(anchorDate, 1), slot)}
-                        className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800 transition cursor-pointer"
-                      >
-                        {slot}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Linha 3: Domingo */}
-                <div>
-                  <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-700 mb-1.5">
-                    <span className="h-2 w-2 rounded-full bg-teal-500 inline-block" />
-                    <span>Dom, 26 Out</span>
-                  </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {['11:00', '14:00', '16:00'].map(slot => (
-                      <button
-                        key={slot}
-                        type="button"
-                        onClick={() => handleOpenNewForDay(addDays(anchorDate, 2), slot)}
-                        className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:border-teal-400 hover:bg-teal-50 hover:text-teal-800 transition cursor-pointer"
-                      >
-                        {slot}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4">
+              <h3 className="text-sm font-semibold">Agendar um atendimento</h3>
+              <p className="mt-2 text-xs text-zinc-500">Confira os horários e o profissional na agenda antes de confirmar.</p>
+              <button type="button" onClick={() => handleOpenNewForDay(anchorDate)} className="mt-3 min-h-11 text-sm font-semibold text-teal-800">Novo agendamento</button>
             </div>
           </aside>
         </div>
@@ -1441,6 +1328,16 @@ export default function PetshopAgendaPage() {
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
                           <h3 className="text-sm font-bold text-zinc-900">{item.pet?.name}</h3>
+                          {item.pet?.sex === 'male' && (
+                            <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200" title="Macho (gravata/adereço azul)">
+                              ♂ Macho
+                            </span>
+                          )}
+                          {item.pet?.sex === 'female' && (
+                            <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200" title="Fêmea (laço/adereço rosa)">
+                              ♀ Fêmea
+                            </span>
+                          )}
                           <span className="text-xs text-zinc-500">Tutor: {item.customer?.name}</span>
                           {renderStatusBadge(item.status)}
                         </div>
@@ -1448,8 +1345,17 @@ export default function PetshopAgendaPage() {
                         <p className="mt-1 text-xs text-zinc-600 truncate">
                           {item.services.map(s => s.nameSnapshot).join(' + ') || 'Serviço'} ·{' '}
                           <strong className="font-semibold text-zinc-800">
-                            {money(item.services.reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0))}
+                            {money(
+                              item.services
+                                .filter(s => s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
+                                .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0),
+                            )}
                           </strong>
+                          {item.services.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && (
+                            <span className="ml-2 inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-bold text-teal-800">
+                              <PackageCheck size={10} /> Pacote
+                            </span>
+                          )}
                         </p>
 
                         <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
@@ -1458,39 +1364,54 @@ export default function PetshopAgendaPage() {
                           </span>
                           {item.stageNotes && (
                             <span className="rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-700 truncate max-w-md">
-                              💬 “{item.stageNotes}”
+                              Recado: "{item.stageNotes}"
                             </span>
                           )}
                         </div>
 
-                        {/* Barra de 5 Etapas Operacionais */}
-                        {isInCare && (
-                          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                            {stageProgressSteps.map((step, idx) => {
-                              const done = idx <= stepIdx;
-                              const current = idx === stepIdx;
-                              return (
-                                <button
-                                  key={step.key}
-                                  type="button"
-                                  disabled={updatingId === item.id}
-                                  onClick={() => changeStatus(item, step.key)}
-                                  className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${
-                                    current
-                                      ? step.key === 'ready'
-                                        ? 'bg-emerald-600 text-white shadow-xs'
-                                        : 'bg-teal-700 text-white shadow-xs'
-                                      : done
-                                        ? 'bg-teal-50 text-teal-800 hover:bg-teal-100'
-                                        : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
-                                  }`}
-                                >
-                                  {idx + 1}. {step.label}
-                                </button>
-                              );
-                            })}
+                        {/* Barra de Etapas Operacionais Dinâmicas do Serviço */}
+                        {isInCare ? (() => {
+                          const steps = getAppointmentSteps(item);
+                          const currentStepIdx = steps.findIndex(s => s.key === item.status);
+                          return (
+                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                              {steps.map((step, idx) => {
+                                const done = currentStepIdx !== -1 && idx <= currentStepIdx;
+                                const current = idx === currentStepIdx;
+                                return (
+                                  <button
+                                    key={step.key}
+                                    type="button"
+                                    disabled={updatingId === item.id}
+                                    onClick={() => changeStatus(item, step.key)}
+                                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${
+                                      current
+                                        ? step.key === 'ready'
+                                          ? 'bg-emerald-600 text-white shadow-xs'
+                                          : 'bg-teal-700 text-white shadow-xs'
+                                        : done
+                                          ? 'bg-teal-50 text-teal-800 hover:bg-teal-100'
+                                          : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
+                                    }`}
+                                  >
+                                    {idx + 1}. {step.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          );
+                        })() : (item.status === 'scheduled' || item.status === 'requested') ? (
+                          <div className="mt-3 flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={updatingId === item.id}
+                              onClick={() => changeStatus(item, 'checked_in')}
+                              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-teal-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs transition hover:bg-teal-800 disabled:opacity-50"
+                            >
+                              <CheckCircle2 size={14} /> Fazer Check-in (Receber Pet)
+                            </button>
                           </div>
-                        )}
+                        ) : null}
                       </div>
                     </div>
 
@@ -1672,64 +1593,133 @@ export default function PetshopAgendaPage() {
               </div>
             </div>
 
-            {/* Barra de 5 Etapas com Clique Imediato */}
-            <div className="rounded-xl border border-zinc-200 bg-white p-3.5">
-              <p className="text-xs font-bold text-zinc-700 uppercase tracking-wider mb-2">
-                Progresso do Atendimento
-              </p>
-              <div className="grid grid-cols-5 gap-1.5">
-                {stageProgressSteps.map((step, idx) => {
-                  const stepIdx = stageProgressSteps.findIndex(s => s.key === selectedAppointment.status);
-                  const done = stepIdx !== -1 && idx <= stepIdx;
-                  const current = selectedAppointment.status === step.key;
+            {/* Barra de Etapas Dinâmicas Configuradas para este Atendimento */}
+            {(() => {
+              const steps = getAppointmentSteps(selectedAppointment);
+              const stepIdx = steps.findIndex(s => s.key === selectedAppointment.status);
+              const gridColsClass =
+                steps.length <= 3
+                  ? 'grid-cols-3'
+                  : steps.length === 4
+                  ? 'grid-cols-4'
+                  : steps.length === 5
+                  ? 'grid-cols-5'
+                  : 'grid-cols-3 sm:grid-cols-6';
 
-                  return (
+              return (
+                <div className="rounded-xl border border-zinc-200 bg-white p-3.5">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
+                      Progresso do Atendimento
+                    </p>
+                    <span className="text-[10px] text-teal-700 font-bold bg-teal-50 border border-teal-200 px-2 py-0.5 rounded-full">
+                      {steps.length} etapas para este serviço
+                    </span>
+                  </div>
+                  {(selectedAppointment.status === 'scheduled' || selectedAppointment.status === 'requested') && (
                     <button
-                      key={step.key}
                       type="button"
                       disabled={updatingId === selectedAppointment.id}
-                      onClick={() => changeStatus(selectedAppointment, step.key)}
-                      className={`rounded-lg py-2 px-1 text-center text-xs font-semibold transition cursor-pointer ${
-                        current
-                          ? step.key === 'ready'
-                            ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
-                            : 'bg-teal-700 text-white shadow-sm'
-                          : done
-                            ? 'bg-teal-50 text-teal-800 hover:bg-teal-100'
-                            : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
-                      }`}
+                      onClick={() => changeStatus(selectedAppointment, 'checked_in')}
+                      className="mb-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-teal-700 py-2.5 text-xs font-bold text-white shadow-xs transition hover:bg-teal-800 disabled:opacity-50"
                     >
-                      <span className="block text-[10px] opacity-75">{idx + 1}</span>
-                      <span className="truncate block">{step.label}</span>
+                      <CheckCircle2 size={16} /> Fazer Check-in (Receber Pet no Estabelecimento)
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                  )}
+                  <div className={`grid ${gridColsClass} gap-1.5`}>
+                    {steps.map((step, idx) => {
+                      const done = stepIdx !== -1 && idx <= stepIdx;
+                      const current = selectedAppointment.status === step.key;
+
+                      return (
+                        <button
+                          key={step.key}
+                          type="button"
+                          disabled={updatingId === selectedAppointment.id}
+                          onClick={() => changeStatus(selectedAppointment, step.key)}
+                          className={`rounded-lg py-2 px-1 text-center text-xs font-semibold transition cursor-pointer ${
+                            current
+                              ? step.key === 'ready'
+                                ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
+                                : 'bg-teal-700 text-white shadow-sm'
+                              : done
+                                ? 'bg-teal-50 text-teal-800 hover:bg-teal-100'
+                                : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
+                          }`}
+                        >
+                          <span className="block text-[10px] opacity-75">{idx + 1}</span>
+                          <span className="truncate block">{step.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Serviços e Valores */}
             <div className="rounded-xl border border-zinc-200 bg-white p-3.5">
               <p className="text-xs font-bold text-zinc-700 uppercase tracking-wider mb-2">
-                Serviços Contratados
+                Serviços Contratados & Cobertura
               </p>
               <div className="divide-y divide-zinc-100">
-                {selectedAppointment.services.map(svc => (
-                  <div key={svc.id} className="py-2 flex items-center justify-between text-xs">
-                    <div>
-                      <strong className="font-semibold text-zinc-800">{svc.nameSnapshot}</strong>
-                      <span className="text-zinc-400 ml-2">({svc.durationMinutes} min)</span>
+                {selectedAppointment.services.map(svc => {
+                  const isCovered = svc.coverageStatus === 'reserved' || svc.coverageStatus === 'consumed';
+                  const isComboChild = Boolean(svc.comboParentId);
+                  const isComboParent = Boolean(svc.isCombo);
+                  return (
+                    <div
+                      key={svc.id}
+                      className={`py-2 flex items-center justify-between gap-2 text-xs ${
+                        isComboChild ? 'pl-4 bg-zinc-50/60 rounded-lg' : ''
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {isComboChild && <span className="text-zinc-400 font-mono">↳</span>}
+                          <strong className="font-semibold text-zinc-800">{svc.nameSnapshot}</strong>
+                          <span className="text-zinc-400">({svc.durationMinutes} min)</span>
+                          {isComboParent && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-800">
+                              Combo
+                            </span>
+                          )}
+                          {isComboChild && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                              Item do combo
+                            </span>
+                          )}
+                          {svc.coverageStatus === 'reserved' && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-800">
+                              <PackageCheck size={10} /> Sessão Reservada no Pacote
+                            </span>
+                          )}
+                          {svc.coverageStatus === 'consumed' && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-800">
+                              <PackageCheck size={10} /> Sessão Consumida do Pacote
+                            </span>
+                          )}
+                        </div>
+                        {svc.customerPackage && (
+                          <p className="text-[10px] text-teal-700 mt-0.5">
+                            Pacote: {svc.customerPackage.planNameSnapshot}
+                          </p>
+                        )}
+                      </div>
+                      <span className={`font-bold tabular-nums shrink-0 ${isCovered || isComboChild ? 'text-teal-700' : 'text-zinc-900'}`}>
+                        {isCovered ? 'Coberto (R$ 0,00)' : isComboChild ? 'Incluso (R$ 0,00)' : money(Number(svc.priceSnapshot || 0))}
+                      </span>
                     </div>
-                    <span className="font-bold text-zinc-900 tabular-nums">
-                      {money(Number(svc.priceSnapshot || 0))}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="pt-2 border-t border-zinc-200 flex justify-between items-center text-xs">
-                <span className="font-bold text-zinc-700">Total:</span>
+                <span className="font-bold text-zinc-700">Total adicional a receber:</span>
                 <span className="text-sm font-bold text-teal-800 tabular-nums">
                   {money(
-                    selectedAppointment.services.reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0),
+                    selectedAppointment.services
+                      .filter(s => s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
+                      .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0),
                   )}
                 </span>
               </div>
@@ -1838,7 +1828,7 @@ export default function PetshopAgendaPage() {
             {/* Recado ou Foto da Etapa */}
             {selectedAppointment.stageNotes && (
               <div className="rounded-xl border border-teal-200 bg-teal-50/60 p-3 text-xs text-teal-900">
-                <strong className="block mb-1 font-semibold">💬 Último recado enviado:</strong>
+                <strong className="block mb-1 font-semibold">Último recado enviado:</strong>
                 <p>“{selectedAppointment.stageNotes}”</p>
               </div>
             )}
@@ -1853,6 +1843,141 @@ export default function PetshopAgendaPage() {
                 <div className="text-xs">
                   <p className="font-semibold text-zinc-800">Foto da etapa enviada ao tutor</p>
                   <p className="text-zinc-500">Visível no link ao vivo de acompanhamento.</p>
+                </div>
+              </div>
+            )}
+
+            {/* Galeria de Fotos de Todas as Etapas */}
+            {(() => {
+              const historyPhotos = Array.isArray(selectedAppointment.stageHistory)
+                ? (selectedAppointment.stageHistory as any[]).filter(h => h.photoUrl)
+                : [];
+              const allPhotos: Array<{ url: string; label: string }> = [];
+              historyPhotos.forEach(h => {
+                if (h.photoUrl && !allPhotos.some(p => p.url === h.photoUrl)) {
+                  allPhotos.push({
+                    url: h.photoUrl,
+                    label: h.label || statusLabelMap[h.status] || h.status,
+                  });
+                }
+              });
+              if (selectedAppointment.stagePhotoUrl && !allPhotos.some(p => p.url === selectedAppointment.stagePhotoUrl)) {
+                allPhotos.push({
+                  url: selectedAppointment.stagePhotoUrl,
+                  label: 'Foto atual',
+                });
+              }
+
+              if (allPhotos.length === 0) return null;
+
+              return (
+                <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs font-bold text-teal-900 flex items-center gap-1.5">
+                      <Camera size={14} className="text-teal-700" />
+                      Galeria de Fotos do Atendimento ({allPhotos.length})
+                    </span>
+                    <span className="text-[10px] text-teal-700 font-medium">Fotos de cada etapa registrada</span>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {allPhotos.map((photo, pIdx) => (
+                      <a
+                        key={pIdx}
+                        href={getFullUrl(photo.url)}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="group relative rounded-lg overflow-hidden border border-teal-200 bg-white shadow-2xs hover:shadow-md transition"
+                        title={`Clique para ampliar foto de ${photo.label}`}
+                      >
+                        <img
+                          src={getFullUrl(photo.url)}
+                          alt={`Foto etapa ${photo.label}`}
+                          className="h-16 w-16 object-cover group-hover:scale-105 transition"
+                        />
+                        <span className="absolute bottom-0 inset-x-0 bg-black/65 text-[9px] text-white text-center py-0.5 truncate px-1 font-semibold">
+                          {photo.label}
+                        </span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Histórico Completo de Transições & Auditoria */}
+            {Array.isArray(selectedAppointment.stageHistory) && selectedAppointment.stageHistory.length > 0 && (
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5">
+                <div className="flex items-center justify-between mb-2.5">
+                  <span className="text-xs font-bold text-zinc-700 uppercase tracking-wider flex items-center gap-1.5">
+                    <History size={14} className="text-teal-700" />
+                    Histórico do Atendimento
+                  </span>
+                  <span className="text-[10px] text-zinc-500 font-semibold">
+                    {selectedAppointment.stageHistory.length} registros
+                  </span>
+                </div>
+
+                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                  {selectedAppointment.stageHistory.map((h, hIdx) => {
+                    const stageLabel = h.label || statusLabelMap[h.status] || getStageLabel(h.status, selectedAppointment.customStages) || h.status;
+                    const timeFormatted = new Date(h.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                    const dateFormatted = new Date(h.at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+
+                    return (
+                      <div
+                        key={hIdx}
+                        className={`flex items-start justify-between gap-2 rounded-lg p-2 text-xs border ${
+                          h.skipped
+                            ? 'bg-amber-50/70 border-amber-200 text-amber-950'
+                            : 'bg-white border-zinc-200 text-zinc-800'
+                        }`}
+                      >
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <strong className="font-bold">{stageLabel}</strong>
+                            {h.skipped ? (
+                              <span className="rounded bg-amber-100 border border-amber-300 text-amber-900 px-1.5 py-0.2 text-[10px] font-bold">
+                                Etapa Pulada
+                              </span>
+                            ) : (
+                              <span className="rounded bg-teal-50 border border-teal-200 text-teal-800 px-1.5 py-0.2 text-[10px] font-semibold">
+                                Concluída
+                              </span>
+                            )}
+                            {h.userName && (
+                              <span className="text-[11px] text-zinc-500">
+                                por <strong className="text-zinc-700">{h.userName}</strong>
+                              </span>
+                            )}
+                          </div>
+                          {h.reason && <p className="text-[10px] text-amber-800 mt-0.5">{h.reason}</p>}
+                          {h.notes && <p className="text-[11px] text-zinc-600 mt-0.5 italic">"{h.notes}"</p>}
+                          {h.photoUrl && (
+                            <div className="mt-2">
+                              <a
+                                href={getFullUrl(h.photoUrl)}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50/80 p-1.5 text-[11px] font-semibold text-teal-800 hover:bg-teal-100 transition"
+                              >
+                                <img
+                                  src={getFullUrl(h.photoUrl)}
+                                  alt="Foto da etapa"
+                                  className="h-10 w-10 rounded object-cover border border-teal-200"
+                                />
+                                <span className="flex items-center gap-1">
+                                  <Camera size={12} /> Foto da etapa ({stageLabel})
+                                </span>
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                        <span className="text-[10px] font-semibold text-zinc-400 tabular-nums shrink-0 mt-0.5">
+                          {timeFormatted} · {dateFormatted}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -1889,24 +2014,42 @@ export default function PetshopAgendaPage() {
               </div>
 
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  disabled={chargingId === selectedAppointment.id}
-                  onClick={() => handleChargeAppointment(selectedAppointment)}
-                  className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm cursor-pointer active:scale-95 ${
-                    selectedAppointment.status === 'ready'
-                      ? 'bg-teal-600 text-white hover:bg-teal-700 ring-2 ring-teal-400/40'
-                      : 'bg-zinc-800 text-white hover:bg-zinc-900'
-                  }`}
-                  title="Cobrar atendimento no Frente de Caixa (PDV)"
-                >
-                  {chargingId === selectedAppointment.id ? (
-                    <Loader2 size={15} className="animate-spin" />
-                  ) : (
-                    <CreditCard size={15} />
-                  )}
-                  <span>Cobrar</span>
-                </button>
+                {selectedAppointment.status === 'delivered' ? (
+                  <div className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 shadow-2xs">
+                    <CheckCircle2 size={15} className="text-emerald-600" />
+                    <span>✓ Já Cobrado e Concluído</span>
+                  </div>
+                ) : selectedAppointment.status === 'cancelled' ? (
+                  <div className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-800 shadow-2xs">
+                    <XCircle size={15} className="text-rose-600" />
+                    <span>Atendimento Cancelado</span>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={chargingId === selectedAppointment.id || selectedAppointment.status !== 'ready'}
+                    onClick={() => handleChargeAppointment(selectedAppointment)}
+                    className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm cursor-pointer active:scale-95 ${
+                      selectedAppointment.status === 'ready'
+                        ? 'bg-teal-600 text-white hover:bg-teal-700 ring-2 ring-teal-400/40'
+                        : 'bg-zinc-800 text-white hover:bg-zinc-900'
+                    }`}
+                    title="Cobrar atendimento no Frente de Caixa (PDV) ou concluir via pacote"
+                  >
+                    {chargingId === selectedAppointment.id ? (
+                      <Loader2 size={15} className="animate-spin" />
+                    ) : selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') ? (
+                      <PackageCheck size={15} />
+                    ) : (
+                      <CreditCard size={15} />
+                    )}
+                    <span>
+                      {selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed')
+                        ? 'Concluir (Pacote)'
+                        : 'Cobrar'}
+                    </span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -1920,6 +2063,10 @@ export default function PetshopAgendaPage() {
           </div>
         </Modal>
       )}
+
+      {paymentItem && <PaymentModal isOpen onClose={() => setPaymentItem(null)} isOnline={navigator.onLine} tenantConfig={tenant}
+        petshopReceipt={{ customer: paymentItem.customer.name, total: paymentItem.services.filter(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus || '')).reduce((sum, s) => sum + Math.max(0, Number(s.priceSnapshot) - Number(s.coveredAmount || 0)), 0), submit: async payments => { const { data } = await api.post(`/petshop/appointments/${paymentItem.id}/receive`, { payments }); return data; } }}
+        onSuccess={() => { setSelectedAppointment(null); loadAppointments(false); toast.success('Pagamento registrado.'); }} />}
 
       {/* 9. MODAL DE FOTO E RECADO DA ETAPA */}
       {stageModalItem && (
@@ -1966,7 +2113,7 @@ export default function PetshopAgendaPage() {
               <textarea
                 className={inputClass}
                 rows={2}
-                placeholder="Ex: Tomou banho quentinho, comportou super bem e já está secando! 🐾"
+                placeholder="Ex: Tomou banho quentinho, comportou super bem e já está secando!"
                 value={stageForm.stageNotes}
                 onChange={e => setStageForm({ ...stageForm, stageNotes: e.target.value })}
               />
@@ -2016,6 +2163,73 @@ export default function PetshopAgendaPage() {
               </select>
             </label>
 
+            {form.petId && (() => {
+              const selectedPetObj = pets.find(p => p.id === form.petId);
+              if (!selectedPetObj) return null;
+              return (
+                <div className="sm:col-span-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-teal-200 bg-teal-50/70 p-3 text-xs">
+                  <div className="flex items-center gap-2.5">
+                    <PetAvatar pet={selectedPetObj} size="sm" />
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <strong className="text-zinc-900 font-bold">{selectedPetObj.name}</strong>
+                        {selectedPetObj.sex === 'male' && (
+                          <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300" title="Macho (gravata)">
+                            ♂ Macho
+                          </span>
+                        )}
+                        {selectedPetObj.sex === 'female' && (
+                          <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[10px] font-bold bg-pink-100 text-pink-800 border border-pink-300" title="Fêmea (laço)">
+                            ♀ Fêmea
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-[11px] text-zinc-500">
+                        {selectedPetObj.breed || 'SRD'} · Tutor: {selectedPetObj.customer?.name}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-zinc-700">Porte para cobrança:</span>
+                    {selectedPetObj.size ? (
+                      <span className="inline-flex items-center gap-1 rounded-lg bg-teal-700 text-white font-bold text-xs px-2.5 py-1">
+                        <PawPrint size={12} />
+                        {sizeLabel(selectedPetObj.size)}
+                      </span>
+                    ) : (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-amber-800 font-semibold text-[11px]">Sem porte!</span>
+                        <select
+                          className="rounded-lg border border-amber-400 bg-white px-2 py-1 text-xs font-semibold text-zinc-800"
+                          defaultValue=""
+                          onChange={async e => {
+                            const val = e.target.value;
+                            if (!val) return;
+                            try {
+                              await api.patch(`/petshop/pets/${selectedPetObj.id}`, { size: val });
+                              toast.success(`Porte do pet atualizado para ${sizeLabel(val)}!`);
+                              selectedPetObj.size = val;
+                              loadAppointments(false);
+                            } catch {
+                              toast.error('Erro ao salvar porte do pet.');
+                            }
+                          }}
+                        >
+                          <option value="">Definir porte agora...</option>
+                          <option value="mini">Mini (até 5kg)</option>
+                          <option value="small">Pequeno (5 a 10kg)</option>
+                          <option value="medium">Médio (10 a 20kg)</option>
+                          <option value="large">Grande (20 a 35kg)</option>
+                          <option value="giant">Gigante (acima de 35kg)</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
+
             <label>
               <span className={labelClass}>Data e hora *</span>
               <input
@@ -2046,37 +2260,166 @@ export default function PetshopAgendaPage() {
             <fieldset className="sm:col-span-2">
               <legend className={labelClass}>Serviços *</legend>
               <div className="grid gap-2 sm:grid-cols-2 max-h-48 overflow-y-auto pr-1">
-                {services.map(svc => (
-                  <label
-                    key={svc.id}
-                    className={`flex cursor-pointer items-center gap-3 rounded-xl border p-2.5 transition ${
-                      form.serviceIds.includes(svc.id)
-                        ? 'border-teal-600 bg-teal-50/70'
-                        : 'border-zinc-200 hover:bg-zinc-50'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={form.serviceIds.includes(svc.id)}
-                      onChange={e =>
-                        setForm({
-                          ...form,
-                          serviceIds: e.target.checked
-                            ? [...form.serviceIds, svc.id]
-                            : form.serviceIds.filter(id => id !== svc.id),
-                        })
-                      }
-                    />
-                    <span className="flex-1 text-xs font-semibold text-zinc-900">
-                      {svc.name}
-                      <small className="mt-0.5 block font-normal text-zinc-500">
-                        {svc.durationMinutes} min · {money(svc.price)}
-                      </small>
-                    </span>
-                  </label>
-                ))}
+                {services.map(svc => {
+                  const isSelected = form.serviceIds.includes(svc.id);
+                  const selectedPetObj = pets.find(p => p.id === form.petId);
+                  const eff = getEffectiveServicePrice(svc, selectedPetObj);
+                  const isCombo = svc.serviceType === 'COMBO';
+                  const eligiblePackages = availablePackages.filter(pkg =>
+                    pkg.items?.some(it => it.serviceId === svc.id && it.availableQuantity > 0),
+                  );
+                  const selectedPkgId = packageSelections[svc.id] || '';
+
+                  return (
+                    <div
+                      key={svc.id}
+                      className={`rounded-xl border p-2.5 transition ${
+                        isSelected
+                          ? isCombo
+                            ? 'border-purple-600 bg-purple-50/70'
+                            : 'border-teal-600 bg-teal-50/70'
+                          : 'border-zinc-200 hover:bg-zinc-50'
+                      }`}
+                    >
+                      <label className="flex cursor-pointer items-start gap-3">
+                        <input
+                          type="checkbox"
+                          className="mt-1"
+                          checked={isSelected}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            setForm({
+                              ...form,
+                              serviceIds: checked
+                                ? [...form.serviceIds, svc.id]
+                                : form.serviceIds.filter(id => id !== svc.id),
+                            });
+                            if (checked && eligiblePackages.length > 0 && !packageSelections[svc.id]) {
+                              setPackageSelections(prev => ({
+                                ...prev,
+                                [svc.id]: eligiblePackages[0].id,
+                              }));
+                            } else if (!checked && packageSelections[svc.id]) {
+                              setPackageSelections(prev => {
+                                const next = { ...prev };
+                                delete next[svc.id];
+                                return next;
+                              });
+                            }
+                          }}
+                        />
+                        <span className="flex-1 text-xs font-semibold text-zinc-900">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span>{svc.name}</span>
+                            {isCombo && (
+                              <span className="rounded bg-purple-100 text-purple-800 text-[10px] font-bold px-1.5 py-0.2">
+                                COMBO
+                              </span>
+                            )}
+                          </div>
+                          <small className="mt-0.5 block font-normal text-zinc-500">
+                            {eff.duration} min ·{' '}
+                            {isSelected && selectedPkgId ? (
+                              <span className="font-bold text-teal-700">Coberto por pacote (R$ 0,00)</span>
+                            ) : (
+                              <>
+                                <span className="font-semibold text-zinc-800">{money(eff.price)}</span>
+                                {eff.variantLabel && (
+                                  <span className="ml-1 text-[10px] text-teal-700 font-medium">({eff.variantLabel})</span>
+                                )}
+                              </>
+                            )}
+                          </small>
+                        </span>
+                      </label>
+
+                      {isSelected && eligiblePackages.length > 0 && (
+                        <div className="mt-2 border-t border-teal-200/80 pt-2">
+                          <label className="block text-[10px] font-bold uppercase tracking-wider text-teal-800 mb-1">
+                            Cobertura de Pacote Disponível
+                          </label>
+                          <select
+                            className="w-full rounded-lg border border-teal-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-800 outline-none"
+                            value={selectedPkgId}
+                            onChange={e =>
+                              setPackageSelections(prev => ({
+                                ...prev,
+                                [svc.id]: e.target.value,
+                              }))
+                            }
+                          >
+                            <option value="">Cobrar avulso ({money(eff.price)})</option>
+                            {eligiblePackages.map(pkg => {
+                              const item = pkg.items?.find(i => i.serviceId === svc.id);
+                              return (
+                                <option key={pkg.id} value={pkg.id}>
+                                  Abater de: {pkg.planNameSnapshot} ({item?.availableQuantity} de {item?.totalQuantity} livres)
+                                </option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </fieldset>
+
+            {/* Resumo de Pacotes Ativos do Pet e Totais */}
+            {form.petId && (
+              <div className="sm:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs space-y-2">
+                {loadingPackages ? (
+                  <p className="text-zinc-500 flex items-center gap-1.5">
+                    <Loader2 size={13} className="animate-spin text-teal-700" />
+                    Verificando pacotes ativos do pet...
+                  </p>
+                ) : availablePackages.length > 0 ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-zinc-200">
+                    <div className="flex items-center gap-1.5 text-teal-800 font-semibold">
+                      <PackageCheck size={15} className="text-teal-700 shrink-0" />
+                      <span>
+                        {availablePackages.length} pacote(s) ativo(s) encontrado(s) para este pet/tutor
+                      </span>
+                    </div>
+                    <span className="text-[11px] text-zinc-500">
+                      Sessão reservada agora e consumida na conclusão
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between text-zinc-500 pb-2 border-b border-zinc-200">
+                    <span>Nenhum pacote vigente com saldo para este pet nesta data.</span>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/petshop/pacotes?petId=${form.petId}`)}
+                      className="text-teal-700 font-semibold hover:underline cursor-pointer"
+                    >
+                      Contratar pacote
+                    </button>
+                  </div>
+                )}
+
+                {form.serviceIds.length > 0 && (
+                  <div className="flex items-center justify-between pt-0.5">
+                    <span className="text-zinc-600 font-medium">
+                      Valor adicional a cobrar no caixa:
+                    </span>
+                    <strong className="text-sm font-bold text-teal-800 tabular-nums">
+                      {money(
+                        form.serviceIds.reduce((sum, svcId) => {
+                          if (packageSelections[svcId]) return sum;
+                          const svc = services.find(s => s.id === svcId);
+                          if (!svc) return sum;
+                          const selectedPetObj = pets.find(p => p.id === form.petId);
+                          const eff = getEffectiveServicePrice(svc, selectedPetObj);
+                          return sum + eff.price;
+                        }, 0),
+                      )}
+                    </strong>
+                  </div>
+                )}
+              </div>
+            )}
 
             <label className="sm:col-span-2">
               <span className={labelClass}>Observações</span>

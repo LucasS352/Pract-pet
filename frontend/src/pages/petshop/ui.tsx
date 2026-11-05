@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { PawPrint, Search, X, type LucideIcon } from 'lucide-react';
+import { Coins, PawPrint, Search, Users, X, type LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { getFullUrl } from '@/lib/getFullUrl';
 
@@ -109,7 +109,9 @@ export function PageHeader({ eyebrow, title, description, action }: { eyebrow: s
   );
 }
 
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+let modalLocks = 0;
+let originalOverflow = '';
+export function Modal({ title, onClose, children, maxWidth = 'sm:max-w-2xl' }: { title: string; onClose: () => void; children: ReactNode; maxWidth?: string }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -142,16 +144,15 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
     };
 
     document.addEventListener('keydown', handleKeyDown);
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
+    if (modalLocks++ === 0) { originalOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; }
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
-      document.body.style.overflow = previousOverflow;
+      if (--modalLocks === 0) document.body.style.overflow = originalOverflow;
       previousFocus?.focus();
     };
   }, []);
 
-  return <div className="fixed inset-0 z-[80] grid place-items-end bg-slate-950/45 p-0 backdrop-blur-[2px] sm:place-items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className="max-h-[92dvh] w-full overflow-auto rounded-t-xl bg-white shadow-2xl sm:max-w-2xl sm:rounded-xl"><div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-5 py-4 backdrop-blur"><h2 id={titleId} className="text-lg font-semibold">{title}</h2><button type="button" onClick={onClose} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-lg text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)]"><X aria-hidden="true" size={18} /></button></div><div className="p-5">{children}</div></div></div>;
+  return <div className="fixed inset-0 z-[80] grid place-items-end bg-slate-950/45 p-0 backdrop-blur-[2px] sm:place-items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`max-h-[92dvh] w-full overflow-auto rounded-t-xl bg-white shadow-2xl sm:rounded-xl ${maxWidth}`}><div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-5 py-4 backdrop-blur"><h2 id={titleId} className="text-lg font-semibold">{title}</h2><button type="button" onClick={onClose} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-lg text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)]"><X aria-hidden="true" size={18} /></button></div><div className="p-5">{children}</div></div></div>;
 }
 
 export function SearchField({ value, onChange, placeholder, label = 'Buscar' }: { value: string; onChange: (value: string) => void; placeholder: string; label?: string }) {
@@ -189,6 +190,27 @@ export function CatalogTabs() {
       <NavLink to="/petshop/alertas-validade" className={tabClass}>Validades</NavLink>
       <NavLink to="/petshop/pedidos-compra" className={tabClass}>Pedidos de Compra</NavLink>
       <NavLink to="/petshop/fornecedores" className={tabClass}>Fornecedores</NavLink>
+    </nav>
+  );
+}
+
+export function TeamTabs() {
+  const tabClass = ({ isActive }: { isActive: boolean }) =>
+    `inline-flex min-h-10 items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition whitespace-nowrap shadow-2xs ${
+      isActive
+        ? 'bg-[#0d6e5a] text-white shadow-xs'
+        : 'border border-zinc-200/90 bg-white text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900'
+    }`;
+  return (
+    <nav aria-label="Seções da equipe" className="mb-6 flex flex-wrap items-center gap-2.5">
+      <NavLink to="/petshop/equipe" end className={tabClass}>
+        <Users size={16} />
+        <span>Colaboradores & PINs</span>
+      </NavLink>
+      <NavLink to="/petshop/equipe/comissoes" className={tabClass}>
+        <Coins size={16} />
+        <span>Comissões & Fechamento</span>
+      </NavLink>
     </nav>
   );
 }

@@ -1,4 +1,4 @@
-import { Injectable, BadRequestException, ConflictException, Logger, NotFoundException, StreamableFile } from '@nestjs/common';
+import { Injectable, ForbiddenException, BadRequestException, ConflictException, Logger, NotFoundException, StreamableFile } from '@nestjs/common';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
@@ -9,6 +9,7 @@ import { retryTransaction } from '../prisma/transaction-retry';
 import { lockProducts } from '../prisma/lock-products';
 import { releaseComandaAssets } from '../comandas/service-timer.rules';
 import { assertComandaSnapshot } from './comanda-snapshot';
+import { claimPetshopCheckout, completePetshopCheckout } from './petshop-checkout';
 import archiver = require('archiver');
 import { MailService } from '../mail/mail.service';
 import { IntegrationsService } from '../integrations/integrations.service';
@@ -127,7 +128,12 @@ export class SalesService {
     }
   }
 
-  async checkout(data: any) {
+  async checkout(data: any, petshopReceipt = false) {
+    if (!petshopReceipt) {
+      const tenant = await this.heartPrisma.tenant.findUnique({ where: { id: this.tenantContext.get().tenantId }, select: { modulos: true } });
+      const modules = typeof tenant?.modulos === 'string' ? JSON.parse(tenant.modulos) : tenant?.modulos;
+      if ((modules as any)?.pdv === false) throw new ForbiddenException('Módulo PDV desabilitado para este cliente.');
+    }
     const { userId, tenantId, databaseUrl } = this.tenantContext.get();
     let operatorId = data.operatorId || userId;
     const prisma = await this.getPrisma();
@@ -178,7 +184,7 @@ export class SalesService {
 
       let targetCashRegisterId = data.cashRegisterId;
 
-      if (!isConsumption && !isAjusteFiscal && !targetCashRegisterId) {
+      if (!petshopReceipt && !isConsumption && !isAjusteFiscal && !targetCashRegisterId) {
         // Se não veio cashRegisterId na requisição, busca o caixa aberto DO OPERADOR ATUAL
         if (operatorId) {
           const openReg = await tx.cashRegister.findFirst({
@@ -270,6 +276,8 @@ export class SalesService {
           }
         }
       }
+
+      const petshopAppointmentId = await claimPetshopCheckout(tx, data, comandaToClose);
 
       // Quando há comanda: apenas extraItems passam pelo fluxo normal de estoque
       // Quando não há comanda: todos os data.items passam pelo fluxo normal
@@ -649,17 +657,21 @@ export class SalesService {
         if (comandaToClose.notes) {
           try {
             let apptId: string | null = null;
+            let pkgContractId: string | null = null;
             if (comandaToClose.notes.startsWith('PET2:')) {
               const parsed = JSON.parse(comandaToClose.notes.slice(5));
               apptId = parsed.a || null;
             } else if (comandaToClose.notes.startsWith('PETSHOP_LINK_V1:')) {
               const parsed = JSON.parse(comandaToClose.notes.slice(16));
               apptId = parsed.appointment?.id || null;
+            } else if (comandaToClose.notes.startsWith('PKG1:')) {
+              const parsed = JSON.parse(comandaToClose.notes.slice(5));
+              pkgContractId = parsed.c || null;
             }
-            if (apptId) {
-              await tx.petAppointment.updateMany({
-                where: { id: apptId },
-                data: { status: 'delivered', completedAt: new Date() },
+            if (pkgContractId) {
+              await tx.customerPetPackage.updateMany({
+                where: { id: pkgContractId },
+                data: { paymentStatus: 'paid', saleId: sale.id },
               });
             }
           } catch (e) {
@@ -901,16 +913,7 @@ export class SalesService {
       // These intents cannot disappear between the sale commit and a process restart.
       if (data.comandaId) await releaseComandaAssets(tx, data.comandaId);
 
-      if (data.petshopAppointmentId) {
-        try {
-          await tx.petAppointment.updateMany({
-            where: { id: String(data.petshopAppointmentId) },
-            data: { status: 'delivered', completedAt: new Date() },
-          });
-        } catch (appErr) {
-          // Silencioso se agendamento não for encontrado
-        }
-      }
+      await completePetshopCheckout(tx, petshopAppointmentId, operatorId || userId || null);
 
       const jobs = [
         ...(fullSale.emitirNfce ? [{ kind: 'NFCE', payload: '{}' }] : []),

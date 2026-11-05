@@ -65,3 +65,13 @@ backups/
 
 # Pacotes de manutenção contêm fotos de clientes e mapeamentos privados.
 image-packages/
+
+# Evidências locais de homologação e arquivos temporários
+scratch/
+docs/homologacao/evidencias/
+docs/homologacao/render/
+
+# Rotinas de homologação locais com dados e acesso ao ambiente de teste
+scripts/qa-petshop-*.cjs
+scripts/repair-petshop-text.cjs
+docs/homologacao/

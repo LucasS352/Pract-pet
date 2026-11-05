@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ArrowUpDown,
@@ -9,6 +9,7 @@ import {
   Download,
   Droplets,
   FlaskConical,
+  Layers,
   MoreHorizontal,
   PawPrint,
   Pencil,
@@ -27,7 +28,10 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { PetService } from './types';
 import { money } from './types';
-import { CatalogTabs, EmptyState, inputClass, labelClass, ListSkeleton, Modal, pageClass, PageHeader, primaryButton, secondaryButton } from './ui';
+import { CatalogTabs, EmptyState, ListSkeleton, pageClass, PageHeader, primaryButton, secondaryButton } from './ui';
+import { ServiceEditorModal } from './ServiceEditorModal';
+import { ManageStoreStagesModal } from './ManageStoreStagesModal';
+import { Workflow } from 'lucide-react';
 
 type ServiceCategory = 'Higiene e Estética' | 'Saúde' | 'Estética e Spa' | 'Outros';
 type TargetPetGroup = 'Cães e Gatos' | 'Cães' | 'Gatos';
@@ -94,7 +98,7 @@ function encodeServiceDescription(cleanDescription: string, category: ServiceCat
   return trimmed ? `${trimmed}\n\n${metaTag}` : metaTag;
 }
 
-function getServiceIconInfo(serviceName: string, category: ServiceCategory, defaultColor: string) {
+function getServiceIconInfo(serviceName: string, category: string, defaultColor?: string) {
   const name = serviceName.toLowerCase();
   if (name.includes('consulta') || name.includes('veterin')) {
     return { icon: Stethoscope, bg: 'bg-rose-50', text: 'text-rose-600', ring: 'ring-rose-200/60' };
@@ -289,14 +293,14 @@ function ServiceRowActionsMenu({
 export default function PetshopServicesPage() {
   const [items, setItems] = useState<PetService[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [updatingId, setUpdatingId] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
+  const [stagesModalOpen, setStagesModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<ServiceFormState>(emptyServiceForm);
 
   // Filtros
   const [search, setSearch] = useState('');
+  const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedPet, setSelectedPet] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
@@ -319,6 +323,7 @@ export default function PetshopServicesPage() {
   const kpis = useMemo(() => {
     const total = items.length;
     const active = items.filter(s => s.active).length;
+    const combos = items.filter(s => s.serviceType === 'COMBO').length;
     const activeItems = items.filter(s => s.active);
 
     const avgMinutes =
@@ -331,7 +336,7 @@ export default function PetshopServicesPage() {
         ? activeItems.reduce((acc, curr) => acc + Number(curr.price || 0), 0) / activeItems.length
         : 0;
 
-    return { total, active, avgMinutes, avgTicket };
+    return { total, active, combos, avgMinutes, avgTicket };
   }, [items]);
 
   // Lista de serviços com metadados parseados
@@ -340,7 +345,10 @@ export default function PetshopServicesPage() {
       const meta = parseServiceMetadata(item);
       return {
         ...item,
-        meta,
+        meta: {
+          ...meta,
+          category: item.category || meta.category,
+        },
       };
     });
   }, [items]);
@@ -348,18 +356,25 @@ export default function PetshopServicesPage() {
   // Lista filtrada e ordenada
   const filteredItems = useMemo(() => {
     let result = parsedItems.filter(item => {
+      // Tipo (Individual vs Combo)
+      if (selectedType !== 'all') {
+        const itType = item.serviceType || 'INDIVIDUAL';
+        if (itType !== selectedType) return false;
+      }
+
       // Busca
       if (search.trim()) {
         const query = search.toLowerCase();
         const matchesName = item.name.toLowerCase().includes(query);
-        const matchesDesc = item.meta.cleanDescription.toLowerCase().includes(query);
-        const matchesCat = item.meta.category.toLowerCase().includes(query);
+        const matchesDesc = (item.description || item.meta.cleanDescription || '').toLowerCase().includes(query);
+        const matchesCat = (item.category || item.meta.category).toLowerCase().includes(query);
         if (!matchesName && !matchesDesc && !matchesCat) return false;
       }
 
       // Categoria
-      if (selectedCategory !== 'all' && item.meta.category !== selectedCategory) {
-        return false;
+      if (selectedCategory !== 'all') {
+        const itCat = item.category || item.meta.category;
+        if (itCat !== selectedCategory) return false;
       }
 
       // Pets
@@ -399,72 +414,57 @@ export default function PetshopServicesPage() {
     });
 
     return result;
-  }, [parsedItems, search, selectedCategory, selectedPet, selectedStatus, sortBy]);
+  }, [parsedItems, search, selectedType, selectedCategory, selectedPet, selectedStatus, sortBy]);
 
   const openNew = () => {
     setEditingId(null);
-    setForm(emptyServiceForm);
     setModalOpen(true);
   };
 
   const openEdit = (item: typeof parsedItems[number]) => {
     setEditingId(item.id);
-    setForm({
-      name: item.name,
-      category: item.meta.category,
-      durationMinutes: item.durationMinutes,
-      price: String(item.price),
-      targetPets: item.meta.targetPets,
-      color: item.color || '#0d9488',
-      description: item.meta.cleanDescription,
-    });
     setModalOpen(true);
   };
 
-  const handleDuplicate = (item: typeof parsedItems[number]) => {
-    setEditingId(null);
-    setForm({
-      name: `${item.name} (Cópia)`,
-      category: item.meta.category,
-      durationMinutes: item.durationMinutes,
-      price: String(item.price),
-      targetPets: item.meta.targetPets,
-      color: item.color || '#0d9488',
-      description: item.meta.cleanDescription,
-    });
-    setModalOpen(true);
-    toast.info('Revise os dados e clique em "Salvar serviço" para confirmar a cópia.');
-  };
-
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
-    setSaving(true);
+  const handleDuplicate = async (item: typeof parsedItems[number]) => {
     try {
-      const fullDescription = encodeServiceDescription(form.description, form.category, form.targetPets);
-      const payload = {
-        name: form.name.trim(),
-        description: fullDescription,
-        durationMinutes: Number(form.durationMinutes),
-        price: Number(form.price),
-        color: form.color,
+      const payload: any = {
+        name: `${item.name} (Cópia)`,
+        description: item.description || item.meta.cleanDescription,
+        category: item.category || item.meta.category,
+        targetSpecies: item.targetSpecies || 'all',
+        durationMinutes: item.durationMinutes,
+        price: Number(item.price),
+        color: item.color || '#0d9488',
+        serviceType: item.serviceType || 'INDIVIDUAL',
+        comboPricingType: item.comboPricingType,
+        comboDiscountValue: item.comboDiscountValue ? Number(item.comboDiscountValue) : undefined,
       };
 
-      if (editingId) {
-        await api.patch(`/petshop/services/${editingId}`, payload);
-        toast.success('Serviço atualizado com sucesso.');
-      } else {
-        await api.post('/petshop/services', payload);
-        toast.success('Serviço criado com sucesso.');
+      if (Array.isArray(item.comboItems) && item.comboItems.length > 0) {
+        payload.comboItems = item.comboItems.map((ci, idx) => ({
+          componentServiceId: ci.componentServiceId,
+          quantity: ci.quantity,
+          order: idx,
+        }));
       }
 
-      setModalOpen(false);
-      setForm(emptyServiceForm);
-      setEditingId(null);
+      if (Array.isArray(item.pricingRules) && item.pricingRules.length > 0) {
+        payload.pricingRules = item.pricingRules.map(r => ({
+          species: r.species,
+          size: r.size,
+          coatType: r.coatType,
+          price: Number(r.price),
+          durationMinutes: r.durationMinutes,
+          label: r.label,
+        }));
+      }
+
+      await api.post('/petshop/services', payload);
+      toast.success('Serviço duplicado com sucesso!');
       void load(false);
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Erro ao salvar serviço.');
-    } finally {
-      setSaving(false);
+    } catch {
+      toast.error('Erro ao duplicar serviço.');
     }
   };
 
@@ -529,10 +529,21 @@ export default function PetshopServicesPage() {
         title="Serviços"
         description="Duração e preço utilizados nos agendamentos."
         action={
-          <button type="button" className={primaryButton} onClick={openNew}>
-            <Plus aria-hidden="true" className="mr-1.5 inline" size={17} />
-            Novo serviço
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className={secondaryButton}
+              onClick={() => setStagesModalOpen(true)}
+              title="Personalizar nomes das etapas e criar etapas adicionais para o Pet Shop"
+            >
+              <Workflow aria-hidden="true" className="mr-1.5 inline text-teal-700" size={17} />
+              Etapas da Loja
+            </button>
+            <button type="button" className={primaryButton} onClick={openNew}>
+              <Plus aria-hidden="true" className="mr-1.5 inline" size={17} />
+              Novo serviço
+            </button>
+          </div>
         }
       />
 
@@ -545,7 +556,9 @@ export default function PetshopServicesPage() {
           </div>
           <div>
             <strong className="text-2xl font-bold tabular-nums text-slate-800">{kpis.total}</strong>
-            <p className="text-xs font-medium text-slate-500">serviços cadastrados</p>
+            <p className="text-xs font-medium text-slate-500">
+              {kpis.combos > 0 ? `${kpis.combos} combos ativos` : 'serviços cadastrados'}
+            </p>
           </div>
         </div>
 
@@ -598,6 +611,19 @@ export default function PetshopServicesPage() {
             placeholder="Buscar serviço..."
             className="h-11 w-full rounded-xl border border-[var(--pc-border)] bg-white pl-10 pr-3 text-sm text-[var(--pc-text)] placeholder:text-slate-400 focus:border-[var(--pc-action)] focus:outline-none focus:ring-2 focus:ring-[var(--pc-action)]/15 shadow-2xs transition"
           />
+        </div>
+
+        {/* Filtro Tipo de Serviço (Individual vs Combo) */}
+        <div className="relative">
+          <select
+            value={selectedType}
+            onChange={e => setSelectedType(e.target.value)}
+            className="h-11 cursor-pointer rounded-xl border border-[var(--pc-border)] bg-white px-3.5 pr-8 text-xs sm:text-sm font-medium text-slate-700 shadow-2xs focus:border-[var(--pc-action)] focus:outline-none focus:ring-2 focus:ring-[var(--pc-action)]/15"
+          >
+            <option value="all">Todos os tipos</option>
+            <option value="INDIVIDUAL">Serviços individuais</option>
+            <option value="COMBO">Combos de serviços</option>
+          </select>
         </div>
 
         {/* Filtro Categoria */}
@@ -737,6 +763,8 @@ export default function PetshopServicesPage() {
                   const iconInfo = getServiceIconInfo(item.name, item.meta.category, item.color);
                   const IconComponent = iconInfo.icon;
                   const isSaude = item.meta.category === 'Saúde';
+                  const isCombo = item.serviceType === 'COMBO';
+                  const hasVariants = (item.pricingRules && item.pricingRules.length > 0) || Boolean(item.priceRange?.hasVariants);
 
                   return (
                     <tr
@@ -747,12 +775,48 @@ export default function PetshopServicesPage() {
                       <td className="px-5 py-4">
                         <div className="flex items-center gap-3.5">
                           <div
-                            className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${iconInfo.bg} ${iconInfo.text} ring-1 ${iconInfo.ring}`}
+                            className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
+                              isCombo
+                                ? 'bg-purple-50 text-purple-700 ring-1 ring-purple-200/60'
+                                : `${iconInfo.bg} ${iconInfo.text} ring-1 ${iconInfo.ring}`
+                            }`}
                           >
-                            <IconComponent size={18} />
+                            {isCombo ? <Layers size={18} /> : <IconComponent size={18} />}
                           </div>
                           <div className="min-w-0">
-                            <strong className="block truncate text-sm font-semibold text-slate-900">{item.name}</strong>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <strong className="block truncate text-sm font-semibold text-slate-900">{item.name}</strong>
+                              {isCombo && (
+                                <span className="inline-flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700">
+                                  <Layers size={11} /> Combo ({item.comboItems?.length || 0} serviços)
+                                </span>
+                              )}
+                              {hasVariants && (
+                                <span className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-800">
+                                  5 Portes Configurados
+                                </span>
+                              )}
+                            </div>
+                            {/* Pílulas de valores rápidos por porte */}
+                            {Array.isArray(item.pricingRules) && item.pricingRules.length > 0 && (
+                              <div className="flex flex-wrap items-center gap-1 mt-1">
+                                {['mini', 'small', 'medium', 'large', 'giant'].map(sz => {
+                                  const rule = item.pricingRules?.find(r => r.size === sz && (!r.coatType || r.coatType === 'all'));
+                                  if (!rule) return null;
+                                  const shortNames: Record<string, string> = { mini: 'Mini', small: 'P', medium: 'M', large: 'G', giant: 'GG' };
+                                  return (
+                                    <span
+                                      key={sz}
+                                      className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-700 border border-slate-200/80"
+                                      title={`Porte ${shortNames[sz]}: ${money(rule.price)}`}
+                                    >
+                                      <span className="font-bold text-slate-600">{shortNames[sz]}:</span>
+                                      <span className="font-semibold text-teal-800 tabular-nums">{money(rule.price)}</span>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
                             <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">
                               {item.meta.cleanDescription || 'Sem descrição cadastrada.'}
                             </p>
@@ -764,13 +828,15 @@ export default function PetshopServicesPage() {
                       <td className="px-5 py-4 whitespace-nowrap">
                         <span
                           className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                            isSaude
+                            isCombo
+                              ? 'border border-purple-200/80 bg-purple-50 text-purple-700'
+                              : isSaude
                               ? 'border border-rose-200/80 bg-rose-50 text-rose-700'
                               : 'border border-emerald-200/80 bg-emerald-50 text-emerald-700'
                           }`}
                         >
-                          <Tag size={12} className={isSaude ? 'text-rose-500' : 'text-emerald-500'} />
-                          {item.meta.category}
+                          <Tag size={12} className={isCombo ? 'text-purple-500' : isSaude ? 'text-rose-500' : 'text-emerald-500'} />
+                          {isCombo ? 'Combo Promocional' : item.meta.category}
                         </span>
                       </td>
 
@@ -778,13 +844,35 @@ export default function PetshopServicesPage() {
                       <td className="px-5 py-4 whitespace-nowrap">
                         <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600">
                           <Clock size={14} className="text-slate-400" />
-                          {item.durationMinutes} min
+                          {item.priceRange?.minDuration !== undefined &&
+                          item.priceRange.maxDuration !== undefined &&
+                          item.priceRange.minDuration !== item.priceRange.maxDuration
+                            ? `${item.priceRange.minDuration} a ${item.priceRange.maxDuration} min`
+                            : `${item.durationMinutes} min`}
                         </span>
                       </td>
 
                       {/* Coluna Preço */}
                       <td className="px-5 py-4 whitespace-nowrap">
-                        <strong className="text-sm font-bold tabular-nums text-slate-900">{money(item.price)}</strong>
+                        <div className="flex flex-col">
+                          <strong className="text-sm font-bold tabular-nums text-slate-900">
+                            {item.priceRange?.formattedRange || money(item.price)}
+                          </strong>
+                          {hasVariants && (
+                            <span className="text-[10px] font-medium text-slate-400">
+                              por porte/pelagem
+                            </span>
+                          )}
+                          {isCombo && item.comboDiscountValue && (
+                            <span className="text-[10px] font-bold text-emerald-600">
+                              {item.comboPricingType === 'PERCENT_DISCOUNT'
+                                ? `${item.comboDiscountValue}% OFF`
+                                : item.comboPricingType === 'FIXED_DISCOUNT'
+                                ? `Economia de ${money(item.comboDiscountValue)}`
+                                : 'Preço Especial'}
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Coluna Para quais pets? */}
@@ -856,113 +944,28 @@ export default function PetshopServicesPage() {
         )}
       </section>
 
-      {/* Modal de Criação / Edição de Serviço */}
+      <ManageStoreStagesModal
+        isOpen={stagesModalOpen}
+        onClose={() => setStagesModalOpen(false)}
+        onUpdated={() => void load(false)}
+      />
+
+      {/* Modal Avançado de Criação / Edição de Serviço e Combos */}
       {modalOpen && (
-        <Modal title={editingId ? 'Editar serviço' : 'Novo serviço'} onClose={() => setModalOpen(false)}>
-          <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-            <label className="sm:col-span-2">
-              <span className={labelClass}>Nome do serviço *</span>
-              <input
-                required
-                className={inputClass}
-                value={form.name}
-                onChange={e => setForm({ ...form, name: e.target.value })}
-                placeholder="Ex.: Banho e Tosa Completo"
-              />
-            </label>
-
-            <label>
-              <span className={labelClass}>Categoria *</span>
-              <select
-                value={form.category}
-                onChange={e => setForm({ ...form, category: e.target.value as ServiceCategory })}
-                className={inputClass}
-              >
-                <option value="Higiene e Estética">Higiene e Estética</option>
-                <option value="Saúde">Saúde</option>
-                <option value="Estética e Spa">Estética e Spa</option>
-                <option value="Outros">Outros</option>
-              </select>
-            </label>
-
-            <label>
-              <span className={labelClass}>Para quais pets? *</span>
-              <select
-                value={form.targetPets}
-                onChange={e => setForm({ ...form, targetPets: e.target.value as TargetPetGroup })}
-                className={inputClass}
-              >
-                <option value="Cães e Gatos">Cães e Gatos</option>
-                <option value="Cães">Apenas Cães</option>
-                <option value="Gatos">Apenas Gatos</option>
-              </select>
-            </label>
-
-            <label>
-              <span className={labelClass}>Duração estimada (minutos) *</span>
-              <input
-                required
-                min={5}
-                max={720}
-                type="number"
-                className={inputClass}
-                value={form.durationMinutes}
-                onChange={e => setForm({ ...form, durationMinutes: Number(e.target.value) })}
-              />
-            </label>
-
-            <label>
-              <span className={labelClass}>Preço base (R$) *</span>
-              <input
-                required
-                min={0}
-                step="0.01"
-                type="number"
-                className={inputClass}
-                value={form.price}
-                onChange={e => setForm({ ...form, price: e.target.value })}
-                placeholder="Ex.: 95,00"
-              />
-            </label>
-
-            <label className="sm:col-span-2">
-              <span className={labelClass}>Cor na agenda operacional</span>
-              <div className="flex min-h-11 items-center gap-3 rounded-lg border border-[var(--pc-border-strong)] bg-white px-3">
-                <input
-                  aria-label="Cor do serviço"
-                  type="color"
-                  className="h-7 w-10 cursor-pointer border-0 bg-transparent p-0"
-                  value={form.color}
-                  onChange={e => setForm({ ...form, color: e.target.value })}
-                />
-                <span className="text-xs font-mono uppercase tabular-nums text-[var(--pc-text-muted)]">
-                  {form.color}
-                </span>
-                <span className="text-xs text-slate-400">Usada nos cards e blocos de agendamento</span>
-              </div>
-            </label>
-
-            <label className="sm:col-span-2">
-              <span className={labelClass}>Descrição detalhada</span>
-              <textarea
-                rows={3}
-                className={inputClass}
-                value={form.description}
-                onChange={e => setForm({ ...form, description: e.target.value })}
-                placeholder="Ex.: Higienização completa, tosa geral da raça, secagem e perfume hipoalergênico."
-              />
-            </label>
-
-            <div className="flex flex-col-reverse gap-2 border-t border-[var(--pc-border)] pt-4 sm:col-span-2 sm:flex-row sm:justify-end">
-              <button type="button" onClick={() => setModalOpen(false)} disabled={saving} className={secondaryButton}>
-                Cancelar
-              </button>
-              <button type="submit" disabled={saving || !form.name.trim() || !form.price} className={primaryButton}>
-                {saving ? 'Salvando…' : editingId ? 'Salvar alterações' : 'Cadastrar serviço'}
-              </button>
-            </div>
-          </form>
-        </Modal>
+        <ServiceEditorModal
+          isOpen={modalOpen}
+          onClose={() => {
+            setModalOpen(false);
+            setEditingId(null);
+          }}
+          serviceId={editingId}
+          existingServices={items}
+          onSaved={() => {
+            setModalOpen(false);
+            setEditingId(null);
+            void load(false);
+          }}
+        />
       )}
     </div>
   );

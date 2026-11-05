@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { StationAccessService } from './station-access.service';
+import { pinVersion } from './operator-session';
 
 @Injectable()
 export class AuthService {
@@ -50,6 +51,7 @@ export class AuthService {
           opId: operator.id,
           tenantId,
           context,
+          pinVersion: pinVersion(operator.pin, process.env.JWT_SECRET!),
         },
         { expiresIn: '30m' }
       );

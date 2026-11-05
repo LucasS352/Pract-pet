@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   CalendarDays,
+  Coins,
   KeyRound,
   LayoutDashboard,
   Lock,
   LogOut,
+  MessageSquare,
   Package,
+  PackageCheck,
   PawPrint,
   Scissors,
   ShieldAlert,
@@ -29,20 +32,28 @@ import '@/pages/petshop/petshop.css';
 const allDesktopNav = [
   { to: '/petshop', label: 'Hoje', icon: LayoutDashboard, end: true },
   { to: '/petshop/agenda', label: 'Agenda', icon: CalendarDays },
+  { to: '/petshop/pacotes', label: 'Pacotes', icon: PackageCheck },
   { to: '/petshop/pets', label: 'Pets', icon: PawPrint },
   { to: '/petshop/tutores', label: 'Tutores', icon: Users },
   { to: '/petshop/servicos', label: 'Serviços', icon: Scissors },
   { to: '/petshop/produtos', label: 'Produtos', icon: Package },
+  { to: '/petshop/whatsapp', label: 'WhatsApp', icon: MessageSquare },
   { to: '/petshop/fornecedores', label: 'Fornecedores', icon: Truck },
   { to: '/petshop/pedidos-compra', label: 'Pedidos Compra', icon: ShoppingCart },
-  { to: '/petshop/equipe', label: 'Equipe', icon: UserRoundCog },
+  { to: '/petshop/equipe', label: 'Equipe', icon: UserRoundCog, end: true },
+  { to: '/petshop/equipe/comissoes', label: 'Comissões', icon: Coins },
   { to: '/petshop/metricas', label: 'Métricas & Vendas', icon: TrendingUp },
 ];
 
 // Rotas restritas para colaboradores operacionais sem isManager
 const restrictedPaths = [
+  '/petshop/comissoes',
+  '/petshop/pacotes',
+  '/petshop/pets',
+  '/petshop/tutores',
   '/petshop/servicos',
   '/petshop/produtos',
+  '/petshop/whatsapp',
   '/petshop/fornecedores',
   '/petshop/pedidos-compra',
   '/petshop/equipe',
@@ -52,9 +63,37 @@ const restrictedPaths = [
   '/petshop/alertas-validade',
 ];
 
+export interface PetshopLayoutContext {
+  modules: Record<string, boolean>;
+  tenant: any;
+  loadTenant: () => void;
+  hasVaccines: boolean;
+  isRestrictedStaff: boolean;
+  operator: any;
+}
+
+export function usePetshopContext() {
+  const context = useOutletContext<PetshopLayoutContext | undefined>();
+  const { user } = useAuthStore();
+  const modules = useMemo(() => {
+    return { ...(user?.modules || {}), ...(context?.modules || {}) };
+  }, [user?.modules, context?.modules]);
+
+  const hasVaccines = modules.petshopVacinas !== false;
+
+  return {
+    modules,
+    tenant: context?.tenant,
+    loadTenant: context?.loadTenant,
+    hasVaccines,
+    isRestrictedStaff: context?.isRestrictedStaff ?? false,
+    operator: context?.operator,
+  };
+}
+
 export function PetshopLayout() {
   const { user, logout } = useAuthStore();
-  const { operator, logoutOperator } = useShift();
+  const { operator, logoutOperator, needsOperatorReauth } = useShift();
   const navigate = useNavigate();
   const { pathname } = useLocation();
 
@@ -94,14 +133,16 @@ export function PetshopLayout() {
     }
   }, [isOperatorAccount, operator]);
 
+  useEffect(() => {
+    if (needsOperatorReauth) setShowOpModal(true);
+  }, [needsOperatorReauth]);
+
   const currentNav = useMemo(() => {
     if (isRestrictedStaff) {
-      // Colaborador comum acessa apenas Hoje, Agenda, Pets e Tutores
+      // Colaborador operacional acessa exclusivamente Hoje e Agenda
       return [
         { to: '/petshop', label: 'Hoje', icon: LayoutDashboard, end: true },
         { to: '/petshop/agenda', label: 'Agenda', icon: CalendarDays },
-        { to: '/petshop/pets', label: 'Pets', icon: PawPrint },
-        { to: '/petshop/tutores', label: 'Tutores', icon: Users },
       ];
     }
     return allDesktopNav;
@@ -167,6 +208,7 @@ export function PetshopLayout() {
     navigate('/login');
   };
 
+  const hasPdv = modules.pdv !== false;
   const tenantName = tenant.nomeFantasia || tenant.name;
 
   return (
@@ -246,13 +288,13 @@ export function PetshopLayout() {
 
         {/* Rodapé da Sidebar */}
         <div className="border-t border-[var(--pc-border)] p-3 space-y-2">
-          <button
+          {hasPdv && (<button
             onClick={() => navigate('/')}
             className="flex min-h-10 w-full items-center gap-2.5 rounded-lg border border-[var(--pc-border)] bg-white px-3 text-xs font-semibold text-[var(--pc-text)] shadow-2xs transition hover:bg-[var(--pc-surface-subtle)]"
           >
             <ShoppingCart aria-hidden="true" size={16} />
             <span>Ir para o PDV Caixa</span>
-          </button>
+          </button>)}
 
           <div className="flex items-center gap-2.5 border-t border-[var(--pc-border)] px-2 pt-2.5">
             <div className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[var(--pc-surface-subtle)] text-xs font-semibold text-slate-700">
@@ -335,13 +377,13 @@ export function PetshopLayout() {
             </button>
           )}
 
-          <button
+          {hasPdv && (<button
             onClick={() => navigate('/')}
             className="flex min-h-9 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] px-3 text-xs font-semibold text-[var(--pc-text)] transition hover:bg-[var(--pc-surface-subtle)]"
           >
             <ShoppingCart aria-hidden="true" size={14} />
             <span className="hidden sm:inline">PDV Caixa</span>
-          </button>
+          </button>)}
 
           <button
             onClick={exit}
@@ -386,14 +428,14 @@ export function PetshopLayout() {
             </div>
           </div>
         ) : (
-          <Outlet />
+          <Outlet context={{ modules, tenant, loadTenant, hasVaccines: modules.petshopVacinas !== false, isRestrictedStaff, operator }} />
         )}
       </main>
 
       {/* Navegação Mobile */}
       <nav
         aria-label="Navegação mobile"
-        className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-[var(--pc-border)] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
+        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-2' : 'grid-cols-4'} border-t border-[var(--pc-border)] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden`}
       >
         <NavLink
           to="/petshop"
@@ -418,24 +460,28 @@ export function PetshopLayout() {
           <CalendarDays size={18} strokeWidth={2} />
           <span>Agenda</span>
         </NavLink>
-        <NavLink
-          to="/petshop/pets"
-          className={({ isActive }) =>
-            `flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
-              isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
-            }`
-          }
-        >
-          <PawPrint size={18} strokeWidth={2} />
-          <span>Pets</span>
-        </NavLink>
-        <NavLink
-          to="/"
-          className="flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium text-slate-400"
-        >
-          <ShoppingCart size={18} strokeWidth={2} />
-          <span>PDV</span>
-        </NavLink>
+        {!isRestrictedStaff && (
+          <>
+            <NavLink
+              to="/petshop/pets"
+              className={({ isActive }) =>
+                `flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
+                  isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
+                }`
+              }
+            >
+              <PawPrint size={18} strokeWidth={2} />
+              <span>Pets</span>
+            </NavLink>
+            <NavLink
+              to={hasPdv ? '/' : '/petshop/agenda'}
+              className="flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium text-slate-400"
+            >
+              <ShoppingCart size={18} strokeWidth={2} />
+              <span>{hasPdv ? 'PDV' : 'Agenda'}</span>
+            </NavLink>
+          </>
+        )}
       </nav>
 
       {/* Modal de Login de Colaborador */}
