@@ -824,7 +824,7 @@ export default function PetshopPackagesPage() {
                         {contract.status === 'active' && availableSessions > 0 && (
                           <button
                             type="button"
-                            onClick={() => navigate('/petshop/agenda?new=1')}
+                            onClick={() => navigate(`/petshop/agenda?new=1${contract.petId ? `&petId=${encodeURIComponent(contract.petId)}` : ''}`)}
                             className="inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2.5 py-1.5 text-xs font-semibold text-teal-800 transition hover:bg-teal-100"
                           >
                             Agendar Sessão
