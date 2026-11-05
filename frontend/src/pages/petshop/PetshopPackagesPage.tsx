@@ -1038,29 +1038,31 @@ export default function PetshopPackagesPage() {
          ===================================================================== */}
       {openPlanModal && (
         <Modal
-          title={editingPlan ? 'Editar Plano de Pacote' : 'Novo Plano de Pacote no Catálogo'}
+          title={editingPlan ? 'Editar plano de pacote' : 'Novo plano de pacote'}
+          maxWidth="sm:max-w-3xl"
           onClose={() => setOpenPlanModal(false)}
         >
-          <form onSubmit={handleSubmitPlan} className="space-y-4">
+          <form onSubmit={handleSubmitPlan} className="space-y-5">
+            <p className="text-sm leading-6 text-slate-500">Defina os serviços, a quantidade de sessões e o valor do pacote para seus clientes.</p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div className="sm:col-span-2">
-                <label className={labelClass}>Nome do Plano *</label>
+                <label htmlFor="plan-name" className={labelClass}>Nome do plano *</label>
                 <input
                   required
-                  value={planForm.name}
+                  id="plan-name" value={planForm.name}
                   onChange={e => setPlanForm({ ...planForm, name: e.target.value })}
                   placeholder="Ex: Pacote Mensal — 4 Banhos + 1 Tosa Higiênica"
                   className={inputClass}
                 />
               </div>
               <div>
-                <label className={labelClass}>Validade (dias) *</label>
+                <label htmlFor="plan-validity" className={labelClass}>Validade (dias) *</label>
                 <input
                   type="number"
                   min={1}
                   max={365}
                   required
-                  value={planForm.validityDays}
+                  id="plan-validity" value={planForm.validityDays}
                   onChange={e =>
                     setPlanForm({ ...planForm, validityDays: Number(e.target.value) })
                   }
@@ -1071,13 +1073,13 @@ export default function PetshopPackagesPage() {
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className={labelClass}>Preço Base Padrão (R$) *</label>
+                <label htmlFor="plan-price" className={labelClass}>Valor do pacote (R$) *</label>
                 <input
                   type="number"
                   step="0.01"
                   min={0}
                   required
-                  value={planForm.basePrice}
+                  id="plan-price" value={planForm.basePrice}
                   onChange={e => setPlanForm({ ...planForm, basePrice: e.target.value })}
                   placeholder="180.00"
                   className={inputClass}
@@ -1098,83 +1100,69 @@ export default function PetshopPackagesPage() {
               </div>
             </div>
 
-            {/* Serviços inclusos no pacote */}
-            <div className="rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-[var(--pc-text)]">
-                  Serviços e Quantidade de Sessões Inclusas
-                </span>
-                <button
-                  type="button"
+            <section className="rounded-2xl border border-teal-200 bg-teal-50/40 p-4 sm:p-5" aria-labelledby="plan-services-title">
+              <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 id="plan-services-title" className="text-sm font-semibold text-slate-900">Serviços incluídos</h3>
+                  <p className="mt-1 text-xs text-slate-500">Escolha os serviços e quantas sessões de cada um o pacote oferece.</p>
+                </div>
+                <button type="button" disabled={!services.some(s => !planForm.items.some(i => i.serviceId === s.id))}
                   onClick={() => {
-                    if (!services.length) return;
-                    setPlanForm(prev => ({
-                      ...prev,
-                      items: [...prev.items, { serviceId: services[0].id, quantity: 1 }],
-                    }));
+                    const available = services.find(s => !planForm.items.some(i => i.serviceId === s.id));
+                    if (available) setPlanForm(prev => ({ ...prev, items: [...prev.items, { serviceId: available.id, quantity: 1 }] }));
                   }}
-                  className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-[var(--pc-action)] shadow-2xs border border-[var(--pc-border)]"
-                >
-                  <Plus size={13} /> Adicionar Serviço
+                  className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-3 text-xs font-semibold text-teal-800 transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50">
+                  <Plus size={15} /> Adicionar serviço
                 </button>
               </div>
-
-              <div className="space-y-2">
-                {planForm.items.map((item, idx) => (
-                  <div key={idx} className="flex items-center gap-2">
-                    <select
-                      value={item.serviceId}
-                      onChange={e => {
-                        const next = [...planForm.items];
-                        next[idx] = { ...next[idx], serviceId: e.target.value };
-                        setPlanForm({ ...planForm, items: next });
-                      }}
-                      className={`${inputClass} flex-1`}
-                    >
-                      {services.map(s => (
-                        <option key={s.id} value={s.id}>
-                          {s.name} (Avulso: {money(s.price)})
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      min={1}
-                      max={100}
-                      value={item.quantity}
-                      onChange={e => {
-                        const next = [...planForm.items];
-                        next[idx] = { ...next[idx], quantity: Number(e.target.value) };
-                        setPlanForm({ ...planForm, items: next });
-                      }}
-                      className={`${inputClass} w-24 text-center font-semibold`}
-                      title="Quantidade de sessões"
-                    />
-                    {planForm.items.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPlanForm({
-                            ...planForm,
-                            items: planForm.items.filter((_, i) => i !== idx),
-                          })
-                        }
-                        className="grid h-10 w-10 place-items-center rounded-lg text-rose-600 hover:bg-rose-50"
-                      >
+              <div className="space-y-3">
+                {planForm.items.map((item, idx) => {
+                  const selected = services.find(s => s.id === item.serviceId) || editingPlan?.items.find(i => i.serviceId === item.serviceId)?.service;
+                  return <div key={idx} className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4" data-testid="package-service-row">
+                    <div className="grid grid-cols-[minmax(0,1fr)_5rem] items-end gap-3 sm:grid-cols-[minmax(0,1fr)_6rem_2.75rem]">
+                      <div className="col-span-2 min-w-0 sm:col-span-1">
+                        <label htmlFor={`plan-service-${idx}`} className={labelClass}>Serviço {idx + 1}</label>
+                        <select id={`plan-service-${idx}`} required value={item.serviceId}
+                          onChange={e => setPlanForm(prev => ({ ...prev, items: prev.items.map((row, i) => i === idx ? { ...row, serviceId: e.target.value } : row) }))}
+                          className={`${inputClass} min-w-0`}>
+                          {!services.some(s => s.id === item.serviceId) && <option value={item.serviceId}>{selected?.name || 'Serviço indisponível'}</option>}
+                          {services.map(s => <option key={s.id} value={s.id} disabled={planForm.items.some((row, i) => i !== idx && row.serviceId === s.id)}>{s.name}</option>)}
+                        </select>
+                      </div>
+                      <div className="min-w-0">
+                        <label htmlFor={`plan-quantity-${idx}`} className={labelClass}>Sessões</label>
+                        <input id={`plan-quantity-${idx}`} required type="number" min={1} max={100} step={1} value={item.quantity}
+                          onChange={e => setPlanForm(prev => ({ ...prev, items: prev.items.map((row, i) => i === idx ? { ...row, quantity: Number(e.target.value) } : row) }))}
+                          className={`${inputClass} text-center font-semibold tabular-nums`} />
+                      </div>
+                      <button type="button" disabled={planForm.items.length === 1} aria-label={`Remover serviço ${idx + 1}`}
+                        onClick={() => setPlanForm(prev => ({ ...prev, items: prev.items.filter((_, i) => i !== idx) }))}
+                        className="grid h-11 w-11 justify-self-end place-items-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 disabled:cursor-not-allowed disabled:opacity-30">
                         <Trash2 size={16} />
                       </button>
-                    )}
-                  </div>
-                ))}
+                    </div>
+                    <div className="mt-3 flex items-start gap-2 border-t border-slate-100 pt-3">
+                      <Scissors size={15} className="mt-0.5 shrink-0 text-teal-700" aria-hidden="true" />
+                      <div className="min-w-0">
+                        <p className="break-words text-sm font-semibold text-slate-800">{selected?.name || 'Selecione um serviço'}</p>
+                        <p className="mt-0.5 text-xs text-slate-500">{item.quantity} {item.quantity === 1 ? 'sessão incluída' : 'sessões incluídas'}{selected && <> · Avulso: {money(selected.price)} por sessão</>}</p>
+                      </div>
+                    </div>
+                  </div>;
+                })}
+                {!planForm.items.length && <p className="rounded-xl border border-dashed border-teal-200 bg-white p-4 text-sm text-slate-600">Adicione pelo menos um serviço ao pacote.</p>}
               </div>
-            </div>
+              <p className="mt-4 text-sm font-semibold text-teal-900" aria-live="polite">{planForm.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)} sessões no total · {planForm.items.length} {planForm.items.length === 1 ? 'serviço' : 'serviços'}</p>
+            </section>
 
             {/* Regras de Precificação por Porte e Pelagem */}
-            <div className="rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-4">
-              <div className="mb-2 flex items-center justify-between">
+            <details className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-5" open={Boolean(editingPlan?.pricingRules.length)}>
+              <summary className="cursor-pointer text-sm font-semibold text-slate-900">Preços por porte e pelagem <span className="ml-1 text-xs font-normal text-slate-500">Opcional</span></summary>
+              <div className="mt-4">
+              <div className="mb-3 flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-[var(--pc-text)]">
-                    Tabela de Preços Variáveis (Porte / Pelagem / Espécie)
+                  <span className="text-sm font-semibold text-[var(--pc-text)]">
+                    Valores específicos para cada perfil
                   </span>
                   <p className="text-[11px] text-[var(--pc-text-secondary)]">
                     Ao selecionar o pet na venda, o sistema aplica automaticamente o valor correspondente.
@@ -1191,7 +1179,7 @@ export default function PetshopPackagesPage() {
                       ],
                     }))
                   }
-                  className="inline-flex items-center gap-1 rounded-lg bg-white px-2.5 py-1 text-xs font-semibold text-[var(--pc-action)] shadow-2xs border border-[var(--pc-border)]"
+                  className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-[var(--pc-action)] shadow-2xs border border-[var(--pc-border)]"
                 >
                   <Plus size={13} /> Nova Regra
                 </button>
@@ -1205,13 +1193,13 @@ export default function PetshopPackagesPage() {
                   >
                     <div className="sm:col-span-3">
                       <select
-                        value={rule.species}
+                        aria-label={`Espécie da regra ${idx + 1}`} value={rule.species}
                         onChange={e => {
                           const next = [...planForm.pricingRules];
                           next[idx] = { ...next[idx], species: e.target.value };
                           setPlanForm({ ...planForm, pricingRules: next });
                         }}
-                        className="w-full rounded-md border border-[var(--pc-border)] px-2 py-1.5 text-xs"
+                        className="min-h-11 w-full min-w-0 rounded-lg border border-[var(--pc-border)] px-2 py-1.5 text-xs"
                       >
                         <option value="all">Cães e Gatos</option>
                         <option value="dog">Cachorro</option>
@@ -1220,13 +1208,13 @@ export default function PetshopPackagesPage() {
                     </div>
                     <div className="sm:col-span-3">
                       <select
-                        value={rule.size}
+                        aria-label={`Porte da regra ${idx + 1}`} value={rule.size}
                         onChange={e => {
                           const next = [...planForm.pricingRules];
                           next[idx] = { ...next[idx], size: e.target.value };
                           setPlanForm({ ...planForm, pricingRules: next });
                         }}
-                        className="w-full rounded-md border border-[var(--pc-border)] px-2 py-1.5 text-xs"
+                        className="min-h-11 w-full min-w-0 rounded-lg border border-[var(--pc-border)] px-2 py-1.5 text-xs"
                       >
                         <option value="all">Qualquer Porte</option>
                         <option value="small">Pequeno (P)</option>
@@ -1237,13 +1225,13 @@ export default function PetshopPackagesPage() {
                     </div>
                     <div className="sm:col-span-3">
                       <select
-                        value={rule.coatType}
+                        aria-label={`Pelagem da regra ${idx + 1}`} value={rule.coatType}
                         onChange={e => {
                           const next = [...planForm.pricingRules];
                           next[idx] = { ...next[idx], coatType: e.target.value };
                           setPlanForm({ ...planForm, pricingRules: next });
                         }}
-                        className="w-full rounded-md border border-[var(--pc-border)] px-2 py-1.5 text-xs"
+                        className="min-h-11 w-full min-w-0 rounded-lg border border-[var(--pc-border)] px-2 py-1.5 text-xs"
                       >
                         <option value="all">Qualquer Pelagem</option>
                         <option value="short">Pelo Curto</option>
@@ -1257,14 +1245,14 @@ export default function PetshopPackagesPage() {
                         type="number"
                         step="0.01"
                         min={0}
-                        placeholder="R$ Valor"
+                        aria-label={`Preço da regra ${idx + 1}`} placeholder="R$ Valor"
                         value={rule.price}
                         onChange={e => {
                           const next = [...planForm.pricingRules];
                           next[idx] = { ...next[idx], price: e.target.value };
                           setPlanForm({ ...planForm, pricingRules: next });
                         }}
-                        className="w-full rounded-md border border-[var(--pc-border-strong)] px-2 py-1.5 text-xs font-semibold"
+                        className="min-h-11 w-full min-w-0 rounded-lg border border-[var(--pc-border-strong)] px-2 py-1.5 text-xs font-semibold"
                       />
                       <button
                         type="button"
@@ -1274,7 +1262,7 @@ export default function PetshopPackagesPage() {
                             pricingRules: planForm.pricingRules.filter((_, i) => i !== idx),
                           })
                         }
-                        className="p-1 text-rose-600 hover:bg-rose-50 rounded"
+                        aria-label={`Remover regra ${idx + 1}`} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-rose-600 hover:bg-rose-50"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -1282,7 +1270,8 @@ export default function PetshopPackagesPage() {
                   </div>
                 ))}
               </div>
-            </div>
+              </div>
+            </details>
 
             <div>
               <label className={labelClass}>Observações comerciais do plano</label>
@@ -1295,7 +1284,7 @@ export default function PetshopPackagesPage() {
               />
             </div>
 
-            <div className="flex justify-end gap-2 pt-2">
+            <div className="sticky -bottom-5 z-10 -mx-5 -mb-5 flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-white px-5 py-4">
               <button
                 type="button"
                 onClick={() => setOpenPlanModal(false)}
