@@ -14,8 +14,8 @@ O frontend publica 3531. API 3530 e NFC-e 3532 ficam em loopback; o MySQL fica a
 
 1. Configure as variáveis e execute docker compose -f docker-compose.production.yml config --quiet.
 2. Execute docker compose -f docker-compose.production.yml build e depois up -d mysql.
-3. Somente para Heart novo e vazio, inicialize explicitamente: docker compose -f docker-compose.production.yml run --rm --no-deps --entrypoint npx backend prisma db push --schema=prisma/heart.schema.prisma --skip-generate.
-4. Execute docker compose -f docker-compose.production.yml up -d. No Portainer, execute a inicialização explícita no console do backend antes de iniciar o uso.
+3. Execute docker compose -f docker-compose.production.yml up -d. O backend cria o banco e o schema Heart somente se ele não tiver tabelas, inclusive quando o volume MySQL já existia. Se a inicialização falhar, o backend não inicia a API; verifique os logs.
+4. O bootstrap pode ser desativado com `BOOTSTRAP_EMPTY_HEART=false` quando a infraestrutura gerencia o Heart separadamente.
 5. Aguarde MySQL saudável e API inicializada; confira docker compose -f docker-compose.production.yml ps e logs --tail 100 backend.
 6. Acesse /sys-init com o PIN administrativo configurado e crie o estabelecimento e seu administrador. O provisionamento cria o banco do cliente com o schema atual.
 7. Configure os módulos do cliente; para usar somente Pet Shop, desative PDV Caixa.
@@ -23,7 +23,7 @@ O frontend publica 3531. API 3530 e NFC-e 3532 ficam em loopback; o MySQL fica a
 
 ### Portainer com volume MySQL já existente
 
-O Docker executa `mysql/init.sql` somente ao criar um volume MySQL vazio. Se o volume já existia, a API pode falhar na inicialização com `Database heart_practpet does not exist`; nesse caso o frontend retorna HTTP 502, mesmo para rotas sem PIN. No console do contêiner MySQL, entre com `mysql -uroot -p` e execute `CREATE DATABASE IF NOT EXISTS heart_practpet CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`. Digite a senha apenas no prompt do MySQL, sem colocá-la em comandos ou capturas. Em seguida, no console do contêiner backend, execute `npx prisma db push --schema=prisma/heart.schema.prisma --skip-generate` para criar as tabelas do Heart novo. Use esse procedimento apenas quando o Heart ainda não tiver tabelas; para instalações com dados, revise o schema e faça backup antes de alterar tabelas. Não remova o volume MySQL.
+O Docker executa `mysql/init.sql` somente ao criar um volume MySQL vazio. Se o volume já existia, a API pode falhar com `Database heart_practpet does not exist`; o frontend então retorna HTTP 502, mesmo para rotas sem PIN. A imagem atual do backend detecta um Heart ausente ou sem tabelas, cria o banco e aplica o schema inicial antes de iniciar a API. Bancos Heart com tabelas são preservados; para instalações com dados, revise o schema e faça backup antes de qualquer migração. Não remova o volume MySQL. No Portainer, use **Pull and redeploy** com rebuild da imagem do backend; apenas reiniciar um contêiner antigo não instala o bootstrap.
 
 Antes de informar o PIN, `GET /api/tenants/setup/list` deve retornar HTTP 401. HTTP 502 indica que o proxy ainda não alcança a API e não confirma um PIN incorreto.
 

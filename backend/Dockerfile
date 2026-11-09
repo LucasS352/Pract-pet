@@ -41,6 +41,7 @@ COPY --from=builder /app/prisma/schema.prisma ./prisma/schema.prisma
 COPY --from=builder /app/prisma/heart.schema.prisma ./prisma/heart.schema.prisma
 
 COPY entrypoint.sh ./entrypoint.sh
+COPY scripts/bootstrap-heart.cjs ./scripts/bootstrap-heart.cjs
 RUN sed -i 's/\r$//' ./entrypoint.sh && chmod +x ./entrypoint.sh
 
 EXPOSE 3530

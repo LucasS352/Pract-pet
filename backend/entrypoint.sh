@@ -1,7 +1,12 @@
 #!/bin/sh
 
-# Schemas são inicializados explicitamente no provisionamento ou pelo Sys-Init.
-# Nunca alterar bancos de clientes ou Heart automaticamente ao reiniciar.
+# Inicializa o Heart apenas quando estiver sem tabelas, inclusive em volumes MySQL
+# preexistentes nos quais mysql/init.sql não é executado novamente.
+# Bancos Heart com tabelas e bancos de clientes nunca são alterados aqui.
+
+if [ "${BOOTSTRAP_EMPTY_HEART:-true}" = "true" ]; then
+  node /app/scripts/bootstrap-heart.cjs || exit 1
+fi
 
 # ── Modo Demo: importar demo-seed.sql se o banco demo estiver sem produtos ──
 if [ "$APP_MODE" = "demo" ] && [ -f "/app/demo-seed.sql" ]; then
