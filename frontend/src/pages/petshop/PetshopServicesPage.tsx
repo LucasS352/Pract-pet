@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { NavLink } from 'react-router-dom';
 import {
   ArrowUpDown,
   CheckCircle2,
@@ -15,6 +16,9 @@ import {
   Pencil,
   Plus,
   Scissors,
+  Bath,
+  ChevronDown,
+  Package,
   Search,
   Smile,
   Sparkles,
@@ -51,7 +55,7 @@ function parseServiceMetadata(service: PetService): ParsedServiceMeta {
   let cleanDescription = rawDesc;
 
   if (metaMatch) {
-    cleanDescription = rawDesc.replace(metaMatch[0], '').trim();
+    cleanDescription = rawDesc.replace(metaMatch[0], '').replace(/\[icon:[a-z_]+\].*/gi, '').trim();
     const parsedCat = metaMatch[2]?.trim();
     const parsedPets = metaMatch[4]?.trim();
 
@@ -98,34 +102,60 @@ function encodeServiceDescription(cleanDescription: string, category: ServiceCat
   return trimmed ? `${trimmed}\n\n${metaTag}` : metaTag;
 }
 
-function getServiceIconInfo(serviceName: string, category: string, defaultColor?: string) {
-  const name = serviceName.toLowerCase();
-  if (name.includes('consulta') || name.includes('veterin')) {
-    return { icon: Stethoscope, bg: 'bg-rose-50', text: 'text-rose-600', ring: 'ring-rose-200/60' };
-  }
-  if (name.includes('vacina')) {
-    return { icon: Syringe, bg: 'bg-red-50', text: 'text-red-600', ring: 'ring-red-200/60' };
-  }
-  if (name.includes('exame') || name.includes('laborat')) {
-    return { icon: FlaskConical, bg: 'bg-purple-50', text: 'text-purple-600', ring: 'ring-purple-200/60' };
-  }
-  if (name.includes('dent') || name.includes('escova')) {
-    return { icon: Smile, bg: 'bg-pink-50', text: 'text-pink-600', ring: 'ring-pink-200/60' };
-  }
-  if (name.includes('hidrata') || name.includes('spa') || name.includes('brilho')) {
-    return { icon: Sparkles, bg: 'bg-amber-50', text: 'text-amber-600', ring: 'ring-amber-200/60' };
-  }
-  if (name.includes('unha') || name.includes('pat')) {
-    return { icon: PawPrint, bg: 'bg-teal-50', text: 'text-teal-600', ring: 'ring-teal-200/60' };
-  }
-  if (name.includes('banho essencial') || name.includes('banho simples')) {
-    return { icon: Droplets, bg: 'bg-cyan-50', text: 'text-cyan-600', ring: 'ring-cyan-200/60' };
-  }
-  if (name.includes('tosa') || name.includes('banho')) {
-    return { icon: Scissors, bg: 'bg-sky-50', text: 'text-sky-600', ring: 'ring-sky-200/60' };
-  }
+const SIZES_ORDER = [
+  { key: 'mini', label: 'Mini' },
+  { key: 'small', label: 'P' },
+  { key: 'medium', label: 'M' },
+  { key: 'large', label: 'G' },
+  { key: 'giant', label: 'GG' },
+];
 
-  return { icon: Scissors, bg: 'bg-emerald-50', text: 'text-emerald-700', ring: 'ring-emerald-200/60' };
+function getPricesBySize(service: PetService) {
+  if (!service.pricingRules || service.pricingRules.length === 0) return null;
+  const rules = service.pricingRules;
+  return SIZES_ORDER.map(s => {
+    const match = rules.find(r => r.size?.toLowerCase() === s.key);
+    return {
+      key: s.key,
+      label: s.label,
+      price: match ? money(match.price) : money(service.price),
+    };
+  });
+}
+
+function inferIconFromName(name: string, category?: string): string {
+  const n = (name || '').toLowerCase();
+  const c = (category || '').toLowerCase();
+  if (n.includes('tosa') || n.includes('trim') || n.includes('máquina')) return 'scissors';
+  if (n.includes('unha') || n.includes('pata') || n.includes('patas')) return 'nail';
+  if (n.includes('pulga') || n.includes('carrapato') || n.includes('medicament') || n.includes('dermat') || n.includes('antipulga')) return 'flea';
+  if (n.includes('hidrata') || n.includes('spa') || n.includes('cauteriz') || n.includes('ozônio') || n.includes('estética') || c.includes('spa')) return 'spa';
+  if (n.includes('vacina') || n.includes('consulta') || n.includes('veterin') || n.includes('exame') || n.includes('saúde') || c.includes('saúde')) return 'health';
+  if (n.includes('banho') || n.includes('ducha') || n.includes('higien') || c.includes('higiene')) return 'bath';
+  return 'bath';
+}
+
+function getServiceIconInfo(service: PetService) {
+  const rawDesc = service.description || '';
+  const match = rawDesc.match(/\[icon:([a-z_]+)\]/i);
+  const iconKey = match ? match[1] : inferIconFromName(service.name, service.category);
+
+  switch (iconKey) {
+    case 'bath':
+      return { icon: Bath, bg: 'bg-emerald-50', text: 'text-teal-700', border: 'border-emerald-200/80', ring: 'ring-emerald-200/60', label: 'Banho' };
+    case 'scissors':
+      return { icon: Scissors, bg: 'bg-sky-50', text: 'text-sky-600', border: 'border-sky-200/80', ring: 'ring-sky-200/60', label: 'Tosa' };
+    case 'nail':
+      return { icon: PawPrint, bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-200/80', ring: 'ring-amber-200/60', label: 'Corte de Unha' };
+    case 'flea':
+      return { icon: Droplets, bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-200/80', ring: 'ring-emerald-200/60', label: 'Antipulga' };
+    case 'spa':
+      return { icon: Sparkles, bg: 'bg-purple-50', text: 'text-purple-600', border: 'border-purple-200/80', ring: 'ring-purple-200/60', label: 'Hidratação & Spa' };
+    case 'health':
+      return { icon: Stethoscope, bg: 'bg-rose-50', text: 'text-rose-600', border: 'border-rose-200/80', ring: 'ring-rose-200/60', label: 'Saúde / Vacina' };
+    default:
+      return { icon: Bath, bg: 'bg-emerald-50', text: 'text-teal-700', border: 'border-emerald-200/80', ring: 'ring-emerald-200/60', label: 'Serviço' };
+  }
 }
 
 interface ServiceFormState {
@@ -524,32 +554,134 @@ export default function PetshopServicesPage() {
 
   return (
     <div className={pageClass}>
-      <PageHeader
-        eyebrow="Catálogo operacional"
-        title="Serviços"
-        description="Duração e preço utilizados nos agendamentos."
-        action={
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              className={secondaryButton}
-              onClick={() => setStagesModalOpen(true)}
-              title="Personalizar nomes das etapas e criar etapas adicionais para o Pet Shop"
-            >
-              <Workflow aria-hidden="true" className="mr-1.5 inline text-teal-700" size={17} />
-              Etapas da Loja
-            </button>
-            <button type="button" className={primaryButton} onClick={openNew}>
-              <Plus aria-hidden="true" className="mr-1.5 inline" size={17} />
-              Novo serviço
-            </button>
-          </div>
-        }
-      />
+      {/* 1. Cabeçalho - Mobile (Idêntico ao layout solicitado com arte no topo) */}
+      <div className="md:hidden relative mb-4 rounded-3xl border border-zinc-200/90 bg-white p-4 shadow-2xs overflow-hidden">
+        {/* Arte vetorial suave de cão e gato ao fundo à direita */}
+        <div className="pointer-events-none absolute -right-2 -top-2 w-36 h-32 select-none text-emerald-600">
+          <svg viewBox="0 0 160 140" fill="none" xmlns="http://www.w3.org/2000/svg" className="w-full h-full opacity-60">
+            <ellipse cx="120" cy="50" rx="14" ry="16" fill="currentColor" fillOpacity="0.15" />
+            <ellipse cx="98" cy="38" rx="8" ry="10" fill="currentColor" fillOpacity="0.15" />
+            <ellipse cx="118" cy="22" rx="7" ry="9" fill="currentColor" fillOpacity="0.15" />
+            <ellipse cx="140" cy="30" rx="7" ry="9" fill="currentColor" fillOpacity="0.15" />
+            <path d="M75 110 C70 85 90 70 105 70 C120 70 135 85 130 110" stroke="#0d6e5a" strokeWidth="2.5" strokeLinecap="round" strokeOpacity="0.45" />
+            <path d="M80 82 C75 75 72 65 78 60 C85 55 90 68 90 75" stroke="#0d6e5a" strokeWidth="2.5" strokeLinecap="round" strokeOpacity="0.45" />
+            <path d="M125 80 C130 75 138 62 132 58 C125 54 120 68 120 75" stroke="#0d6e5a" strokeWidth="2.5" strokeLinecap="round" strokeOpacity="0.45" />
+            <circle cx="95" cy="88" r="2.5" fill="#0d6e5a" fillOpacity="0.6" />
+            <circle cx="115" cy="88" r="2.5" fill="#0d6e5a" fillOpacity="0.6" />
+            <path d="M102 96 C105 99 107 99 110 96" stroke="#0d6e5a" strokeWidth="2" strokeLinecap="round" strokeOpacity="0.6" />
+            <path d="M135 45 C132 40 138 35 142 38 C146 35 152 40 149 45 L142 52 Z" fill="#0d6e5a" fillOpacity="0.4" />
+          </svg>
+        </div>
 
-      {/* 4 Cards de KPI */}
-      <section aria-label="Indicadores de serviços" className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {/* KPI 1: Cadastrados */}
+        <div className="relative pr-20">
+          <span className="text-xs font-semibold text-teal-800">Catálogo operacional</span>
+          <h1 className="text-2xl font-black tracking-tight text-zinc-900 mt-0.5">
+            Serviços
+          </h1>
+          <p className="mt-0.5 text-xs text-zinc-500 leading-snug">
+            Duração e preço utilizados nos agendamentos.
+          </p>
+        </div>
+
+        <div className="mt-3.5 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setStagesModalOpen(true)}
+            className="flex-1 flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white py-2.5 px-3 text-xs font-bold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition cursor-pointer"
+          >
+            <Workflow size={15} className="text-teal-700" />
+            <span>Etapas da Loja</span>
+          </button>
+          <button
+            type="button"
+            onClick={openNew}
+            className="flex-1 flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] py-2.5 px-3 text-xs font-bold text-white shadow-xs hover:bg-[#0a5747] transition cursor-pointer"
+          >
+            <Plus size={16} strokeWidth={2.5} />
+            <span>Novo serviço</span>
+          </button>
+        </div>
+      </div>
+
+      {/* 1. Cabeçalho - Desktop */}
+      <div className="hidden md:block">
+        <PageHeader
+          eyebrow="Catálogo operacional"
+          title="Serviços"
+          description="Duração e preço utilizados nos agendamentos."
+          action={
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className={secondaryButton}
+                onClick={() => setStagesModalOpen(true)}
+                title="Personalizar nomes das etapas e criar etapas adicionais para o Pet Shop"
+              >
+                <Workflow aria-hidden="true" className="mr-1.5 inline text-teal-700" size={17} />
+                Etapas da Loja
+              </button>
+              <button type="button" className={primaryButton} onClick={openNew}>
+                <Plus aria-hidden="true" className="mr-1.5 inline" size={17} />
+                Novo serviço
+              </button>
+            </div>
+          }
+        />
+      </div>
+
+      {/* 2. KPIs - Mobile (4 colunas compactas com ícones e valores idênticos ao mockup) */}
+      <section aria-label="Indicadores mobile" className="md:hidden mb-4 grid grid-cols-4 gap-2">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs flex flex-col justify-between">
+          <div className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+            <ClipboardList size={16} />
+          </div>
+          <div className="mt-2">
+            <strong className="block text-lg font-black tracking-tight text-zinc-900 tabular-nums">
+              {kpis.total}
+            </strong>
+            <p className="text-[10px] text-zinc-500 leading-tight">serviços cadastrados</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs flex flex-col justify-between">
+          <div className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+            <CheckCircle2 size={16} />
+          </div>
+          <div className="mt-2">
+            <strong className="block text-lg font-black tracking-tight text-zinc-900 tabular-nums">
+              {kpis.active}
+            </strong>
+            <p className="text-[10px] text-zinc-500 leading-tight">ativos</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs flex flex-col justify-between">
+          <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-50 text-amber-700">
+            <Clock size={16} />
+          </div>
+          <div className="mt-2">
+            <strong className="block text-sm font-black tracking-tight text-zinc-900 tabular-nums truncate">
+              {kpis.avgMinutes} min
+            </strong>
+            <p className="text-[10px] text-zinc-500 leading-tight">Tempo médio</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs flex flex-col justify-between">
+          <div className="grid h-8 w-8 place-items-center rounded-xl bg-purple-50 text-purple-700">
+            <Tag size={16} />
+          </div>
+          <div className="mt-2">
+            <strong className="block text-xs sm:text-sm font-black tracking-tight text-zinc-900 tabular-nums truncate">
+              {money(kpis.avgTicket)}
+            </strong>
+            <p className="text-[10px] text-zinc-500 leading-tight">Ticket médio</p>
+          </div>
+        </div>
+      </section>
+
+      {/* 2. KPIs - Desktop */}
+      <section aria-label="Indicadores desktop" className="hidden md:grid mb-6 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <div className="flex items-center gap-4 rounded-2xl border border-[var(--pc-border)] bg-white p-4 shadow-2xs">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
             <ClipboardList size={22} />
@@ -562,7 +694,6 @@ export default function PetshopServicesPage() {
           </div>
         </div>
 
-        {/* KPI 2: Ativos */}
         <div className="flex items-center gap-4 rounded-2xl border border-[var(--pc-border)] bg-white p-4 shadow-2xs">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-emerald-50 text-emerald-600 ring-1 ring-emerald-100">
             <CheckCircle2 size={22} />
@@ -573,7 +704,6 @@ export default function PetshopServicesPage() {
           </div>
         </div>
 
-        {/* KPI 3: Tempo Médio */}
         <div className="flex items-center gap-4 rounded-2xl border border-[var(--pc-border)] bg-white p-4 shadow-2xs">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-amber-50 text-amber-600 ring-1 ring-amber-100">
             <Clock size={22} />
@@ -584,7 +714,6 @@ export default function PetshopServicesPage() {
           </div>
         </div>
 
-        {/* KPI 4: Ticket Médio */}
         <div className="flex items-center gap-4 rounded-2xl border border-[var(--pc-border)] bg-white p-4 shadow-2xs">
           <div className="grid h-12 w-12 place-items-center rounded-xl bg-purple-50 text-purple-600 ring-1 ring-purple-100">
             <Tag size={22} />
@@ -596,11 +725,182 @@ export default function PetshopServicesPage() {
         </div>
       </section>
 
-      {/* Abas do Catálogo */}
-      <CatalogTabs />
+      {/* Abas do Catálogo - Mobile (Exato mockup) */}
+      <nav aria-label="Seções do catálogo mobile" className="md:hidden mb-4 flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+        <NavLink
+          to="/petshop/servicos"
+          className={({ isActive }) =>
+            `flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-bold transition whitespace-nowrap shadow-xs ${
+              isActive ? 'bg-[#0d6e5a] text-white' : 'bg-white border border-zinc-200/90 text-zinc-600 hover:text-zinc-900'
+            }`
+          }
+        >
+          <PawPrint size={15} />
+          <span>Serviços</span>
+        </NavLink>
+        <NavLink
+          to="/petshop/produtos"
+          className={({ isActive }) =>
+            `flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition whitespace-nowrap ${
+              isActive ? 'bg-[#0d6e5a] text-white font-bold' : 'text-zinc-600 hover:text-zinc-900'
+            }`
+          }
+        >
+          <Package size={15} />
+          <span>Produtos</span>
+        </NavLink>
+        <NavLink
+          to="/petshop/edicao-massa"
+          className={({ isActive }) =>
+            `flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition whitespace-nowrap ${
+              isActive ? 'bg-[#0d6e5a] text-white font-bold' : 'text-zinc-600 hover:text-zinc-900'
+            }`
+          }
+        >
+          <Layers size={15} />
+          <span>Edição em Massa</span>
+        </NavLink>
+        <NavLink
+          to="/petshop/entrada-estoque"
+          className={({ isActive }) =>
+            `flex min-h-10 items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition whitespace-nowrap ${
+              isActive ? 'bg-[#0d6e5a] text-white font-bold' : 'text-zinc-600 hover:text-zinc-900'
+            }`
+          }
+        >
+          <Download size={15} />
+          <span>Entrada / Lotes</span>
+        </NavLink>
+      </nav>
 
-      {/* Barra de Filtros */}
-      <section aria-label="Filtros de serviços" className="mb-5 flex flex-wrap items-center gap-3">
+      {/* Abas do Catálogo - Desktop */}
+      <div className="hidden md:block">
+        <CatalogTabs />
+      </div>
+
+      {/* 3. Filtros - Mobile (Estruturado em card idêntico ao mockup) */}
+      <section
+        className="md:hidden mb-4 rounded-2xl border border-zinc-200/90 bg-white p-3.5 shadow-2xs space-y-2.5"
+        aria-label="Filtros de serviços mobile"
+      >
+        {/* Linha 1: Busca */}
+        <div className="relative w-full">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar serviço..."
+            className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-9 pr-8 text-xs text-zinc-800 placeholder-zinc-400 outline-none transition focus:border-teal-600 focus:bg-white"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 p-1"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {/* Linha 2: Tipos e Categorias */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <Tag size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-teal-700 pointer-events-none" />
+            <select
+              value={selectedType}
+              onChange={e => setSelectedType(e.target.value)}
+              className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-8 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="all">Todos os tipos</option>
+              <option value="INDIVIDUAL">Serviços individuais</option>
+              <option value="COMBO">Combos de serviços</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          </div>
+
+          <div className="relative">
+            <Layers size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-teal-700 pointer-events-none" />
+            <select
+              value={selectedCategory}
+              onChange={e => setSelectedCategory(e.target.value)}
+              className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-8 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="all">Todas as categorias</option>
+              <option value="Higiene e Estética">Higiene e Estética</option>
+              <option value="Saúde">Saúde</option>
+              <option value="Estética e Spa">Estética e Spa</option>
+              <option value="Outros">Outros</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          </div>
+        </div>
+
+        {/* Linha 3: Portes e Status */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <PawPrint size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-teal-700 pointer-events-none" />
+            <select
+              value={selectedPet}
+              onChange={e => setSelectedPet(e.target.value)}
+              className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-8 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="all">Todos os portes</option>
+              <option value="Cães e Gatos">Cães e Gatos</option>
+              <option value="Cães">Apenas Cães</option>
+              <option value="Gatos">Apenas Gatos</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          </div>
+
+          <div className="relative">
+            <CheckCircle2 size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-teal-700 pointer-events-none" />
+            <select
+              value={selectedStatus}
+              onChange={e => setSelectedStatus(e.target.value)}
+              className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-8 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="all">Todos os status</option>
+              <option value="active">Ativos</option>
+              <option value="inactive">Inativos</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          </div>
+        </div>
+
+        {/* Linha 4: Ordenação e Botão Exportar */}
+        <div className="flex items-center gap-2">
+          <div className="relative flex-1">
+            <ArrowUpDown size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-teal-700 pointer-events-none" />
+            <select
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value)}
+              className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-8 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="name_asc">Ordenar por nome (A-Z)</option>
+              <option value="name_desc">Ordenar por nome (Z-A)</option>
+              <option value="price_asc">Menor preço</option>
+              <option value="price_desc">Maior preço</option>
+              <option value="duration_asc">Menor duração</option>
+              <option value="duration_desc">Maior duração</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          </div>
+
+          <button
+            type="button"
+            onClick={exportCsv}
+            className="flex h-10 items-center gap-1.5 rounded-xl border border-teal-200/80 bg-emerald-50/80 px-3 text-xs font-bold text-teal-900 shadow-2xs hover:bg-emerald-100 transition cursor-pointer shrink-0"
+          >
+            <Download size={14} className="text-teal-800" />
+            <span>Exportar</span>
+          </button>
+        </div>
+      </section>
+
+      {/* 3. Filtros - Desktop */}
+      <section aria-label="Filtros de serviços desktop" className="hidden md:flex mb-5 flex-wrap items-center gap-3">
         {/* Campo de Busca */}
         <div className="relative min-w-[240px] flex-1">
           <Search size={16} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -613,7 +913,7 @@ export default function PetshopServicesPage() {
           />
         </div>
 
-        {/* Filtro Tipo de Serviço (Individual vs Combo) */}
+        {/* Filtro Tipo de Serviço */}
         <div className="relative">
           <select
             value={selectedType}
@@ -695,8 +995,116 @@ export default function PetshopServicesPage() {
         </button>
       </section>
 
-      {/* Tabela de Serviços */}
-      <section aria-label="Lista de serviços" className="pc-panel min-h-[350px] overflow-visible rounded-2xl border border-[var(--pc-border)] bg-white shadow-2xs">
+      {/* 4. Lista de Serviços - Mobile (Cards fieis ao layout solicitado) */}
+      <div className="md:hidden space-y-3 mb-6">
+        {loading ? (
+          <ListSkeleton rows={4} />
+        ) : filteredItems.length === 0 ? (
+          <EmptyState
+            icon={Scissors}
+            title="Nenhum serviço encontrado"
+            description="Nenhum serviço corresponde aos filtros selecionados."
+            action={
+              <button
+                type="button"
+                onClick={() => {
+                  setSearch('');
+                  setSelectedType('all');
+                  setSelectedCategory('all');
+                  setSelectedPet('all');
+                  setSelectedStatus('all');
+                }}
+                className="mt-2 rounded-xl bg-teal-50 px-4 py-2 text-xs font-bold text-teal-800 border border-teal-200"
+              >
+                Limpar filtros
+              </button>
+            }
+          />
+        ) : (
+          filteredItems.map(item => {
+            const iconInfo = getServiceIconInfo(item);
+            const IconComp = iconInfo.icon;
+            const sizePrices = getPricesBySize(item);
+
+            return (
+              <div
+                key={item.id}
+                onClick={() => openEdit(item)}
+                className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 shadow-2xs space-y-3 cursor-pointer hover:border-teal-300 transition"
+              >
+                {/* Linha superior: Ícone grande + Nome/Categoria + Duração e Ações */}
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="grid h-14 w-14 place-items-center rounded-2xl bg-emerald-50 text-teal-700 shrink-0 border border-emerald-100/80">
+                      <IconComp size={28} strokeWidth={2} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-base font-bold text-zinc-900 truncate">
+                          {item.name}
+                        </h3>
+                        {!item.active && (
+                          <span className="rounded-md bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700 border border-rose-200">
+                            Inativo
+                          </span>
+                        )}
+                      </div>
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-teal-800 border border-emerald-200/60 mt-1">
+                        <Tag size={10} />
+                        {item.category || item.meta.category}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0" onClick={e => e.stopPropagation()}>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700">
+                      <Clock size={12} />
+                      {item.durationMinutes} min
+                    </span>
+                    <ServiceRowActionsMenu
+                      service={item}
+                      onEdit={() => openEdit(item)}
+                      onDuplicate={() => void handleDuplicate(item)}
+                      onToggleActive={() => void toggleStatus(item)}
+                      onDelete={() => void handleDelete(item)}
+                      updating={updatingId === item.id}
+                    />
+                  </div>
+                </div>
+
+                {/* Linha inferior: Preços por Porte ou Preço Único */}
+                {sizePrices ? (
+                  <div className="rounded-xl bg-zinc-50/80 p-2.5 border border-zinc-100/90">
+                    <span className="text-[11px] font-bold text-zinc-600 flex items-center gap-1.5 mb-2">
+                      <PawPrint size={13} className="text-teal-700" /> Preços por porte
+                    </span>
+                    <div className="grid grid-cols-5 gap-1.5 text-center">
+                      {sizePrices.map((sp: { key: string; label: string; price: string }) => (
+                        <div key={sp.key} className="rounded-lg bg-white border border-zinc-200/80 p-1.5 shadow-2xs">
+                          <span className="block text-[9px] font-bold text-zinc-500 uppercase">{sp.label}</span>
+                          <strong className="block text-[11px] sm:text-xs font-black text-teal-800 tabular-nums">
+                            {sp.price}
+                          </strong>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between rounded-xl bg-zinc-50/80 px-3 py-2 border border-zinc-100/90 text-xs">
+                    <span className="text-zinc-500 font-medium">Preço individual</span>
+                    <strong className="text-sm font-black text-teal-800 tabular-nums">
+                      {money(item.price)}
+                    </strong>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* 4. Tabela de Serviços - Desktop */}
+      <section aria-label="Lista de serviços desktop" className="hidden md:block pc-panel min-h-[350px] overflow-visible rounded-2xl border border-[var(--pc-border)] bg-white shadow-2xs">
         {loading ? (
           <ListSkeleton rows={6} />
         ) : filteredItems.length === 0 ? (
@@ -748,7 +1156,7 @@ export default function PetshopServicesPage() {
                     Preço
                   </th>
                   <th scope="col" className="px-5 py-3.5">
-                    Para quais pets?
+                    Para quais pets
                   </th>
                   <th scope="col" className="px-5 py-3.5">
                     Status
@@ -760,151 +1168,84 @@ export default function PetshopServicesPage() {
               </thead>
               <tbody className="divide-y divide-[var(--pc-border)]">
                 {filteredItems.map(item => {
-                  const iconInfo = getServiceIconInfo(item.name, item.meta.category, item.color);
+                  const iconInfo = getServiceIconInfo(item);
                   const IconComponent = iconInfo.icon;
-                  const isSaude = item.meta.category === 'Saúde';
-                  const isCombo = item.serviceType === 'COMBO';
-                  const hasVariants = (item.pricingRules && item.pricingRules.length > 0) || Boolean(item.priceRange?.hasVariants);
 
                   return (
                     <tr
                       key={item.id}
-                      className={`transition-colors hover:bg-slate-50/60 ${item.active ? '' : 'bg-slate-50/30 opacity-65'}`}
+                      onClick={() => openEdit(item)}
+                      className="cursor-pointer transition hover:bg-[var(--pc-surface-subtle)]/60"
                     >
                       {/* Coluna Serviço */}
                       <td className="px-5 py-4">
-                        <div className="flex items-center gap-3.5">
+                        <div className="flex items-center gap-3">
                           <div
-                            className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${
-                              isCombo
-                                ? 'bg-purple-50 text-purple-700 ring-1 ring-purple-200/60'
-                                : `${iconInfo.bg} ${iconInfo.text} ring-1 ${iconInfo.ring}`
-                            }`}
+                            className={`grid h-10 w-10 place-items-center rounded-xl ${iconInfo.bg} ${iconInfo.text} ring-1 ${iconInfo.border} shrink-0`}
                           >
-                            {isCombo ? <Layers size={18} /> : <IconComponent size={18} />}
+                            <IconComponent size={18} />
                           </div>
-                          <div className="min-w-0">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <strong className="block truncate text-sm font-semibold text-slate-900">{item.name}</strong>
-                              {isCombo && (
-                                <span className="inline-flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-700">
-                                  <Layers size={11} /> Combo ({item.comboItems?.length || 0} serviços)
-                                </span>
-                              )}
-                              {hasVariants && (
-                                <span className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-800">
-                                  5 Portes Configurados
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-[var(--pc-text)]">{item.name}</span>
+                              {item.serviceType === 'COMBO' && (
+                                <span className="rounded-md bg-purple-50 px-1.5 py-0.5 text-[10px] font-bold text-purple-700 border border-purple-200">
+                                  Combo
                                 </span>
                               )}
                             </div>
-                            {/* Pílulas de valores rápidos por porte */}
-                            {Array.isArray(item.pricingRules) && item.pricingRules.length > 0 && (
-                              <div className="flex flex-wrap items-center gap-1 mt-1">
-                                {['mini', 'small', 'medium', 'large', 'giant'].map(sz => {
-                                  const rule = item.pricingRules?.find(r => r.size === sz && (!r.coatType || r.coatType === 'all'));
-                                  if (!rule) return null;
-                                  const shortNames: Record<string, string> = { mini: 'Mini', small: 'P', medium: 'M', large: 'G', giant: 'GG' };
-                                  return (
-                                    <span
-                                      key={sz}
-                                      className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-700 border border-slate-200/80"
-                                      title={`Porte ${shortNames[sz]}: ${money(rule.price)}`}
-                                    >
-                                      <span className="font-bold text-slate-600">{shortNames[sz]}:</span>
-                                      <span className="font-semibold text-teal-800 tabular-nums">{money(rule.price)}</span>
-                                    </span>
-                                  );
-                                })}
-                              </div>
+                            {item.meta.cleanDescription && (
+                              <p className="line-clamp-1 max-w-xs text-xs text-[var(--pc-text-muted)]">
+                                {item.meta.cleanDescription}
+                              </p>
                             )}
-                            <p className="mt-0.5 line-clamp-1 text-xs text-slate-500">
-                              {item.meta.cleanDescription || 'Sem descrição cadastrada.'}
-                            </p>
                           </div>
                         </div>
                       </td>
 
                       {/* Coluna Categoria */}
                       <td className="px-5 py-4 whitespace-nowrap">
-                        <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${
-                            isCombo
-                              ? 'border border-purple-200/80 bg-purple-50 text-purple-700'
-                              : isSaude
-                              ? 'border border-rose-200/80 bg-rose-50 text-rose-700'
-                              : 'border border-emerald-200/80 bg-emerald-50 text-emerald-700'
-                          }`}
-                        >
-                          <Tag size={12} className={isCombo ? 'text-purple-500' : isSaude ? 'text-rose-500' : 'text-emerald-500'} />
-                          {isCombo ? 'Combo Promocional' : item.meta.category}
+                        <span className="inline-flex items-center rounded-md bg-[var(--pc-surface-subtle)] px-2 py-1 text-xs font-medium text-[var(--pc-text-secondary)]">
+                          {item.meta.category}
                         </span>
                       </td>
 
                       {/* Coluna Duração */}
                       <td className="px-5 py-4 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-600">
-                          <Clock size={14} className="text-slate-400" />
-                          {item.priceRange?.minDuration !== undefined &&
-                          item.priceRange.maxDuration !== undefined &&
-                          item.priceRange.minDuration !== item.priceRange.maxDuration
-                            ? `${item.priceRange.minDuration} a ${item.priceRange.maxDuration} min`
-                            : `${item.durationMinutes} min`}
+                        <span className="flex items-center gap-1.5 text-xs text-slate-600">
+                          <Clock size={13} className="text-slate-400" />
+                          {item.durationMinutes} min
                         </span>
                       </td>
 
                       {/* Coluna Preço */}
                       <td className="px-5 py-4 whitespace-nowrap">
-                        <div className="flex flex-col">
-                          <strong className="text-sm font-bold tabular-nums text-slate-900">
-                            {item.priceRange?.formattedRange || money(item.price)}
-                          </strong>
-                          {hasVariants && (
-                            <span className="text-[10px] font-medium text-slate-400">
-                              por porte/pelagem
-                            </span>
-                          )}
-                          {isCombo && item.comboDiscountValue && (
-                            <span className="text-[10px] font-bold text-emerald-600">
-                              {item.comboPricingType === 'PERCENT_DISCOUNT'
-                                ? `${item.comboDiscountValue}% OFF`
-                                : item.comboPricingType === 'FIXED_DISCOUNT'
-                                ? `Economia de ${money(item.comboDiscountValue)}`
-                                : 'Preço Especial'}
-                            </span>
-                          )}
-                        </div>
+                        <strong className="text-sm font-bold text-teal-800 tabular-nums">
+                          {money(item.price)}
+                        </strong>
                       </td>
 
-                      {/* Coluna Para quais pets? */}
+                      {/* Coluna Pets */}
                       <td className="px-5 py-4 whitespace-nowrap">
-                        <div className="inline-flex items-center gap-2 text-xs font-medium text-slate-700">
-                          <span className="flex items-center gap-1 text-slate-400">
-                            <PawPrint size={15} className="text-amber-600/70" />
-                          </span>
-                          <span>{item.meta.targetPets}</span>
-                        </div>
+                        <span className="text-xs font-medium text-slate-600">
+                          {item.meta.targetPets}
+                        </span>
                       </td>
 
                       {/* Coluna Status */}
                       <td className="px-5 py-4 whitespace-nowrap">
                         <span
-                          className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                            item.active
-                              ? 'border border-emerald-200/80 bg-emerald-50 text-emerald-700'
-                              : 'border border-rose-200/80 bg-rose-50 text-rose-700'
+                          className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            item.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'
                           }`}
                         >
-                          <span
-                            className={`h-2 w-2 rounded-full ${item.active ? 'bg-emerald-500' : 'bg-rose-500'}`}
-                          />
                           {item.active ? 'Ativo' : 'Inativo'}
                         </span>
                       </td>
 
                       {/* Coluna Ações */}
-                      <td className="px-5 py-4 text-right whitespace-nowrap">
+                      <td className="px-5 py-4 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                         <div className="inline-flex items-center justify-end gap-1.5">
-                          {/* Editar */}
                           <button
                             type="button"
                             onClick={() => openEdit(item)}
@@ -914,23 +1255,21 @@ export default function PetshopServicesPage() {
                             <Pencil size={14} />
                           </button>
 
-                          {/* Duplicar */}
                           <button
                             type="button"
-                            onClick={() => handleDuplicate(item)}
+                            onClick={() => void handleDuplicate(item)}
                             title="Duplicar serviço"
                             className="flex h-8 w-8 items-center justify-center rounded-lg border border-[var(--pc-border)] bg-white text-slate-600 shadow-2xs transition hover:border-[var(--pc-action)] hover:text-[var(--pc-action)]"
                           >
                             <Copy size={14} />
                           </button>
 
-                          {/* Menu suspenso em portal */}
                           <ServiceRowActionsMenu
                             service={item}
                             onEdit={() => openEdit(item)}
-                            onDuplicate={() => handleDuplicate(item)}
-                            onToggleActive={() => toggleStatus(item)}
-                            onDelete={() => handleDelete(item)}
+                            onDuplicate={() => void handleDuplicate(item)}
+                            onToggleActive={() => void toggleStatus(item)}
+                            onDelete={() => void handleDelete(item)}
                             updating={updatingId === item.id}
                           />
                         </div>

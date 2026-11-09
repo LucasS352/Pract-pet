@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo, FormEvent } from 'react';
 import {
+  Bath,
+  Stethoscope,
   Scissors,
   Layers,
   Sparkles,
@@ -106,6 +108,27 @@ const DEFAULT_SIZE_PRICES: Record<string, SizePriceEntry> = {
   giant: { price: '110.00', duration: '90' },
 };
 
+export const SERVICE_ICON_OPTIONS = [
+  { id: 'bath', label: 'Banho', icon: Bath, desc: 'Banho simples ou completo' },
+  { id: 'scissors', label: 'Tosa', icon: Scissors, desc: 'Tosa geral ou higiênica' },
+  { id: 'nail', label: 'Corte de Unha', icon: PawPrint, desc: 'Unhas e patas' },
+  { id: 'flea', label: 'Antipulga', icon: Droplets, desc: 'Shampoo antipulga ou medicinal' },
+  { id: 'spa', label: 'Hidratação & Spa', icon: Sparkles, desc: 'Hidratação, ozônio e spa' },
+  { id: 'health', label: 'Saúde / Vacina', icon: Stethoscope, desc: 'Consultas e vacinas' },
+];
+
+export function inferIconFromName(name: string, category?: string): string {
+  const n = (name || '').toLowerCase();
+  const c = (category || '').toLowerCase();
+  if (n.includes('tosa') || n.includes('trim') || n.includes('máquina')) return 'scissors';
+  if (n.includes('unha') || n.includes('pata') || n.includes('patas')) return 'nail';
+  if (n.includes('pulga') || n.includes('carrapato') || n.includes('medicament') || n.includes('dermat') || n.includes('antipulga')) return 'flea';
+  if (n.includes('hidrata') || n.includes('spa') || n.includes('cauteriz') || n.includes('ozônio') || n.includes('estética') || c.includes('spa')) return 'spa';
+  if (n.includes('vacina') || n.includes('consulta') || n.includes('veterin') || n.includes('exame') || n.includes('saúde') || c.includes('saúde')) return 'health';
+  if (n.includes('banho') || n.includes('ducha') || n.includes('higien') || c.includes('higiene')) return 'bath';
+  return 'bath';
+}
+
 export function ServiceEditorModal({
   isOpen,
   onClose,
@@ -127,6 +150,8 @@ export function ServiceEditorModal({
   const [color, setColor] = useState('#0d9488');
   const [description, setDescription] = useState('');
   const [active, setActive] = useState(true);
+  const [selectedIcon, setSelectedIcon] = useState<string>('bath');
+  const [iconTouched, setIconTouched] = useState<boolean>(false);
 
   // Precificação
   const [pricingMode, setPricingMode] = useState<'BY_SIZE' | 'SINGLE'>('BY_SIZE');
@@ -756,7 +781,7 @@ export function ServiceEditorModal({
 
       const payload: any = {
         name: name.trim(),
-        description: description.trim(),
+        description: description.trim() ? `${description.trim()}\n\n[icon:${selectedIcon}]` : `[icon:${selectedIcon}]`,
         serviceType,
         category,
         targetSpecies,
