@@ -92,7 +92,7 @@ export function PetshopOperatorLoginModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-[2px] animate-in fade-in duration-200">
-      <div className="w-full max-w-md max-h-[calc(100dvh-2rem)] overflow-y-auto rounded-2xl border border-[var(--pc-border)] bg-white shadow-2xl text-[var(--pc-text)]">
+      <div className="w-full max-w-md max-h-[calc(100dvh-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px)-2rem)] overflow-y-auto rounded-2xl border border-[var(--pc-border)] bg-white shadow-2xl text-[var(--pc-text)]">
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--pc-border)] bg-slate-50/70 px-5 py-4">
           <div className="flex items-center gap-2.5">

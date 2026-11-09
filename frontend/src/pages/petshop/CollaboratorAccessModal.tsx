@@ -103,8 +103,8 @@ export function CollaboratorAccessModal({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 backdrop-blur-xs animate-in fade-in duration-200">
-      <div className="w-full max-w-md overflow-hidden rounded-2xl border border-[var(--pc-border)] bg-white shadow-2xl text-[var(--pc-text)]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4 pt-[max(1rem,env(safe-area-inset-top,0px))] pb-[max(1rem,env(safe-area-inset-bottom,0px))] backdrop-blur-xs animate-in fade-in duration-200">
+      <div className="w-full max-w-md max-h-[calc(100dvh-env(safe-area-inset-top,0px)-env(safe-area-inset-bottom,0px)-2rem)] overflow-y-auto rounded-2xl border border-[var(--pc-border)] bg-white shadow-2xl text-[var(--pc-text)]">
         {/* Cabeçalho */}
         <div className="flex items-center justify-between border-b border-[var(--pc-border)] bg-slate-50/70 px-5 py-4">
           <div className="flex items-center gap-2.5">

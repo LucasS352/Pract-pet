@@ -90,7 +90,8 @@ export function NetworkStatusBanner() {
     <div
       role="status"
       aria-live="polite"
-      className={`w-full py-1.5 px-4 text-center text-sm font-medium ${bg} ${text} z-50 relative transition-colors`}
+      style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.375rem)' }}
+      className={`w-full pb-1.5 px-4 text-center text-sm font-medium ${bg} ${text} z-50 relative transition-colors`}
     >
       {message}
       {reviews.length > 0 && (

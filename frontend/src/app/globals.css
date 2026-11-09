@@ -1,17 +1,38 @@
 @import "tailwindcss";
 
+/* ─── Comportamento Nativo PWA (iOS WebKit & Android) ──────────────────────── */
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+}
+
+html,
+body {
+  overscroll-behavior-y: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: pan-x pan-y;
+}
+
+:where(a, button, input, select, textarea, [role="button"], label) {
+  touch-action: manipulation;
+}
+
 /* Garçom: permite rolagem, sem zoom por toque duplo/pinça, inclusive nos portais. */
 body.garcom-touch-screen,
 body.garcom-touch-screen * {
   touch-action: pan-x pan-y;
 }
 
-/* Evita zoom automático ao focar campos pequenos no Safari mobile. */
-@media (pointer: coarse) {
-  body.garcom-touch-screen input,
-  body.garcom-touch-screen textarea,
-  body.garcom-touch-screen select {
-    font-size: max(1rem, 16px);
+/* Evita zoom automático do iOS Safari/PWA ao focar campos < 16px em toda a aplicação (incluindo modais e portais). */
+@media (max-width: 1023px), (pointer: coarse) {
+  input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  textarea,
+  select {
+    font-size: max(1rem, 16px) !important;
   }
 }
 

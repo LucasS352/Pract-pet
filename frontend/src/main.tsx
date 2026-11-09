@@ -113,6 +113,26 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
+// ── Proteção Anti-Zoom Nativo iOS WebKit / PWA ───────────────────────────────
+if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+  const preventGestureZoom = (e: Event) => {
+    e.preventDefault();
+  };
+  document.addEventListener('gesturestart', preventGestureZoom, { passive: false });
+  document.addEventListener('gesturechange', preventGestureZoom, { passive: false });
+  document.addEventListener('gestureend', preventGestureZoom, { passive: false });
+
+  document.addEventListener(
+    'touchmove',
+    (e: TouchEvent) => {
+      if (e.touches.length > 1) {
+        e.preventDefault();
+      }
+    },
+    { passive: false }
+  );
+}
+
 // ── Componentes de Rota Protegida ────────────────────────────────────────────
 const IS_DEMO = import.meta.env.VITE_APP_MODE === 'demo';
 
@@ -250,6 +270,9 @@ function App() {
         position="top-center" 
         richColors 
         duration={2000}
+        style={{
+          top: 'max(env(safe-area-inset-top, 0px), 16px)',
+        }}
         toastOptions={{
           style: { 
             fontSize: '0.95rem', 

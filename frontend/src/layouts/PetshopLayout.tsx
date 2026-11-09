@@ -159,7 +159,7 @@ export function PetshopLayout() {
 
   if (tenantError) {
     return (
-      <div className="petcare-shell grid min-h-screen place-items-center p-6">
+      <div className="petcare-shell grid min-h-screen place-items-center p-6 pt-[calc(1.5rem+env(safe-area-inset-top,0px))] pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))]">
         <div className="pc-panel max-w-md p-6 text-center">
           <h1 className="text-lg font-semibold">Não foi possível carregar o Pet Care</h1>
           <p className="mt-2 text-sm text-[var(--pc-text-secondary)]">Verifique sua conexão e tente novamente.</p>
@@ -176,7 +176,7 @@ export function PetshopLayout() {
 
   if (!tenant) {
     return (
-      <div className="petcare-shell grid min-h-screen place-items-center" role="status">
+      <div className="petcare-shell grid min-h-screen place-items-center pt-[env(safe-area-inset-top,0px)] pb-[env(safe-area-inset-bottom,0px)]" role="status">
         <div className="flex items-center gap-3 text-sm font-medium text-[var(--pc-text-secondary)]">
           <span className="h-4 w-4 animate-spin rounded-full border-2 border-[var(--pc-border-strong)] border-t-[var(--pc-action)]" />
           Preparando o Pet Care…
@@ -187,7 +187,7 @@ export function PetshopLayout() {
 
   if (modules.petshop === false) {
     return (
-      <div className="petcare-shell grid min-h-screen place-items-center p-6 text-center">
+      <div className="petcare-shell grid min-h-screen place-items-center p-6 pt-[calc(1.5rem+env(safe-area-inset-top,0px))] pb-[calc(1.5rem+env(safe-area-inset-bottom,0px))] text-center">
         <div className="pc-panel max-w-md p-7">
           <PawPrint className="mx-auto mb-4 text-[var(--pc-text-muted)]" size={36} />
           <h1 className="text-xl font-semibold">Módulo Pet Shop não habilitado</h1>
@@ -222,7 +222,7 @@ export function PetshopLayout() {
     <div className="petcare-shell min-h-screen">
       <a
         href="#petcare-main"
-        className="fixed left-3 top-3 z-[100] -translate-y-20 rounded-lg bg-[var(--pc-text)] px-4 py-2 text-sm font-semibold text-white focus:translate-y-0"
+        className="fixed left-3 top-[calc(0.75rem+env(safe-area-inset-top,0px))] z-[100] -translate-y-24 rounded-lg bg-[var(--pc-text)] px-4 py-2 text-sm font-semibold text-white focus:translate-y-0"
       >
         Ir para o conteúdo
       </a>
@@ -334,100 +334,120 @@ export function PetshopLayout() {
         </div>
       </aside>
 
-      {/* Top Header */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-3 sm:px-4 backdrop-blur lg:ml-64 lg:px-6">
-        <div className="flex min-w-0 items-center gap-3">
-          <button type="button" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--pc-border)] bg-white text-[var(--pc-text)] shadow-2xs active:bg-slate-100 lg:hidden"><Menu size={18} /></button>
-          {tenant?.logoUrl ? (
-            <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-0.5 shadow-2xs flex items-center justify-center lg:hidden">
-              <img
-                src={getFullUrl(tenant.logoUrl)}
-                alt={tenantName}
-                className="h-full w-full object-contain"
-                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              />
+      {/* Top Header (com Safe-Area nativa para Notch / Dynamic Island do iPhone) */}
+      <header
+        className="sticky top-0 z-30 border-b border-[var(--pc-border)] bg-white/95 backdrop-blur lg:ml-64"
+        style={{
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+          paddingLeft: 'env(safe-area-inset-left, 0px)',
+          paddingRight: 'env(safe-area-inset-right, 0px)',
+        }}
+      >
+        <div className="flex h-14 items-center justify-between gap-2 px-3 sm:px-4 lg:px-6">
+          <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              aria-label="Abrir menu"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--pc-border)] bg-white text-[var(--pc-text)] shadow-2xs active:bg-slate-100 lg:hidden"
+            >
+              <Menu size={18} />
+            </button>
+            {tenant?.logoUrl ? (
+              <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-0.5 shadow-2xs flex items-center justify-center lg:hidden">
+                <img
+                  src={getFullUrl(tenant.logoUrl)}
+                  alt={tenantName}
+                  className="h-full w-full object-contain"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              </div>
+            ) : (
+              <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-800 text-white lg:hidden">
+                <PawPrint aria-hidden="true" size={17} />
+              </div>
+            )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold lg:hidden">{tenantName}</p>
+              <p className="hidden text-sm text-[var(--pc-text-secondary)] lg:block">Área de atendimento e gestão</p>
             </div>
-          ) : (
-            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-800 text-white lg:hidden">
-              <PawPrint aria-hidden="true" size={17} />
-            </div>
-          )}
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold lg:hidden">{tenantName}</p>
-            <p className="hidden text-sm text-[var(--pc-text-secondary)] lg:block">Área de atendimento e gestão</p>
           </div>
-        </div>
 
-        <div className="flex items-center gap-2 sm:gap-3">
-          {/* Botão Acesso da Equipe (gerencia a credencial de login dos colaboradores) */}
-          {(user?.role === 'admin' || user?.role === 'superadmin') && (
-            <button
-              type="button"
-              onClick={() => setShowCreateAccessModal(true)}
-              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50/80 px-2.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 hover:border-emerald-400 transition shadow-2xs"
-              title="Configurar e-mail e senha de login da equipe"
-            >
-              <KeyRound size={14} className="text-emerald-700" />
-              <span className="hidden sm:inline">Acesso da Equipe</span>
-            </button>
-          )}
+          <div className="flex shrink-0 items-center gap-1.5 sm:gap-2.5">
+            {/* Botão Acesso da Equipe (gerencia a credencial de login dos colaboradores) */}
+            {(user?.role === 'admin' || user?.role === 'superadmin') && (
+              <button
+                type="button"
+                onClick={() => setShowCreateAccessModal(true)}
+                className="flex min-h-9 items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50/80 px-2.5 text-xs font-bold text-emerald-800 hover:bg-emerald-100 hover:border-emerald-400 transition shadow-2xs"
+                title="Configurar e-mail e senha de login da equipe"
+              >
+                <KeyRound size={14} className="text-emerald-700" />
+                <span className="hidden sm:inline">Acesso da Equipe</span>
+              </button>
+            )}
 
-          {operator ? (
-            <div className="flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50/90 px-2.5 py-1 text-xs font-semibold text-emerald-900 shadow-2xs">
+            {operator ? (
+              <div className="flex items-center gap-1 rounded-xl border border-emerald-200 bg-emerald-50/90 px-2.5 py-1 text-xs font-semibold text-emerald-900 shadow-2xs">
+                <button
+                  type="button"
+                  onClick={() => setShowOpModal(true)}
+                  className="flex items-center gap-1.5 hover:opacity-80 transition"
+                  title="Clique para trocar ou sair do perfil do colaborador"
+                >
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="max-w-[90px] sm:max-w-[110px] truncate">{operator.name}</span>
+                  <span className="text-2xs text-emerald-700 font-normal hidden md:inline">
+                    ({(operator as any)?.jobTitle || 'Atendimento'})
+                  </span>
+                </button>
+                <span className="text-emerald-300 mx-0.5">|</span>
+                <button
+                  type="button"
+                  onClick={() => setShowOpModal(true)}
+                  className="text-2xs font-bold text-emerald-800 hover:underline px-1 py-0.5"
+                  title="Trocar colaborador"
+                >
+                  Trocar
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
                 onClick={() => setShowOpModal(true)}
-                className="flex items-center gap-1.5 hover:opacity-80 transition"
-                title="Clique para trocar ou sair do perfil do colaborador"
+                className="flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--pc-border-strong)] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-2xs"
               >
-                <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="max-w-[100px] truncate">{operator.name}</span>
-                <span className="text-2xs text-emerald-700 font-normal hidden md:inline">
-                  ({(operator as any)?.jobTitle || 'Atendimento'})
-                </span>
+                <KeyRound size={14} className="text-slate-400" />
+                <span>Login PIN</span>
               </button>
-              <span className="text-emerald-300 mx-0.5">|</span>
-              <button
-                type="button"
-                onClick={() => setShowOpModal(true)}
-                className="text-2xs font-bold text-emerald-800 hover:underline px-1 py-0.5"
-                title="Trocar colaborador"
-              >
-                Trocar
-              </button>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setShowOpModal(true)}
-              className="flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--pc-border-strong)] bg-white px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-2xs"
+            )}
+
+            {hasPdv && (<button
+              onClick={() => navigate('/')}
+              className="hidden sm:flex min-h-9 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] px-3 text-xs font-semibold text-[var(--pc-text)] transition hover:bg-[var(--pc-surface-subtle)]"
             >
-              <KeyRound size={14} className="text-slate-400" />
-              <span>Login PIN</span>
+              <ShoppingCart aria-hidden="true" size={14} />
+              <span className="hidden sm:inline">PDV Caixa</span>
+            </button>)}
+
+            <button
+              onClick={exit}
+              aria-label="Sair"
+              title="Sair"
+              className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 lg:hidden"
+            >
+              <LogOut aria-hidden="true" size={16} />
             </button>
-          )}
-
-          {hasPdv && (<button
-            onClick={() => navigate('/')}
-            className="flex min-h-9 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] px-3 text-xs font-semibold text-[var(--pc-text)] transition hover:bg-[var(--pc-surface-subtle)]"
-          >
-            <ShoppingCart aria-hidden="true" size={14} />
-            <span className="hidden sm:inline">PDV Caixa</span>
-          </button>)}
-
-          <button
-            onClick={exit}
-            aria-label="Sair"
-            title="Sair"
-            className="grid h-9 w-9 place-items-center rounded-lg text-slate-400 hover:bg-rose-50 hover:text-rose-600 lg:hidden"
-          >
-            <LogOut aria-hidden="true" size={16} />
-          </button>
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main id="petcare-main" tabIndex={-1} className="pb-24 lg:ml-64 lg:pb-8">
+      <main
+        id="petcare-main"
+        tabIndex={-1}
+        className="pb-[calc(5.5rem+env(safe-area-inset-bottom,0px))] lg:ml-64 lg:pb-8"
+      >
         {isAccessBlocked ? (
           <div className="mx-auto max-w-lg p-6 pt-16 text-center">
             <div className="pc-panel p-8 shadow-md">
@@ -462,16 +482,16 @@ export function PetshopLayout() {
         )}
       </main>
 
-      {/* Navegação Mobile */}
+      {/* Navegação Mobile Inferior (com Safe-Area nativa) */}
       <nav
         aria-label="Navegação mobile"
-        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-2' : 'grid-cols-5'} border-t border-[var(--pc-border)] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.04)]`}
+        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-2' : 'grid-cols-5'} border-t border-[var(--pc-border)] bg-white/95 px-1 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur lg:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.04)]`}
       >
         <NavLink
           to="/petshop"
           end
           className={({ isActive }) =>
-            `flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
+            `flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
               isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
             }`
           }
@@ -482,7 +502,7 @@ export function PetshopLayout() {
         <NavLink
           to="/petshop/agenda"
           className={({ isActive }) =>
-            `flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
+            `flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
               isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
             }`
           }
@@ -495,7 +515,7 @@ export function PetshopLayout() {
             <NavLink
               to="/petshop/pets"
               className={({ isActive }) =>
-                `flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
+                `flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
                   isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
                 }`
               }
@@ -503,8 +523,27 @@ export function PetshopLayout() {
               <PawPrint size={18} strokeWidth={2} />
               <span>Pets</span>
             </NavLink>
-            <NavLink to="/petshop/pacotes" className={({ isActive }) => `flex min-h-14 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition ${isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-500'}`}><PackageCheck size={18} strokeWidth={2} /><span>Pacotes</span></NavLink>
-            <button type="button" onClick={() => setMobileMenuOpen(true)} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition ${mobileMenuOpen ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-500'}`}><Menu size={18} strokeWidth={2} /><span>Menu</span></button>
+            <NavLink
+              to="/petshop/pacotes"
+              className={({ isActive }) =>
+                `flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
+                  isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
+                }`
+              }
+            >
+              <PackageCheck size={18} strokeWidth={2} />
+              <span>Pacotes</span>
+            </NavLink>
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen(true)}
+              className={`flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
+                mobileMenuOpen ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
+              }`}
+            >
+              <Menu size={18} strokeWidth={2} />
+              <span>Menu</span>
+            </button>
             <NavLink
               to={hasPdv ? '/' : '/petshop/agenda'}
               className="hidden"
@@ -516,12 +555,15 @@ export function PetshopLayout() {
         )}
       </nav>
 
-      {/* Drawer Mobile Completo */}
+      {/* Drawer Mobile Completo (com Safe-Area no topo e rodapé para iPhone) */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-[70] lg:hidden">
           <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-[2px]" onClick={() => setMobileMenuOpen(false)} />
-          <div className="fixed inset-y-0 left-0 z-10 flex w-[285px] max-w-[85vw] flex-col bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-[var(--pc-border)] px-4 py-3.5">
+          <div className="fixed inset-y-0 left-0 z-10 flex h-[100dvh] max-h-[100dvh] w-[285px] max-w-[85vw] flex-col bg-white shadow-2xl">
+            <div
+              className="flex items-center justify-between border-b border-[var(--pc-border)] px-4 pb-3.5 shrink-0"
+              style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.875rem)' }}
+            >
               <div className="flex items-center gap-2.5 min-w-0">
                 {tenant?.logoUrl ? (
                   <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-0.5 shadow-2xs flex items-center justify-center">
@@ -551,7 +593,7 @@ export function PetshopLayout() {
                 <X size={18} />
               </button>
             </div>
-            <div className="border-b border-[var(--pc-border)] p-3">
+            <div className="border-b border-[var(--pc-border)] p-3 shrink-0">
               {operator ? (
                 <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5">
                   <div className="min-w-0">
@@ -577,7 +619,7 @@ export function PetshopLayout() {
                 </button>
               )}
             </div>
-            <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+            <nav className="flex-1 space-y-1 overflow-y-auto overscroll-contain p-3">
               {currentNav.map(item => (
                 <NavLink key={item.to} to={item.to} end={item.end} onClick={() => setMobileMenuOpen(false)} className={linkClass}>
                   <item.icon aria-hidden="true" size={18} />
@@ -585,7 +627,7 @@ export function PetshopLayout() {
                 </NavLink>
               ))}
             </nav>
-            <div className="border-t border-[var(--pc-border)] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] space-y-2">
+            <div className="border-t border-[var(--pc-border)] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] space-y-2 shrink-0">
               {(user?.role === 'admin' || user?.role === 'superadmin') && (
                 <button
                   type="button"

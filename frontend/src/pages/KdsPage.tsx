@@ -154,7 +154,13 @@ export function KdsPage() {
     (i) => station === 'ALL' || i.kdsDestination === station,
   );
   return (
-    <main className="min-h-screen bg-[#090f14] text-slate-100 p-3 sm:p-5 lg:p-7">
+    <main
+      className="min-h-screen bg-[#090f14] text-slate-100 p-3 sm:p-5 lg:p-7"
+      style={{
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)',
+        paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
+      }}
+    >
       <header className="flex flex-wrap items-center justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           {!assignedStation && <Link

@@ -429,9 +429,16 @@ export default function PetClientPortalPage() {
   }
 
   return (
-    <div className="petcare-shell min-h-screen pb-16">
-      {/* 1. Header do Pet Shop */}
-      <header className="sticky top-0 z-30 border-b border-[var(--pc-border)] bg-white/95 backdrop-blur">
+    <div className="petcare-shell min-h-screen pb-[calc(4rem+env(safe-area-inset-bottom,0px))]">
+      {/* 1. Header do Pet Shop (com Safe-Area nativa para Notch do iPhone) */}
+      <header
+        className="sticky top-0 z-30 border-b border-[var(--pc-border)] bg-white/95 backdrop-blur"
+        style={{
+          paddingTop: 'env(safe-area-inset-top, 0px)',
+          paddingLeft: 'env(safe-area-inset-left, 0px)',
+          paddingRight: 'env(safe-area-inset-right, 0px)',
+        }}
+      >
         <div className="mx-auto flex min-h-16 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
           <div className="flex items-center gap-3">
             {data.shop.logoUrl ? (

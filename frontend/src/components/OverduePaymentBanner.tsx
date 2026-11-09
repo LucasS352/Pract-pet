@@ -108,8 +108,11 @@ export function OverduePaymentBanner() {
 
   return (
     <div
-      className={`fixed top-0 left-0 right-0 z-[9999] border-b ${bg} backdrop-blur-md px-4 py-3 flex items-start gap-3 shadow-2xl animate-[slideDown_0.3s_ease]`}
-      style={{ animation: 'slideDown 0.3s ease' }}
+      className={`fixed top-0 left-0 right-0 z-[9999] border-b ${bg} backdrop-blur-md px-4 pb-3 flex items-start gap-3 shadow-2xl animate-[slideDown_0.3s_ease]`}
+      style={{
+        animation: 'slideDown 0.3s ease',
+        paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)',
+      }}
     >
       <style>{`
         @keyframes slideDown {

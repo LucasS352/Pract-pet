@@ -614,7 +614,10 @@ export function GarcomPage() {
       <div className="w-full max-w-xl flex-1 flex flex-col h-full overflow-hidden bg-zinc-950 border-x border-zinc-800/50 shadow-2xl relative">
 
         {/* ─── Header ─────────────────────────────────────────────────────── */}
-        <header className="bg-zinc-900 border-b border-zinc-800 px-4 py-3 flex items-center justify-between shrink-0">
+        <header
+          className="bg-zinc-900 border-b border-zinc-800 px-4 pb-3 flex items-center justify-between shrink-0"
+          style={{ paddingTop: 'calc(env(safe-area-inset-top, 0px) + 0.75rem)' }}
+        >
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-orange-500/20 border border-orange-500/30 flex items-center justify-center">
               <UtensilsCrossed size={18} className="text-orange-400" />
@@ -775,7 +778,10 @@ export function GarcomPage() {
             </div>
 
             {/* Bottom Bar: Abrir Nova Mesa */}
-            <div className="bg-zinc-900 border-t border-zinc-800 p-4 shrink-0">
+            <div
+              className="bg-zinc-900 border-t border-zinc-800 px-4 pt-4 shrink-0"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' }}
+            >
               <button
                 type="button"
                 onClick={() => setShowNewComanda(true)}
@@ -874,7 +880,10 @@ export function GarcomPage() {
             </div>
 
             {/* Footer de Ações */}
-            <div className="bg-zinc-900 border-t border-zinc-800 p-4 shrink-0">
+            <div
+              className="bg-zinc-900 border-t border-zinc-800 px-4 pt-4 shrink-0"
+              style={{ paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 1rem)' }}
+            >
               {selectedComanda.status === 'waiting_payment' ? (
                 <div className="flex gap-3">
                   <button
