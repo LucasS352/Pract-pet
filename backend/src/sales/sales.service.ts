@@ -913,7 +913,7 @@ export class SalesService {
       // These intents cannot disappear between the sale commit and a process restart.
       if (data.comandaId) await releaseComandaAssets(tx, data.comandaId);
 
-      await completePetshopCheckout(tx, petshopAppointmentId, operatorId || userId || null);
+      await completePetshopCheckout(tx, petshopAppointmentId, operatorId || userId || null, tenantId);
 
       const jobs = [
         ...(fullSale.emitirNfce ? [{ kind: 'NFCE', payload: '{}' }] : []),

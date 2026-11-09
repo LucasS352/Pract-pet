@@ -1,4 +1,27 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
+
+export async function recordAddedServiceCommissions(tx: any, appointment: any, tenantId: string, at: Date) {
+  const history = Array.isArray(appointment.stageHistory) ? appointment.stageHistory : [];
+  const entries = history.filter((entry: any) => entry?.kind === 'service_added' && entry.operatorId && entry.commissionRuleId);
+  if (!entries.length) return;
+  const services = await tx.petAppointmentService.findMany({ where: { appointmentId: appointment.id, id: { in: entries.map((entry: any) => entry.appointmentServiceId) } } });
+  const byId = new Map<string, any>(services.map((service: any) => [service.id, service]));
+  for (const entry of entries) {
+    const service = byId.get(entry.appointmentServiceId);
+    if (!service) continue; // Serviço retirado antes da cobrança.
+    const rule = await tx.petCommissionRule.findUnique({ where: { id: entry.commissionRuleId } });
+    if (!rule || rule.serviceId !== service.serviceId || rule.kind !== 'PERCENT') throw new BadRequestException('Regra de comissão do adicional inválida. Revise o cadastro antes de cobrar.');
+    const base = new Prisma.Decimal(service.priceSnapshot);
+    const amount = base.mul(rule.value).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    await tx.petCommission.createMany({ data: [{
+      tenantId, appointmentId: appointment.id, appointmentServiceId: service.id,
+      operatorId: entry.operatorId, stageKey: 'service_added', executedAt: at,
+      baseAmount: base, ruleId: rule.id, ruleVersion: rule.version,
+      ruleKind: rule.kind, ruleValue: rule.value, amount,
+    }], skipDuplicates: true });
+  }
+}
 
 export function appointmentFromComanda(notes?: string | null): string | null {
   if (!notes) return null;
@@ -29,10 +52,11 @@ export async function claimPetshopCheckout(tx: any, data: any, comanda: any) {
   return linkedId;
 }
 
-export async function completePetshopCheckout(tx: any, appointmentId: string | null, actorId: string | null) {
+export async function completePetshopCheckout(tx: any, appointmentId: string | null, actorId: string | null, tenantId: string) {
   if (!appointmentId) return;
   const appointment = await tx.petAppointment.findUnique({ where: { id: appointmentId } });
   const now = new Date();
+  await recordAddedServiceCommissions(tx, appointment, tenantId, now);
   await tx.petAppointment.update({ where: { id: appointmentId }, data: {
     status: 'delivered', completedAt: now,
     stageHistory: [...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []), {

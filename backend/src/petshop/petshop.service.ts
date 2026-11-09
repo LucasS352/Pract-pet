@@ -5,12 +5,14 @@ import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
 import { productImageOptimizer } from '../images/product-image.optimizer';
-import { createHash, randomBytes } from 'crypto';
+import { createHash, randomBytes, randomUUID } from 'crypto';
 import { PetshopPackagesService } from './petshop-packages.service';
 import { PetshopWhatsappService } from './petshop-whatsapp.service';
 import { PetshopPricingService, DEFAULT_STAGE_DEFINITIONS, PetshopStageItem } from './petshop-pricing.service';
 import { PetshopCommissionsService } from './petshop-commissions.service';
 import { normalizeTransport, parseAppointmentTransport, serializeAppointmentTransport } from './petshop-transport';
+import { addonSettingsId, parseAddonSettings, validateAddonSettings } from './service-addon-settings';
+import { recordAddedServiceCommissions } from '../sales/petshop-checkout';
 
 const APPOINTMENT_STATUSES = new Set([
   'requested', 'scheduled', 'checked_in', 'bathing', 'grooming',
@@ -53,6 +55,18 @@ export class PetshopService {
   private async prisma() {
     const { tenantId, databaseUrl } = this.tenantContext.get();
     return this.tenantManager.getTenantClient(tenantId, databaseUrl);
+  }
+
+  private async syncAddonCommissionRule(tx: Prisma.TransactionClient, serviceId: string, settings: ReturnType<typeof parseAddonSettings>, actorId?: string | null) {
+    const scopeKey = `service_added:${serviceId}:*`;
+    const latest = await tx.petCommissionRule.findFirst({ where: { scopeKey }, orderBy: { version: 'desc' } });
+    if (latest?.active && settings.commissionOnAdd && latest.kind === 'PERCENT' && Number(latest.value) === settings.commissionPercent) return;
+    if (latest?.active) await tx.petCommissionRule.update({ where: { id: latest.id }, data: { active: false } });
+    if (settings.commissionOnAdd) await tx.petCommissionRule.create({ data: {
+      scopeKey, stageKey: 'service_added', serviceId, operatorId: null, kind: 'PERCENT',
+      value: new Prisma.Decimal(settings.commissionPercent), version: (latest?.version || 0) + 1,
+      createdById: actorId || null,
+    } });
   }
 
   async uploadPhoto(file: Express.Multer.File) {
@@ -609,11 +623,14 @@ export class PetshopService {
     });
 
     const componentsMap = new Map<string, any>(services.map(s => [s.id, s]));
+    const addonRows = await prisma.tenantSettings.findMany({ where: { id: { startsWith: 'petshop_addon:' } }, select: { id: true, paymentMethodsConfig: true } });
+    const addonByService = new Map(addonRows.map(row => [row.id, parseAddonSettings(row.paymentMethodsConfig)]));
 
     return services.map(svc => {
       const range = this.pricing.calculatePriceRange(svc, componentsMap);
       return {
         ...svc,
+        ...addonByService.get(addonSettingsId(svc.id)),
         customStages: (svc as any).customStages || this.pricing.suggestStages(svc.name, svc.category),
         priceRange: range,
       };
@@ -649,8 +666,10 @@ export class PetshopService {
     if (!svc) throw new NotFoundException('Serviço não encontrado.');
 
     const range = this.pricing.calculatePriceRange(svc);
+    const addonRow = await prisma.tenantSettings.findUnique({ where: { id: addonSettingsId(id) }, select: { paymentMethodsConfig: true } });
     return {
       ...svc,
+      ...parseAddonSettings(addonRow?.paymentMethodsConfig),
       customStages: (svc as any).customStages || this.pricing.suggestStages(svc.name, svc.category),
       priceRange: range,
     };
@@ -973,6 +992,10 @@ export class PetshopService {
     const color = optionalText(data.color) || '#0d9488';
     const active = data.active === undefined ? true : Boolean(data.active);
     const description = optionalText(data.description);
+    const addonSettings = validateAddonSettings(data);
+    if (serviceType === 'COMBO' && (addonSettings.trackAddedBy || addonSettings.commissionOnAdd)) {
+      throw new BadRequestException('Rastreamento de inclusão se aplica apenas a serviços individuais.');
+    }
 
     let price = Number(data.price || 0);
     let durationMinutes = Number(data.durationMinutes || 60);
@@ -1063,11 +1086,14 @@ export class PetshopService {
         },
       });
 
+      await tx.tenantSettings.create({ data: { id: addonSettingsId(created.id), paymentMethodsConfig: addonSettings } });
+      await this.syncAddonCommissionRule(tx, created.id, addonSettings);
+
       return created;
     });
 
     await this.ensureServiceProductBacking(prisma, svc);
-    return svc;
+    return { ...svc, ...addonSettings };
   }
 
   async updateService(id: string, data: any) {
@@ -1077,6 +1103,8 @@ export class PetshopService {
       include: { comboItems: true, pricingRules: true },
     });
     if (!current) throw new NotFoundException('Serviço não encontrado.');
+    const currentAddonRow = await prisma.tenantSettings.findUnique({ where: { id: addonSettingsId(id) }, select: { paymentMethodsConfig: true } });
+    const addonSettings = validateAddonSettings(data, parseAddonSettings(currentAddonRow?.paymentMethodsConfig));
 
     const name = data.name !== undefined ? requiredText(data.name, 'Nome do serviço') : current.name;
     const category = data.category !== undefined ? optionalText(data.category) || 'Higiene e Estética' : current.category;
@@ -1085,6 +1113,9 @@ export class PetshopService {
     const active = data.active !== undefined ? Boolean(data.active) : current.active;
     const description = data.description !== undefined ? optionalText(data.description) : current.description;
     const serviceType = data.serviceType !== undefined ? (data.serviceType === 'COMBO' ? 'COMBO' : 'INDIVIDUAL') : current.serviceType;
+    if (serviceType === 'COMBO' && (addonSettings.trackAddedBy || addonSettings.commissionOnAdd)) {
+      throw new BadRequestException('Rastreamento de inclusão se aplica apenas a serviços individuais.');
+    }
 
     let price = data.price !== undefined ? Number(data.price) : Number(current.price);
     let durationMinutes = data.durationMinutes !== undefined ? Number(data.durationMinutes) : current.durationMinutes;
@@ -1124,6 +1155,8 @@ export class PetshopService {
     }
 
     const updated = await prisma.$transaction(async tx => {
+      await tx.tenantSettings.upsert({ where: { id: addonSettingsId(id) }, update: { paymentMethodsConfig: addonSettings }, create: { id: addonSettingsId(id), paymentMethodsConfig: addonSettings } });
+      await this.syncAddonCommissionRule(tx, id, addonSettings);
       await tx.petService.update({
         where: { id },
         data: {
@@ -1183,7 +1216,7 @@ export class PetshopService {
     });
 
     await this.ensureServiceProductBacking(prisma, updated);
-    return updated;
+    return { ...updated, ...addonSettings };
   }
 
   async removeService(id: string) {
@@ -1215,7 +1248,11 @@ export class PetshopService {
       );
     }
 
-    await prisma.petService.delete({ where: { id } });
+    await prisma.$transaction(async tx => {
+      await tx.petCommissionRule.deleteMany({ where: { serviceId: id, stageKey: 'service_added' } });
+      await tx.petService.delete({ where: { id } });
+      await tx.tenantSettings.deleteMany({ where: { id: addonSettingsId(id) } });
+    });
     await prisma.product.updateMany({ where: { id }, data: { active: false } });
     return { success: true };
   }
@@ -1485,7 +1522,7 @@ export class PetshopService {
     };
   }
 
-  async updateAppointment(id: string, data: any) {
+  async updateAppointment(id: string, data: any, req?: any) {
     const prisma = await this.prisma();
     const { userId } = this.tenantContext.get();
     const current = await prisma.petAppointment.findUnique({
@@ -1570,14 +1607,12 @@ export class PetshopService {
       if (conflict) throw new ConflictException(`O profissional responsável já possui outro atendimento nesse novo horário.`);
     }
 
-    // Remoção de serviço extra
-    if (data.removeAppointmentServiceId) {
-      await prisma.petAppointmentService.deleteMany({
-        where: {
-          id: String(data.removeAppointmentServiceId),
-          appointmentId: id,
-        },
-      });
+    // A autoria de adicionais é vinculada à sessão de colaborador, nunca ao nome enviado pelo cliente.
+    const addedServiceHistory: any[] = [];
+    const additions: Array<{ id: string; appointmentId: string; serviceId: string; nameSnapshot: string; priceSnapshot: number; durationMinutes: number; coverageStatus: string }> = [];
+    let addonActor: { id: string; name: string } | null = null;
+    if (Array.isArray(data.addServices) && data.addServices.length && req?.headers?.['x-operator-token']) {
+      addonActor = await this.commissions.sessionOperator(req);
     }
 
     // Adição de serviços extras
@@ -1586,6 +1621,11 @@ export class PetshopService {
         const svcId = String(item.serviceId);
         const svc = await prisma.petService.findUnique({ where: { id: svcId } });
         if (svc) {
+          const addonRow = await prisma.tenantSettings.findUnique({ where: { id: addonSettingsId(svc.id) }, select: { paymentMethodsConfig: true } });
+          const addon = parseAddonSettings(addonRow?.paymentMethodsConfig);
+          if (addon.commissionOnAdd && !addonActor) throw new BadRequestException('Identifique o colaborador com PIN para incluir este serviço comissionado.');
+          const addonRule = addon.commissionOnAdd ? await prisma.petCommissionRule.findFirst({ where: { scopeKey: `service_added:${svc.id}:*`, active: true }, orderBy: { version: 'desc' } }) : null;
+          if (addon.commissionOnAdd && !addonRule) throw new BadRequestException('Regra de comissão do serviço não encontrada. Salve o serviço novamente.');
           const petChar = {
             species: current.pet?.species,
             size: current.pet?.size,
@@ -1593,16 +1633,21 @@ export class PetshopService {
           };
           const resolved = this.pricing.resolvePriceAndDuration(svc, petChar);
           const price = item.priceSnapshot !== undefined ? Number(item.priceSnapshot) : resolved.price;
-          await prisma.petAppointmentService.create({
-            data: {
-              appointmentId: id,
-              serviceId: svc.id,
-              nameSnapshot: svc.name,
-              priceSnapshot: price,
-              durationMinutes: resolved.durationMinutes,
-              coverageStatus: 'none',
-            },
-          });
+          if (!Number.isFinite(price) || price < 0) throw new BadRequestException('Valor do serviço adicional inválido.');
+          const added = { id: randomUUID(), appointmentId: id, serviceId: svc.id, nameSnapshot: svc.name,
+            priceSnapshot: price, durationMinutes: resolved.durationMinutes, coverageStatus: 'none' };
+          additions.push(added);
+          if (addon.trackAddedBy) {
+            addedServiceHistory.push({
+              kind: 'service_added', status: current.status, label: `Serviço adicionado: ${svc.name}`,
+              appointmentServiceId: added.id, serviceId: svc.id, at: new Date().toISOString(),
+              userId: addonActor?.id || req?.user?.id || userId || null,
+              userName: addonActor?.name || req?.user?.name || req?.user?.email || 'Administrador',
+              operatorId: addonActor?.id || null,
+              commissionPercent: addon.commissionOnAdd ? addon.commissionPercent : 0,
+              commissionRuleId: addonRule?.id || null,
+            });
+          }
         }
       }
     }
@@ -1617,6 +1662,7 @@ export class PetshopService {
 
     // Histórico de alterações
     let updatedHistory = Array.isArray(current.stageHistory) ? [...(current.stageHistory as any[])] : [];
+    updatedHistory.push(...addedServiceHistory);
     if (rescheduled) {
       let operatorName: string | null = null;
       if (userId) {
@@ -1650,7 +1696,15 @@ export class PetshopService {
       checkInNotes = serializeAppointmentTransport(mergedTransport);
     }
 
-    const updated = await prisma.petAppointment.update({
+    const updated = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${id} FOR UPDATE`;
+      const latest = await tx.petAppointment.findUnique({ where: { id }, select: { status: true, updatedAt: true } });
+      if (!latest || latest.updatedAt.getTime() !== current.updatedAt.getTime()) {
+        throw new ConflictException('O atendimento foi alterado por outra pessoa. Recarregue antes de editar.');
+      }
+      if (data.removeAppointmentServiceId) await tx.petAppointmentService.deleteMany({ where: { id: String(data.removeAppointmentServiceId), appointmentId: id } });
+      for (const addition of additions) await tx.petAppointmentService.create({ data: addition });
+      return tx.petAppointment.update({
       where: { id },
       data: {
         startsAt,
@@ -1685,6 +1739,7 @@ export class PetshopService {
           },
         },
       },
+      });
     });
 
     return {
@@ -1882,6 +1937,10 @@ export class PetshopService {
       if (actor && statusChanged && trackedStage) {
         const execution = await tx.petAppointment.findUnique({ where: { id }, include: { services: { include: { service: true, customerPackageItem: true } } } });
         if (execution) await this.commissions.recordExecution(tx, execution, status, actor.id, now);
+      }
+
+      if (status === 'delivered' && statusChanged) {
+        await recordAddedServiceCommissions(tx, current, this.tenantContext.get().tenantId, now);
       }
 
       return tx.petAppointment.update({

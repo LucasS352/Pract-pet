@@ -158,6 +158,9 @@ export function ServiceEditorModal({
   const [color, setColor] = useState('#0d9488');
   const [description, setDescription] = useState('');
   const [active, setActive] = useState(true);
+  const [trackAddedBy, setTrackAddedBy] = useState(false);
+  const [commissionOnAdd, setCommissionOnAdd] = useState(false);
+  const [commissionPercent, setCommissionPercent] = useState('');
   const [selectedIcon, setSelectedIcon] = useState<string>('bath');
   const [iconTouched, setIconTouched] = useState<boolean>(false);
 
@@ -260,6 +263,9 @@ export function ServiceEditorModal({
           setQuickBaseRef(bpNum.toFixed(2).replace('.', ','));
           setBaseDurationMinutes(Number(s.durationMinutes || 60));
           setActive(s.active !== false);
+          setTrackAddedBy(Boolean(s.trackAddedBy || s.commissionOnAdd));
+          setCommissionOnAdd(Boolean(s.commissionOnAdd));
+          setCommissionPercent(s.commissionPercent ? String(s.commissionPercent).replace('.', ',') : '');
 
           if (s.customStages && Array.isArray(s.customStages) && s.customStages.length > 0) {
             const loadedKeys: string[] = [];
@@ -417,6 +423,9 @@ export function ServiceEditorModal({
       setBaseDurationMinutes(60);
       setSizePrices(DEFAULT_SIZE_PRICES);
       setActive(true);
+      setTrackAddedBy(false);
+      setCommissionOnAdd(false);
+      setCommissionPercent('');
       setComboPricingType('PERCENT_DISCOUNT');
       setComboDiscountValue('15');
       setAutoCalculateDuration(true);
@@ -771,6 +780,10 @@ export function ServiceEditorModal({
       toast.error('Informe o nome do serviço.');
       return;
     }
+    if (commissionOnAdd && (parseCurrencyInput(commissionPercent) <= 0 || parseCurrencyInput(commissionPercent) > 100)) {
+      toast.error('Informe um percentual de comissão entre 0 e 100.');
+      return;
+    }
 
     if (serviceType === 'COMBO') {
       if (comboComponents.length === 0) {
@@ -811,6 +824,9 @@ export function ServiceEditorModal({
         targetSpecies,
         color,
         active,
+        trackAddedBy: serviceType === 'INDIVIDUAL' && (trackAddedBy || commissionOnAdd),
+        commissionOnAdd: serviceType === 'INDIVIDUAL' && commissionOnAdd,
+        commissionPercent: serviceType === 'INDIVIDUAL' && commissionOnAdd ? parseCurrencyInput(commissionPercent) : 0,
         durationMinutes: finalDuration,
         price: finalPrice,
         customStages: selectedStages.map(k => {
@@ -1012,6 +1028,27 @@ export function ServiceEditorModal({
               </select>
             </div>
           </div>
+
+          {serviceType === 'INDIVIDUAL' && (
+            <fieldset className="rounded-2xl border border-slate-200 bg-white p-3.5 space-y-3">
+              <legend className="px-1 text-xs font-bold uppercase tracking-wider text-slate-700">Rastreamento de serviço adicional</legend>
+              <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-800">
+                <input type="checkbox" checked={trackAddedBy || commissionOnAdd} disabled={commissionOnAdd}
+                  onChange={e => setTrackAddedBy(e.target.checked)} className="mt-0.5 h-4 w-4 accent-teal-700" />
+                <span><strong>Rastrear quem adicionou</strong><span className="block text-[11px] text-slate-500">Registra nome, horário e serviço no histórico do atendimento.</span></span>
+              </label>
+              <label className="flex items-start gap-2.5 cursor-pointer text-xs text-slate-800">
+                <input type="checkbox" checked={commissionOnAdd}
+                  onChange={e => { setCommissionOnAdd(e.target.checked); if (e.target.checked) setTrackAddedBy(true); }} className="mt-0.5 h-4 w-4 accent-teal-700" />
+                <span><strong>Comissionar quem adicionou</strong><span className="block text-[11px] text-slate-500">Exige PIN do colaborador e gera comissão após a venda concluída.</span></span>
+              </label>
+              {commissionOnAdd && <label className="block text-xs font-semibold text-slate-700">
+                Comissão sobre o valor do adicional (%)
+                <input type="number" min="0.01" max="100" step="0.01" required value={commissionPercent.replace(',', '.')}
+                  onChange={e => setCommissionPercent(e.target.value)} className="mt-1 block w-full sm:w-44 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600" />
+              </label>}
+            </fieldset>
+          )}
 
           {/* 4. MODELO DE COBRANÇA */}
           <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5 space-y-2.5">

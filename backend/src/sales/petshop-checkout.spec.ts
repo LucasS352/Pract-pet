@@ -23,9 +23,9 @@ describe('Pet Shop checkout integrity', () => {
   });
   it('records completion and propagates failures to rollback the sale', async () => {
     const db = tx();
-    await completePetshopCheckout(db, 'apt', 'cashier');
+    await completePetshopCheckout(db, 'apt', 'cashier', 'tenant');
     expect(db.petAppointment.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'delivered', stageHistory: [expect.objectContaining({ userId: 'cashier' })] }) }));
     db.petAppointment.update.mockRejectedValue(new Error('database unavailable'));
-    await expect(completePetshopCheckout(db, 'apt', 'cashier')).rejects.toThrow('database unavailable');
+    await expect(completePetshopCheckout(db, 'apt', 'cashier', 'tenant')).rejects.toThrow('database unavailable');
   });
 });

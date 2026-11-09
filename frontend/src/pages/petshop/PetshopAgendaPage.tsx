@@ -97,6 +97,10 @@ function getAppointmentSteps(apt: Appointment) {
   return resolveAppointmentSteps(apt);
 }
 
+function hasTaxiDogReturn(apt: Appointment) {
+  return Boolean(apt.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(apt.transport.mode));
+}
+
 function normalizeSizeKey(rawSize?: string | null): string {
   if (!rawSize) return 'small';
   const s = rawSize.toLowerCase().trim();
@@ -882,7 +886,7 @@ export default function PetshopAgendaPage() {
       window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
       toast.success(
         item.status === 'ready'
-          ? `Aviso "Pronto para buscar" preparado para ${item.customer.name}!`
+          ? `Aviso "${hasTaxiDogReturn(item) ? 'Pronto para entrega' : 'Pronto para buscar'}" preparado para ${item.customer.name}!`
           : `Link de acompanhamento ao vivo preparado para ${item.customer.name}!`,
       );
     } catch (error: any) {
@@ -2023,7 +2027,7 @@ export default function PetshopAgendaPage() {
                         {item.stagePhotoUrl ? 'Foto / Etapa' : 'Enviar Foto'}
                       </button>
 
-                      <button
+                      {!(item.status === 'ready' && hasTaxiDogReturn(item)) && <button
                         type="button"
                         disabled={notifyingId === item.id}
                         onClick={() => notifyTutorWhatsApp(item)}
@@ -2035,7 +2039,7 @@ export default function PetshopAgendaPage() {
                       >
                         {item.status === 'ready' ? <BellRing size={14} /> : <MessageCircle size={14} />}
                         {notifyingId === item.id ? 'Gerando…' : item.status === 'ready' ? 'Avisar: Pode Buscar!' : 'Avisar Tutor'}
-                      </button>
+                      </button>}
 
                       <select
                         value={item.status}
@@ -2376,6 +2380,11 @@ export default function PetshopAgendaPage() {
                           {isComboChild && <span className="text-zinc-400 font-mono">↳</span>}
                           <strong className="font-semibold text-zinc-800">{svc.nameSnapshot}</strong>
                           <span className="text-zinc-400">({svc.durationMinutes} min)</span>
+                          {selectedAppointment.stageHistory?.find(h => h.kind === 'service_added' && h.appointmentServiceId === svc.id)?.userName && (
+                            <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
+                              Incluído por {selectedAppointment.stageHistory.find(h => h.kind === 'service_added' && h.appointmentServiceId === svc.id)?.userName}
+                            </span>
+                          )}
                           {isComboParent && (
                             <span className="inline-flex items-center gap-1 rounded-md border border-purple-200 bg-purple-50 px-2 py-0.5 text-[10px] font-bold text-purple-800">
                               Combo
@@ -2560,7 +2569,7 @@ export default function PetshopAgendaPage() {
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 flex flex-col justify-between">
                 <div className="flex items-center justify-between gap-1 mb-1.5">
                   <span className="text-zinc-500 font-medium">Horário agendado</span>
-                  {selectedAppointment.status !== 'delivered' && selectedAppointment.status !== 'cancelled' && !editingReschedule && (
+                  {!['ready', 'delivered', 'cancelled'].includes(selectedAppointment.status) && !editingReschedule && (
                     <button
                       type="button"
                       onClick={() => setEditingReschedule(true)}
@@ -2725,7 +2734,9 @@ export default function PetshopAgendaPage() {
                         <div className="min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <strong className="font-bold">{stageLabel}</strong>
-                            {h.skipped ? (
+                            {h.kind === 'service_added' ? (
+                              <span className="rounded bg-sky-50 border border-sky-200 text-sky-800 px-1.5 py-0.5 text-[10px] font-semibold">Adicionado</span>
+                            ) : h.skipped ? (
                               <span className="rounded bg-amber-100 border border-amber-300 text-amber-900 px-1.5 py-0.2 text-[10px] font-bold">
                                 Etapa Pulada
                               </span>
@@ -2774,22 +2785,22 @@ export default function PetshopAgendaPage() {
 
             {/* Botões de Ação */}
             {/* Rodapé de Ações do Modal de Detalhes */}
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-200">
-              <div className="flex items-center gap-1.5 flex-wrap">
+            <div className={`flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-200 ${selectedAppointment.status === 'ready' ? '' : 'justify-between'}`}>
+              <div className={selectedAppointment.status === 'ready' ? 'contents' : 'flex items-center gap-1.5 flex-wrap'}>
                 <button
                   type="button"
                   onClick={() => openStageModal(selectedAppointment)}
-                  className="flex items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
+                  className="order-1 flex items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
                 >
                   <Camera size={14} className="text-teal-700" />
                   {selectedAppointment.stagePhotoUrl ? 'Trocar Foto' : 'Enviar Foto'}
                 </button>
 
-                <button
+                {!(selectedAppointment.status === 'ready' && hasTaxiDogReturn(selectedAppointment)) && <button
                   type="button"
                   disabled={notifyingId === selectedAppointment.id}
                   onClick={() => notifyTutorWhatsApp(selectedAppointment)}
-                  className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition cursor-pointer ${
+                  className={`order-2 flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition cursor-pointer ${
                     selectedAppointment.status === 'ready'
                       ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
                       : 'border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100'
@@ -2801,10 +2812,10 @@ export default function PetshopAgendaPage() {
                     : selectedAppointment.status === 'ready'
                       ? 'Avisar: Pode Buscar!'
                       : 'Avisar Tutor'}
-                </button>
+                </button>}
 
                 {/* Botão de Reagendar Fácil */}
-                {selectedAppointment.status !== 'delivered' && (
+                {!['ready', 'delivered'].includes(selectedAppointment.status) && (
                   <button
                     type="button"
                     onClick={() => setAppointmentToReschedule(selectedAppointment)}
@@ -2821,7 +2832,7 @@ export default function PetshopAgendaPage() {
                   <button
                     type="button"
                     onClick={() => setAppointmentToCancel(selectedAppointment)}
-                    className="flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50/60 px-2.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer"
+                    className="order-5 flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50/60 px-2.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer"
                     title="Cancelar agendamento ou marcar no-show"
                   >
                     <XCircle size={14} className="text-rose-600" />
@@ -2830,7 +2841,7 @@ export default function PetshopAgendaPage() {
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className={selectedAppointment.status === 'ready' ? 'contents' : 'flex items-center gap-2'}>
                 {selectedAppointment.status === 'delivered' ? (
                   <div className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 shadow-2xs">
                     <CheckCircle2 size={15} className="text-emerald-600" />
@@ -2856,7 +2867,7 @@ export default function PetshopAgendaPage() {
                     type="button"
                     disabled={chargingId === selectedAppointment.id || selectedAppointment.status !== 'ready'}
                     onClick={() => handleChargeAppointment(selectedAppointment)}
-                    className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm cursor-pointer active:scale-95 ${
+                    className={`order-3 flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm cursor-pointer active:scale-95 ${
                       selectedAppointment.status === 'ready'
                         ? 'bg-teal-600 text-white hover:bg-teal-700 ring-2 ring-teal-400/40'
                         : 'bg-zinc-800 text-white hover:bg-zinc-900'
@@ -2881,7 +2892,7 @@ export default function PetshopAgendaPage() {
                 <button
                   type="button"
                   onClick={() => setSelectedAppointment(null)}
-                  className="rounded-xl border border-zinc-200 bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 cursor-pointer"
+                  className="order-4 rounded-xl border border-zinc-200 bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 cursor-pointer"
                 >
                   Fechar
                 </button>

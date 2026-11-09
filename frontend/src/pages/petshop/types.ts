@@ -109,6 +109,9 @@ export type PetService = {
   price: string | number;
   color: string;
   active: boolean;
+  trackAddedBy?: boolean;
+  commissionOnAdd?: boolean;
+  commissionPercent?: number;
   comboPricingType?: 'FIXED_PRICE' | 'PERCENT_DISCOUNT' | 'FIXED_DISCOUNT' | null;
   comboDiscountValue?: string | number | null;
   customStages?: (string | PetshopStageItem)[] | null;
@@ -392,6 +395,8 @@ export function resolveAppointmentSteps(apt?: Appointment | null): Array<{ key: 
 
 export type StageHistoryEntry = {
   status: string;
+  kind?: 'service_added' | string;
+  appointmentServiceId?: string;
   label?: string | null;
   at: string;
   photoUrl?: string | null;
