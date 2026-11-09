@@ -485,29 +485,29 @@ export function PetshopLayout() {
       {/* Navegação Mobile Inferior (com Safe-Area nativa) */}
       <nav
         aria-label="Navegação mobile"
-        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-2' : 'grid-cols-5'} border-t border-[var(--pc-border)] bg-white/95 px-1 pb-[env(safe-area-inset-bottom,0px)] backdrop-blur lg:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.04)]`}
+        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-2' : 'grid-cols-5'} border-t border-zinc-200/80 bg-white/95 px-1.5 py-1 pb-[calc(env(safe-area-inset-bottom,0px)+4px)] backdrop-blur lg:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.04)]`}
       >
         <NavLink
           to="/petshop"
           end
           className={({ isActive }) =>
-            `flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
-              isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
+            `flex min-h-[50px] flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition rounded-2xl py-1 my-0.5 ${
+              isActive ? 'bg-[#e8f5f1] text-[#0d6e5a] font-bold' : 'text-zinc-500 hover:text-zinc-800'
             }`
           }
         >
-          <LayoutDashboard size={18} strokeWidth={2} />
+          <LayoutDashboard size={19} strokeWidth={2} />
           <span>Hoje</span>
         </NavLink>
         <NavLink
           to="/petshop/agenda"
           className={({ isActive }) =>
-            `flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
-              isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
+            `flex min-h-[50px] flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition rounded-2xl py-1 my-0.5 ${
+              isActive ? 'bg-[#e8f5f1] text-[#0d6e5a] font-bold' : 'text-zinc-500 hover:text-zinc-800'
             }`
           }
         >
-          <CalendarDays size={18} strokeWidth={2} />
+          <CalendarDays size={19} strokeWidth={2} />
           <span>Agenda</span>
         </NavLink>
         {!isRestrictedStaff && (
@@ -515,33 +515,33 @@ export function PetshopLayout() {
             <NavLink
               to="/petshop/pets"
               className={({ isActive }) =>
-                `flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
-                  isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
+                `flex min-h-[50px] flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition rounded-2xl py-1 my-0.5 ${
+                  isActive ? 'bg-[#e8f5f1] text-[#0d6e5a] font-bold' : 'text-zinc-500 hover:text-zinc-800'
                 }`
               }
             >
-              <PawPrint size={18} strokeWidth={2} />
+              <PawPrint size={19} strokeWidth={2} />
               <span>Pets</span>
             </NavLink>
             <NavLink
               to="/petshop/pacotes"
               className={({ isActive }) =>
-                `flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
-                  isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
+                `flex min-h-[50px] flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition rounded-2xl py-1 my-0.5 ${
+                  isActive ? 'bg-[#e8f5f1] text-[#0d6e5a] font-bold' : 'text-zinc-500 hover:text-zinc-800'
                 }`
               }
             >
-              <PackageCheck size={18} strokeWidth={2} />
+              <PackageCheck size={19} strokeWidth={2} />
               <span>Pacotes</span>
             </NavLink>
             <button
               type="button"
               onClick={() => setMobileMenuOpen(true)}
-              className={`flex min-h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium transition ${
-                mobileMenuOpen ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-400'
+              className={`flex min-h-[50px] flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition rounded-2xl py-1 my-0.5 ${
+                mobileMenuOpen ? 'bg-[#e8f5f1] text-[#0d6e5a] font-bold' : 'text-zinc-500 hover:text-zinc-800'
               }`}
             >
-              <Menu size={18} strokeWidth={2} />
+              <Menu size={19} strokeWidth={2} />
               <span>Menu</span>
             </button>
             <NavLink

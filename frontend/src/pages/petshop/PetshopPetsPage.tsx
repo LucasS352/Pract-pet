@@ -8,6 +8,7 @@ import {
   Dog,
   Camera,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   Clock,
   FileText,
@@ -744,35 +745,61 @@ export default function PetshopPetsPage() {
 
   return (
     <div className={pageClass}>
-      {/* 1. Cabeçalho */}
-      <PageHeader
-        eyebrow="Cadastro e saúde"
-        title="Pets"
-        description={hasVaccines ? "Fichas, alertas importantes e carteira de vacinação." : "Fichas cadastrais, histórico de atendimentos e perfil dos pets."}
-        action={
-          <button
-            type="button"
-            onClick={handleOpenCreatePet}
-            className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-teal-700 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800"
-          >
-            <Plus aria-hidden="true" size={18} />
-            Novo pet
-          </button>
-        }
-      />
+      {/* 1. Cabeçalho - Desktop */}
+      <div className="hidden md:block">
+        <PageHeader
+          eyebrow="Cadastro e saúde"
+          title="Pets"
+          description={hasVaccines ? "Fichas, alertas importantes e carteira de vacinação." : "Fichas cadastrais, histórico de atendimentos e perfil dos pets."}
+          action={
+            <button
+              type="button"
+              onClick={handleOpenCreatePet}
+              className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0d6e5a] px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-[#0a5747]"
+            >
+              <Plus aria-hidden="true" size={18} />
+              Novo pet
+            </button>
+          }
+        />
+      </div>
+
+      {/* 1. Cabeçalho - Mobile (Layout nativo do iPhone/Android) */}
+      <div className="md:hidden relative mb-4">
+        {/* Marca d'água suave de patinha no topo direito */}
+        <div className="absolute right-0 -top-1 text-emerald-200/40 pointer-events-none select-none">
+          <PawPrint size={76} strokeWidth={1.5} />
+        </div>
+        <div className="relative pr-16">
+          <h1 className="text-2xl font-black tracking-tight text-zinc-900">
+            Pets
+          </h1>
+          <p className="mt-1 text-xs text-zinc-600 leading-snug">
+            {hasVaccines ? "Fichas, alertas importantes e carteira de vacinação." : "Fichas cadastrais, histórico de atendimentos e perfil dos pets."}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={handleOpenCreatePet}
+          className="mt-3.5 flex w-full min-h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-[#0d6e5a] px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-[#0a5747] active:scale-[0.99]"
+        >
+          <Plus aria-hidden="true" size={18} strokeWidth={2.5} />
+          Novo pet
+        </button>
+      </div>
 
       {/* 2. Faixa Principal de Indicadores: Total de Pets, Machos, Fêmeas e Porte */}
       <section
-        className="mb-5 grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5"
+        className="mb-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5"
         aria-label="Resumo de pets, machos, fêmeas e portes"
       >
         {/* KPI 1: Pets cadastrados */}
         <button
           type="button"
           onClick={() => { setSexFilter('all'); setSizeFilter('all'); setSpeciesFilter('all'); }}
-          className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between text-left hover:border-teal-300 transition cursor-pointer"
+          className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 shadow-2xs flex items-center justify-between text-left hover:border-teal-300 transition cursor-pointer"
         >
-          <div className="flex items-center gap-3.5">
+          <div className="flex items-center gap-3">
             <div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
               <PawPrint size={22} />
             </div>
@@ -792,15 +819,15 @@ export default function PetshopPetsPage() {
         <button
           type="button"
           onClick={() => setSexFilter(sexFilter === 'male' ? 'all' : 'male')}
-          className={`rounded-2xl border p-4 shadow-xs flex items-center justify-between text-left transition cursor-pointer ${
+          className={`rounded-2xl border p-3.5 shadow-2xs flex items-center justify-between text-left transition cursor-pointer ${
             sexFilter === 'male'
               ? 'border-sky-400 bg-sky-50/70 ring-1 ring-sky-400/30'
               : 'border-zinc-200/90 bg-white hover:border-sky-300'
           }`}
         >
-          <div className="flex items-center gap-3.5">
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-sky-100 text-sky-800 font-extrabold text-sm shrink-0">
-              Macho
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-sky-100 text-sky-600 font-extrabold text-2xl shrink-0">
+              ♂
             </div>
             <div>
               <div className="flex items-baseline gap-2">
@@ -823,15 +850,15 @@ export default function PetshopPetsPage() {
         <button
           type="button"
           onClick={() => setSexFilter(sexFilter === 'female' ? 'all' : 'female')}
-          className={`rounded-2xl border p-4 shadow-xs flex items-center justify-between text-left transition cursor-pointer ${
+          className={`rounded-2xl border p-3.5 shadow-2xs flex items-center justify-between text-left transition cursor-pointer ${
             sexFilter === 'female'
               ? 'border-pink-400 bg-pink-50/70 ring-1 ring-pink-400/30'
               : 'border-zinc-200/90 bg-white hover:border-pink-300'
           }`}
         >
-          <div className="flex items-center gap-3.5">
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-pink-100 text-pink-800 font-extrabold text-sm shrink-0">
-              Fêmea
+          <div className="flex items-center gap-3">
+            <div className="grid h-11 w-11 place-items-center rounded-2xl bg-pink-100 text-pink-600 font-extrabold text-2xl shrink-0">
+              ♀
             </div>
             <div>
               <div className="flex items-baseline gap-2">
@@ -851,7 +878,7 @@ export default function PetshopPetsPage() {
         </button>
 
         {/* KPI 4: Distribuição por Porte (P, M, G) */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex flex-col justify-center">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 shadow-2xs flex flex-col justify-center">
           <div className="flex items-center justify-between mb-1.5">
             <span className="text-xs font-semibold text-zinc-700 flex items-center gap-1.5">
               <Scale size={14} className="text-teal-700" /> Pets por Porte
@@ -901,15 +928,43 @@ export default function PetshopPetsPage() {
         </div>
       </section>
 
-      {/* Abas de Alternância: Lista Operacional vs Relatório Gerencial de Pets & Clientes */}
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-3">
+      {/* Abas de Alternância: Mobile */}
+      <div className="md:hidden grid grid-cols-2 gap-2.5 mb-3.5">
+        <button
+          type="button"
+          onClick={() => setViewMode('list')}
+          className={`flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold transition shadow-xs ${
+            viewMode === 'list'
+              ? 'bg-[#0d6e5a] text-white'
+              : 'bg-white text-zinc-700 border border-zinc-200/90 hover:bg-zinc-50'
+          }`}
+        >
+          <PawPrint size={15} />
+          <span className="truncate">Fichas de Pets ({filteredPets.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('report')}
+          className={`flex min-h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl px-3 py-2 text-xs font-medium transition shadow-xs ${
+            viewMode === 'report'
+              ? 'bg-[#0d6e5a] text-white font-bold'
+              : 'bg-white text-zinc-700 border border-zinc-200/90 hover:bg-zinc-50'
+          }`}
+        >
+          <FileText size={15} />
+          <span className="truncate">Relatório de Pets & Clientes</span>
+        </button>
+      </div>
+
+      {/* Abas de Alternância: Desktop */}
+      <div className="hidden md:flex mb-4 items-center justify-between gap-3 border-b border-zinc-200 pb-3">
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={() => setViewMode('list')}
             className={`inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-xs sm:text-sm font-semibold transition ${
               viewMode === 'list'
-                ? 'bg-zinc-900 text-white shadow-xs'
+                ? 'bg-[#0d6e5a] text-white shadow-xs'
                 : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50'
             }`}
           >
@@ -921,7 +976,7 @@ export default function PetshopPetsPage() {
             onClick={() => setViewMode('report')}
             className={`inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-xs sm:text-sm font-semibold transition ${
               viewMode === 'report'
-                ? 'bg-teal-700 text-white shadow-xs'
+                ? 'bg-[#0d6e5a] text-white shadow-xs'
                 : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50'
             }`}
           >
@@ -942,13 +997,141 @@ export default function PetshopPetsPage() {
         )}
       </div>
 
-      {/* 3. Barra de Busca e Filtros */}
+      {/* 3. Barra de Busca e Filtros - Mobile (Idêntico ao layout nativo) */}
       <section
-        className="mb-5 rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs flex flex-col md:flex-row items-center justify-between gap-3"
-        aria-label="Filtros da lista de pets"
+        className="md:hidden mb-4 rounded-2xl border border-zinc-200/90 bg-white p-3.5 shadow-2xs space-y-2.5"
+        aria-label="Filtros da lista de pets mobile"
+      >
+        {/* Linha 1: Campo de Busca */}
+        <div className="relative w-full">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Buscar pet, raça ou tutor..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-9 pr-8 text-xs text-zinc-800 placeholder-zinc-400 outline-none transition focus:border-teal-600 focus:bg-white"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 p-1"
+            >
+              <X size={13} />
+            </button>
+          )}
+        </div>
+
+        {/* Linha 2: Espécie e Portes (2 colunas) */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <select
+              value={speciesFilter}
+              onChange={e => setSpeciesFilter(e.target.value)}
+              className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-3 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="all">Espécie</option>
+              <option value="dog">Cachorro</option>
+              <option value="cat">Gato</option>
+              <option value="other">Outro</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          </div>
+
+          <div className="relative">
+            <select
+              value={sizeFilter}
+              onChange={e => setSizeFilter(e.target.value)}
+              className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-3 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="all">Todos os Portes</option>
+              <option value="mini">Mini</option>
+              <option value="small">Pequeno (P)</option>
+              <option value="medium">Médio (M)</option>
+              <option value="large">Grande (G)</option>
+              <option value="giant">Gigante (GG)</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          </div>
+        </div>
+
+        {/* Linha 3: Macho e Fêmea (Largura total) */}
+        <div className="relative">
+          <select
+            value={sexFilter}
+            onChange={e => setSexFilter(e.target.value)}
+            className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-3 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+          >
+            <option value="all">Macho e Fêmea</option>
+            <option value="male">♂ Somente Machos</option>
+            <option value="female">♀ Somente Fêmeas</option>
+          </select>
+          <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+        </div>
+
+        {/* Linha 4: Frequência / Retorno (Largura total) */}
+        <div className="relative">
+          <select
+            value={inactivityFilter}
+            onChange={e => setInactivityFilter(e.target.value)}
+            className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-3 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+          >
+            <option value="all">Frequência / Retorno</option>
+            <option value="15plus">Ausentes há +15 dias</option>
+            <option value="30plus">Ausentes há +30 dias</option>
+            <option value="with_package">Com pacote ativo</option>
+            <option value="never">Sem atendimento registrado</option>
+          </select>
+          <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+        </div>
+
+        {/* Linha 5: Status da Vacina (se disponível) */}
+        {hasVaccines && (
+          <div className="relative">
+            <select
+              value={vaccineStatusFilter}
+              onChange={e => setVaccineStatusFilter(e.target.value)}
+              className="h-10 w-full appearance-none cursor-pointer rounded-xl border border-zinc-200 bg-white pl-3 pr-8 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="all">Status da vacina</option>
+              <option value="up_to_date">Em dia</option>
+              <option value="overdue">Vacina atrasada</option>
+              <option value="due_soon">Próximos 30 dias</option>
+              <option value="none">Sem vacina registrada</option>
+              <option value="alerts">Com atenção / alergias</option>
+            </select>
+            <ChevronDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          </div>
+        )}
+
+        {/* Limpar Filtros Mobile */}
+        {(search || speciesFilter !== 'all' || sizeFilter !== 'all' || sexFilter !== 'all' || vaccineStatusFilter !== 'all' || inactivityFilter !== 'all') && (
+          <button
+            type="button"
+            onClick={() => {
+              setSearch('');
+              setSpeciesFilter('all');
+              setSizeFilter('all');
+              setSexFilter('all');
+              setVaccineStatusFilter('all');
+              setInactivityFilter('all');
+            }}
+            className="flex w-full min-h-9 items-center justify-center gap-1.5 rounded-xl border border-dashed border-rose-300 bg-rose-50/50 px-3 text-xs font-semibold text-rose-700 hover:bg-rose-100/60 transition cursor-pointer"
+          >
+            <RotateCcw size={13} />
+            Limpar todos os filtros
+          </button>
+        )}
+      </section>
+
+      {/* 3. Barra de Busca e Filtros - Desktop */}
+      <section
+        className="hidden md:flex mb-5 rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs items-center justify-between gap-3"
+        aria-label="Filtros da lista de pets desktop"
       >
         {/* Campo de Busca */}
-        <div className="relative min-w-[220px] flex-1 w-full md:w-auto">
+        <div className="relative min-w-[220px] flex-1">
           <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
           <input
             type="text"
@@ -969,7 +1152,7 @@ export default function PetshopPetsPage() {
         </div>
 
         {/* Dropdowns de Filtro */}
-        <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Espécie */}
           <select
             value={speciesFilter}
@@ -1024,17 +1207,17 @@ export default function PetshopPetsPage() {
           {/* Status da Vacina */}
           {hasVaccines && (
             <select
-            value={vaccineStatusFilter}
-            onChange={e => setVaccineStatusFilter(e.target.value)}
-            className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
-          >
-            <option value="all">Status da vacina</option>
-            <option value="up_to_date">Em dia</option>
-            <option value="overdue">Vacina atrasada</option>
-            <option value="due_soon">Próximos 30 dias</option>
-            <option value="none">Sem vacina registrada</option>
-            <option value="alerts">Com atenção / alergias</option>
-          </select>
+              value={vaccineStatusFilter}
+              onChange={e => setVaccineStatusFilter(e.target.value)}
+              className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+            >
+              <option value="all">Status da vacina</option>
+              <option value="up_to_date">Em dia</option>
+              <option value="overdue">Vacina atrasada</option>
+              <option value="due_soon">Próximos 30 dias</option>
+              <option value="none">Sem vacina registrada</option>
+              <option value="alerts">Com atenção / alergias</option>
+            </select>
           )}
 
           {/* Botão Limpar Filtros */}
@@ -1049,10 +1232,10 @@ export default function PetshopPetsPage() {
                 setVaccineStatusFilter('all');
                 setInactivityFilter('all');
               }}
-              className="flex h-10 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs font-semibold text-teal-800 hover:bg-teal-100 transition cursor-pointer"
+              className="flex h-10 items-center gap-1.5 rounded-xl border border-dashed border-rose-300 bg-rose-50/50 px-3 text-xs font-semibold text-rose-700 hover:bg-rose-100/60 transition cursor-pointer"
             >
               <RotateCcw size={13} />
-              Limpar filtros
+              Limpar
             </button>
           )}
         </div>
