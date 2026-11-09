@@ -18,6 +18,7 @@
  */
 
 import { db } from './db';
+import { createClientUuid } from './client-id';
 
 export type TelemetryEventType =
   | 'request_timeout'        // ECONNABORTED / ERR_CANCELED
@@ -54,7 +55,7 @@ export interface TelemetryEvent {
 const MAX_EVENTS = 1000;
 
 /** ID de sessão anônimo, gerado uma vez por aba */
-const SESSION_ID = crypto.randomUUID().substring(0, 8);
+const SESSION_ID = createClientUuid().substring(0, 8);
 
 /** Fila em memória desacoplada */
 let memoryQueue: TelemetryEvent[] = [];

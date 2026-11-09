@@ -1,4 +1,5 @@
 import { useCartStore, type CartItem } from '@/store/cart';
+import { createClientUuid } from './client-id';
 
 /** Atualiza apenas os itens da comanda carregada, preservando acréscimos do caixa. */
 export function syncLoadedComanda(comanda: { id: string; items: any[] }) {
@@ -35,6 +36,6 @@ export function syncLoadedComanda(comanda: { id: string; items: any[] }) {
   useCartStore.setState({
     items,
     total: items.reduce((sum, item) => sum + item.subtotal, 0),
-    cartOperationId: crypto.randomUUID(),
+    cartOperationId: createClientUuid(),
   });
 }

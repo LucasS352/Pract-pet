@@ -1,3 +1,5 @@
+import { createClientUuid } from './client-id';
+
 const memory = new Map<string, { payload: string; key: string }>();
 
 function storageKey(scope: string) { return `7bar-comanda-item-attempt:${scope}`; }
@@ -10,7 +12,7 @@ export function getComandaItemAttempt(scope: string, body: unknown): string {
     try { existing = JSON.parse(sessionStorage.getItem(name) || 'null'); } catch { /* memória basta nesta aba */ }
   }
   if (existing?.payload === payload) return existing.key;
-  const attempt = { payload, key: crypto.randomUUID() };
+  const attempt = { payload, key: createClientUuid() };
   memory.set(name, attempt);
   try { sessionStorage.setItem(name, JSON.stringify(attempt)); } catch { /* memória basta nesta aba */ }
   return attempt.key;

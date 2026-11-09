@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
+import { createClientUuid } from '@/lib/client-id';
 
 type Tenant = { id: string; name?: string; databaseName: string };
 type Mode = 'prepare' | 'simulate_apply' | 'apply' | 'simulate_rollback' | 'rollback';
@@ -61,7 +62,7 @@ function TenantImagePanel({ tenant, pin, onBusy }: { tenant: Tenant; pin: string
     updateJob(data); setPreviewIndex(0);
   });
   const create = () => task(async () => {
-    const id = crypto.randomUUID();
+    const id = createClientUuid();
     // Expose the stable ID locally before POST so even a lost response is recoverable.
     setHistory(old => [{ id, createdAt: new Date().toISOString() }, ...old]);
     const { data } = await maintenance.post<Job>(`${base}/jobs`, { id, limit: 'all' }, { headers });

@@ -8,6 +8,7 @@ import {
   Info, Printer, Download, ChevronDown
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
+import { createClientUuid } from '@/lib/client-id';
 
 // ─── Tipos ──────────────────────────────────────────────────────────────────
 interface Product {
@@ -129,7 +130,7 @@ export default function AjusteFiscalPage() {
       const cleanNcm = (product.ncm || '').replace(/\D/g, '');
       const cleanCfop = (gt?.cfop || '').replace(/\D/g, '');
       setItems(prev => [...prev, {
-        uid: crypto.randomUUID(),
+        uid: createClientUuid(),
         product,
         quantity: 1,
         priceUnit: Number(product.priceSell) || 0,
@@ -215,7 +216,7 @@ export default function AjusteFiscalPage() {
         source: 'ajuste_fiscal',
         customerCpf: customerCpf || undefined,
         customerName: customerName || undefined,
-        idempotencyKey: `ajuste_${Date.now()}_${crypto.randomUUID().slice(0, 8)}`,
+        idempotencyKey: `ajuste_${Date.now()}_${createClientUuid().slice(0, 8)}`,
       };
 
       // Fase 2: Enviando checkout

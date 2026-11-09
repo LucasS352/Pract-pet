@@ -4,6 +4,7 @@ import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { IMAGE_BATCH_BYTES, IMAGE_PAGE_SIZE, imageFormData, uploadImageBatches, type ImageUploadItem } from '@/lib/bulk-images';
 import { useAuthStore } from '@/store/auth';
+import { createClientUuid } from '@/lib/client-id';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -73,7 +74,7 @@ export default function BulkImagesPage() {
       return;
     }
     const items: FilePreviewItem[] = arr.map(file => ({
-      id: crypto.randomUUID(),
+      id: createClientUuid(),
       file,
       status: file.size > IMAGE_BATCH_BYTES ? 'error' : 'pending',
       errorMsg: file.size > IMAGE_BATCH_BYTES ? 'Imagem maior que 5 MB. Reduza o tamanho antes de enviar.' : undefined,

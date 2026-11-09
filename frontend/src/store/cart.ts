@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { createClientUuid } from '@/lib/client-id';
 
 export type Product = { 
   id: string; name: string; priceSell: number; stock: number; 
@@ -64,19 +65,19 @@ export const useCartStore = create<CartState>((set, get) => ({
     try { saved = scope ? JSON.parse(sessionStorage.getItem(scope) || 'null') : null; } catch { /* empty draft */ }
     const items = Array.isArray(saved?.items) ? saved.items : [];
     set({ scope, items, total: items.reduce((sum: number, item: CartItem) => sum + item.subtotal, 0),
-      cartOperationId: saved?.cartOperationId || crypto.randomUUID(),
+      cartOperationId: saved?.cartOperationId || createClientUuid(),
       activeComandaId: saved?.activeComandaId || null, activeComandaNumber: saved?.activeComandaNumber || null,
       isOperationLocked: false });
   },
   items: [],
   total: 0,
-  cartOperationId: typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36),
+  cartOperationId: createClientUuid(),
   isOperationLocked: false,
   setOperationLocked: (locked) => set({ isOperationLocked: locked }),
   getOrCreateOperationId: () => {
     const curr = get().cartOperationId;
     if (curr) return curr;
-    const next = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const next = createClientUuid();
     set({ cartOperationId: next });
     return next;
   },
@@ -148,7 +149,7 @@ export const useCartStore = create<CartState>((set, get) => ({
       console.warn('[useCartStore] Operação em andamento — bloqueado clearCart.');
       return;
     }
-    const nextId = typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substring(2) + Date.now().toString(36);
+    const nextId = createClientUuid();
     set({
       items: [],
       total: 0,
