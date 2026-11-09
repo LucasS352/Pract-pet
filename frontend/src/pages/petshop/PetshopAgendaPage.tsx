@@ -210,6 +210,7 @@ export default function PetshopAgendaPage() {
 
   // Estados principais
   const [viewMode, setViewMode] = useState<ViewMode>('week');
+  const [showAllWeekMobile, setShowAllWeekMobile] = useState(false);
   const [anchorDate, setAnchorDate] = useState<Date>(() => {
     const linkedDate = searchParams.get('date');
     if (linkedDate && /^\d{4}-\d{2}-\d{2}$/.test(linkedDate)) return new Date(`${linkedDate}T12:00:00`);
@@ -997,27 +998,255 @@ export default function PetshopAgendaPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1720px] p-3 sm:p-5 lg:p-6 text-zinc-900">
-      {/* 1. Cabeçalho Superior */}
-      <PageHeader
-        eyebrow="Operação & Acompanhamento Ao Vivo"
-        title="Agenda e Etapas dos Pets"
-        description="Visualize, organize e acompanhe os atendimentos da sua equipe em um só lugar."
-        action={
+      {/* 1. Hero Banner no Mobile (conforme Imagem 2) */}
+      <div className="relative mb-3.5 overflow-hidden rounded-3xl bg-[#0d6e5a] p-4 sm:p-5 text-white shadow-sm md:hidden">
+        {/* Marca d'água de patinha decorativa e traços de alegria */}
+        <PawPrint
+          size={120}
+          className="pointer-events-none absolute -right-6 -top-8 text-white/10 rotate-12"
+          aria-hidden="true"
+        />
+        <svg
+          className="pointer-events-none absolute right-24 sm:right-28 top-3 h-5 w-7 text-white/30"
+          viewBox="0 0 32 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.5"
+          strokeLinecap="round"
+        >
+          <line x1="4" y1="20" x2="10" y2="6" />
+          <line x1="16" y1="20" x2="16" y2="4" />
+          <line x1="28" y1="20" x2="22" y2="6" />
+        </svg>
+
+        <div className="flex items-center justify-between gap-1.5">
+          {/* Textos à esquerda */}
+          <div className="relative z-10 min-w-0 flex-1 pr-1.5">
+            <span className="text-[10px] font-extrabold uppercase tracking-widest text-emerald-200">
+              Operação do Pet Shop
+            </span>
+            <h1 className="mt-1 text-lg font-bold leading-tight text-white">
+              Agenda e etapas dos pets
+            </h1>
+            <p className="mt-1 text-xs leading-relaxed text-emerald-100/90 max-w-[215px]">
+              Visualize, organize e acompanhe os atendimentos da sua equipe em um só lugar.
+            </p>
+            <button
+              type="button"
+              onClick={() => handleOpenNewForDay(anchorDate)}
+              className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-white px-3.5 py-2 text-xs font-bold text-teal-900 shadow-xs transition hover:bg-emerald-50 active:scale-95 cursor-pointer"
+            >
+              <Plus size={15} className="text-teal-800" strokeWidth={2.5} />
+              <span>Novo agendamento</span>
+            </button>
+          </div>
+
+          {/* Imagem do Cão e Gato à direita */}
+          <div className="relative shrink-0 w-28 sm:w-32 h-28 sm:h-32 self-end -mb-4 -mr-1 overflow-hidden flex items-end justify-center pointer-events-none">
+            <img
+              src="/petcare/hero-dog-cat.webp"
+              alt="Pets"
+              className="h-full w-full object-contain object-bottom drop-shadow-sm"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* Header Desktop (mantido limpo no desktop) */}
+      <div className="hidden md:block">
+        <PageHeader
+          eyebrow="Operação & Acompanhamento Ao Vivo"
+          title="Agenda e Etapas dos Pets"
+          description="Visualize, organize e acompanhe os atendimentos da sua equipe em um só lugar."
+          action={
+            <button
+              type="button"
+              onClick={() => handleOpenNewForDay(anchorDate)}
+              className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-teal-700 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800"
+            >
+              <Plus aria-hidden="true" size={18} />
+              Novo agendamento
+            </button>
+          }
+        />
+      </div>
+
+      {/* 2. Barra de Modos de Visão no Mobile (Dia | Semana | Timeline | Profissionais) — Conforme Imagem 2 */}
+      <div className="mb-3 grid grid-cols-4 gap-1.5 rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-2xs md:hidden">
+        <button
+          type="button"
+          onClick={() => setViewMode('day')}
+          className={`flex items-center justify-center gap-1 rounded-xl py-2 px-1 text-xs font-bold transition ${
+            viewMode === 'day' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+          }`}
+        >
+          <CalendarDays size={14} />
+          <span>Dia</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('week')}
+          className={`flex items-center justify-center gap-1 rounded-xl py-2 px-1 text-xs font-bold transition ${
+            viewMode === 'week' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+          }`}
+        >
+          <CalendarDays size={14} />
+          <span>Semana</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('timeline')}
+          className={`flex items-center justify-center gap-1 rounded-xl py-2 px-1 text-xs font-bold transition ${
+            viewMode === 'timeline' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+          }`}
+        >
+          <BarChart3 size={14} />
+          <span>Timeline</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setViewMode('professionals')}
+          className={`flex items-center justify-center gap-1 rounded-xl py-2 px-1 text-xs font-bold transition ${
+            viewMode === 'professionals' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
+          }`}
+        >
+          <UserRound size={14} />
+          <span>Profissionais</span>
+        </button>
+      </div>
+
+      {/* 3. Filtros no Mobile (Busca + 2x2 Seletores + Ocultar Concluídos) — Conforme Imagem 2 */}
+      <div className="mb-3.5 space-y-2.5 md:hidden">
+        {/* Campo de Busca */}
+        <div className="relative w-full">
+          <Search size={15} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Buscar por pet, tutor ou serviço..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="h-11 w-full rounded-2xl border border-zinc-200 bg-white pl-9 pr-3 text-xs text-zinc-800 placeholder-zinc-400 outline-none focus:border-teal-600 shadow-2xs"
+          />
+          {searchTerm && (
+            <button
+              type="button"
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+
+        {/* Dropdowns em Grid 2x2 */}
+        <div className="grid grid-cols-2 gap-2">
+          <div className="relative">
+            <select
+              value={selectedBranch}
+              onChange={e => setSelectedBranch(e.target.value)}
+              className="h-10 w-full cursor-pointer appearance-none rounded-xl border border-zinc-200 bg-white px-3 pr-8 text-xs font-medium text-zinc-700 outline-none shadow-2xs"
+            >
+              <option value="all">Unidade</option>
+              <option value="main">Unidade Principal</option>
+            </select>
+            <ChevronRight size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-zinc-400 pointer-events-none" />
+          </div>
+
+          <div className="relative">
+            <select
+              value={selectedProfessional}
+              onChange={e => setSelectedProfessional(e.target.value)}
+              className="h-10 w-full cursor-pointer appearance-none rounded-xl border border-zinc-200 bg-white px-3 pr-8 text-xs font-medium text-zinc-700 outline-none shadow-2xs"
+            >
+              <option value="all">Profissional</option>
+              {operators.map(op => (
+                <option key={op.id} value={op.id}>
+                  {op.name}
+                </option>
+              ))}
+            </select>
+            <ChevronRight size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-zinc-400 pointer-events-none" />
+          </div>
+
+          <div className="relative">
+            <select
+              value={selectedService}
+              onChange={e => setSelectedService(e.target.value)}
+              className="h-10 w-full cursor-pointer appearance-none rounded-xl border border-zinc-200 bg-white px-3 pr-8 text-xs font-medium text-zinc-700 outline-none shadow-2xs"
+            >
+              <option value="all">Serviço</option>
+              {services.map(svc => (
+                <option key={svc.id} value={svc.id}>
+                  {svc.name}
+                </option>
+              ))}
+            </select>
+            <ChevronRight size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-zinc-400 pointer-events-none" />
+          </div>
+
+          <div className="relative">
+            <select
+              value={selectedStatus}
+              onChange={e => setSelectedStatus(e.target.value)}
+              className="h-10 w-full cursor-pointer appearance-none rounded-xl border border-zinc-200 bg-white px-3 pr-8 text-xs font-medium text-zinc-700 outline-none shadow-2xs"
+            >
+              <option value="all">Status</option>
+              <option value="scheduled">Agendado</option>
+              <option value="in_progress">Em atendimento</option>
+              <option value="ready">Pronto p/ buscar</option>
+              <option value="requested">Pendente</option>
+              <option value="delivered">Concluído</option>
+              <option value="cancelled">Cancelado</option>
+            </select>
+            <ChevronRight size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-zinc-400 pointer-events-none" />
+          </div>
+        </div>
+
+        {/* Linha com Ocultar Concluídos e Limpar Filtros */}
+        <div className="flex items-center gap-2">
           <button
             type="button"
-            onClick={() => handleOpenNewForDay(anchorDate)}
-            className="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl bg-teal-700 px-5 text-sm font-semibold text-white shadow-sm transition hover:bg-teal-800"
+            onClick={() => setHideCompleted(prev => !prev)}
+            className={`h-10 flex-1 rounded-xl border px-3 text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer select-none shadow-2xs ${
+              hideCompleted
+                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
+            }`}
           >
-            <Plus aria-hidden="true" size={18} />
-            Novo agendamento
+            <CheckCircle2 size={15} className={hideCompleted ? 'text-emerald-600' : 'text-zinc-400'} />
+            <span>Ocultar concluídos</span>
+            {completedCount > 0 && (
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                hideCompleted ? 'bg-emerald-200 text-emerald-900' : 'bg-zinc-100 text-zinc-600'
+              }`}>
+                {completedCount}
+              </span>
+            )}
           </button>
-        }
-      />
 
-      {/* 2. Barra de Navegação, Modos de Visão e Filtros */}
+          {(searchTerm || selectedProfessional !== 'all' || selectedService !== 'all' || selectedStatus !== 'all' || selectedBranch !== 'all') && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchTerm('');
+                setSelectedBranch('all');
+                setSelectedProfessional('all');
+                setSelectedService('all');
+                setSelectedStatus('all');
+              }}
+              title="Limpar todos os filtros"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 transition cursor-pointer shadow-2xs"
+            >
+              <RotateCcw size={15} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 4. Barra de Navegação Desktop (mantida no desktop com navegador de data e tabs) */}
       <section
-        className="mb-5 rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs flex flex-col xl:flex-row xl:items-center justify-between gap-3"
-        aria-label="Controles da agenda"
+        className="mb-5 hidden md:flex rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs flex-col xl:flex-row xl:items-center justify-between gap-3"
+        aria-label="Controles da agenda desktop"
       >
         {/* Bloco Esquerdo: Navegação de Data + Modos de Visualização */}
         <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -1222,72 +1451,106 @@ export default function PetshopAgendaPage() {
         </div>
       </section>
 
-      <section className="mb-5 grid grid-cols-2 lg:grid-cols-4 gap-3.5" aria-label="Indicadores operacionais">
-        {[
-          { label: 'Agendamentos', value: metrics.total, icon: CalendarDays },
-          { label: 'Em atendimento', value: metrics.inCare, icon: Clock3 },
-          { label: 'Confirmações pendentes', value: metrics.pending, icon: AlertCircle },
-          { label: 'Prontos para retirada', value: metrics.ready, icon: CheckCircle2 },
-        ].map(metric => (
-          <div key={metric.label} className="rounded-2xl border border-zinc-200 bg-white p-4 flex items-center gap-3">
-            <metric.icon size={22} className="shrink-0 text-teal-700" />
-            <div className="min-w-0"><strong className="text-2xl tabular-nums">{metric.value}</strong><p className="text-xs text-zinc-600">{metric.label}</p></div>
+      {/* 5. Cards de Indicadores Operacionais — Conforme Imagem 2 */}
+      <section className="mb-5 grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-3.5" aria-label="Indicadores operacionais">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 flex items-center gap-3 shadow-2xs">
+          <div className="grid h-10 w-10 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100">
+            <CalendarDays size={20} />
           </div>
-        ))}
+          <div className="min-w-0">
+            <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{metrics.total}</strong>
+            <p className="text-[11px] sm:text-xs text-zinc-500 font-medium truncate">Agendamentos</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 flex items-center gap-3 shadow-2xs">
+          <div className="grid h-10 w-10 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-700 ring-1 ring-amber-100">
+            <Clock3 size={20} />
+          </div>
+          <div className="min-w-0">
+            <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{metrics.inCare}</strong>
+            <p className="text-[11px] sm:text-xs text-zinc-500 font-medium truncate">Em atendimento</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 flex items-center gap-3 shadow-2xs">
+          <div className="grid h-10 w-10 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-xl bg-rose-50 text-rose-600 ring-1 ring-rose-100">
+            <BellRing size={20} />
+          </div>
+          <div className="min-w-0">
+            <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{metrics.pending}</strong>
+            <p className="text-[11px] sm:text-xs text-zinc-500 font-medium truncate">Confirmações pendentes</p>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 flex items-center gap-3 shadow-2xs">
+          <div className="grid h-10 w-10 sm:h-11 sm:w-11 shrink-0 place-items-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-100">
+            <CheckCircle2 size={20} />
+          </div>
+          <div className="min-w-0">
+            <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{metrics.ready}</strong>
+            <p className="text-[11px] sm:text-xs text-zinc-500 font-medium truncate">Prontos para retirada</p>
+          </div>
+        </div>
       </section>
 
-      {/* 4. Conteúdo Principal da Agenda (Semana + Sidebar lateral direita) */}
+      {/* 6. Conteúdo Principal da Agenda (Semana + Sidebar lateral direita) */}
       {viewMode === 'week' && (
         <div className="flex flex-col 2xl:flex-row gap-4 items-stretch">
           {/* Grade de 7 Colunas (Segunda a Domingo) */}
           <div className="flex-1 min-w-0 w-full flex flex-col overflow-x-auto">
-            {/* Seletor Rápido de Dias no Mobile (< md) */}
-            <div className="mb-3 grid grid-cols-7 gap-1 rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-2xs md:hidden">
-              {weekDays.map(d => {
-                const dKey = formatISOYMD(d);
-                const count = (appointmentsByDay.get(dKey) || []).length;
-                const isSelected = formatISOYMD(anchorDate) === dKey;
-                const isTodayCell = isCurrentDay(d);
-                return (
-                  <button
-                    key={`mob-strip-${dKey}`}
-                    type="button"
-                    onClick={() => setAnchorDate(d)}
-                    className={`flex flex-col items-center justify-center rounded-xl py-2 px-1 transition ${
-                      isSelected
-                        ? 'bg-teal-700 text-white shadow-xs'
-                        : isTodayCell
-                          ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
-                          : 'text-zinc-600 hover:bg-zinc-50'
-                    }`}
-                  >
-                    <span className={`text-[10px] font-bold uppercase ${isSelected ? 'text-teal-100' : 'text-zinc-400'}`}>
-                      {formatDayOfWeek(d).slice(0, 3)}
-                    </span>
-                    <strong className="text-sm font-extrabold tabular-nums mt-0.5">{d.getDate()}</strong>
-                    <span className={`mt-1 rounded-full px-1.5 py-0.2 text-[9px] font-extrabold tabular-nums ${
-                      isSelected
-                        ? 'bg-white/25 text-white'
-                        : count > 0
-                          ? 'bg-teal-100 text-teal-800'
-                          : 'bg-zinc-100 text-zinc-400'
-                    }`}>
-                      {count}
-                    </span>
-                  </button>
-                );
-              })}
+            {/* Seletor Rápido de Dias no Mobile (< md) — Conforme Imagem 2 */}
+            <div className="mb-3.5 md:hidden">
+              <div className="flex items-center justify-between mb-2 px-1">
+                <h2 className="text-xs font-black uppercase tracking-wider text-zinc-900">
+                  Visão da semana
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setShowAllWeekMobile(prev => !prev)}
+                  className="text-xs font-bold text-teal-800 hover:text-teal-900 hover:underline flex items-center gap-1 cursor-pointer"
+                >
+                  {showAllWeekMobile ? 'Ver apenas dia selecionado →' : 'Ver agenda completa →'}
+                </button>
+              </div>
+
+              <div className="grid grid-cols-7 gap-1 rounded-2xl border border-zinc-200/90 bg-white p-1.5 shadow-2xs">
+                {weekDays.map(d => {
+                  const dKey = formatISOYMD(d);
+                  const isSelected = formatISOYMD(anchorDate) === dKey;
+                  return (
+                    <button
+                      key={`mob-strip-${dKey}`}
+                      type="button"
+                      onClick={() => setAnchorDate(d)}
+                      className={`flex flex-col items-center justify-center rounded-xl py-2 px-1 transition cursor-pointer ${
+                        isSelected
+                          ? 'bg-teal-800 text-white shadow-xs font-bold'
+                          : 'text-zinc-700 hover:bg-zinc-50'
+                      }`}
+                    >
+                      <span className={`text-[10px] font-bold uppercase ${isSelected ? 'text-teal-100' : 'text-zinc-400'}`}>
+                        {formatDayOfWeek(d).slice(0, 3)}
+                      </span>
+                      <strong className="text-sm font-extrabold tabular-nums mt-0.5">{d.getDate()}</strong>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3 flex-1 items-stretch md:min-h-[calc(100vh-250px)]">
               {weekDays.map(dayDate => {
                 const dayKey = formatISOYMD(dayDate);
                 const dayList = appointmentsByDay.get(dayKey) || [];
                 const isTodayActive = isCurrentDay(dayDate);
+                const isSelected = formatISOYMD(anchorDate) === dayKey;
+                const isVisibleOnMobile = showAllWeekMobile || isSelected;
 
                 return (
                   <div
                     key={dayKey}
-                    className={`${formatISOYMD(anchorDate) === dayKey ? 'flex' : 'hidden md:flex'} flex-col h-full rounded-2xl border transition-all ${
+                    className={`${isVisibleOnMobile ? 'flex' : 'hidden md:flex'} flex-col h-full rounded-2xl border transition-all ${
                       isTodayActive
                         ? 'border-emerald-300 bg-emerald-50/20 shadow-xs'
                         : 'border-zinc-200/90 bg-zinc-50/50'
