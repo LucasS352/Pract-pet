@@ -153,7 +153,21 @@ export default function PetshopPackagesPage() {
     billingMode: 'paid' as 'paid' | 'comanda',
     paymentMethod: 'pix',
     notes: '',
+    transportEnabled: false,
+    transportMode: 'round_trip' as 'round_trip' | 'pickup_only' | 'dropoff_only',
+    transportFee: '40',
+    customerStreet: '',
+    customerNeighborhood: '',
+    customerReference: '',
+    transportNotes: '',
+    saveAddressToCustomer: true,
+    scheduleRecurring: true,
+    fixedDayOfWeek: 5, // 5 = Sexta-feira
+    fixedTime: '15:00',
   });
+  const [scheduledSessions, setScheduledSessions] = useState<
+    Array<{ date: string; time: string; serviceId: string; customEdited?: boolean }>
+  >([]);
 
   // Modal de Detalhes / Histórico / Estorno de Contrato
   const [selectedContract, setSelectedContract] = useState<CustomerPetPackage | null>(null);
@@ -219,6 +233,20 @@ export default function PetshopPackagesPage() {
     }
   }, [searchParams, pets, plans, tutors, setSearchParams]);
 
+  // Garante que o modal de contratação nunca fique com plano vazio ao abrir
+  useEffect(() => {
+    if (openContractModal && !contractForm.packagePlanId && plans.length > 0) {
+      const activePlan = plans.find(p => p.active) || plans[0];
+      if (activePlan) {
+        setContractForm(prev => ({
+          ...prev,
+          packagePlanId: activePlan.id,
+          validityDays: activePlan.validityDays,
+        }));
+      }
+    }
+  }, [openContractModal, contractForm.packagePlanId, plans]);
+
   // Simula preço automático sempre que plano, pet, porte ou pelagem mudam no modal de contratação
   useEffect(() => {
     if (!openContractModal || !contractForm.packagePlanId) {
@@ -256,6 +284,100 @@ export default function PetshopPackagesPage() {
     () => pets.filter(p => p.customerId === contractForm.customerId),
     [pets, contractForm.customerId],
   );
+
+  const selectedTutorObj = useMemo(
+    () => tutors.find(t => t.id === contractForm.customerId) || null,
+    [tutors, contractForm.customerId],
+  );
+
+  const selectedPlanObj = useMemo(
+    () => plans.find(p => p.id === contractForm.packagePlanId) || null,
+    [plans, contractForm.packagePlanId],
+  );
+
+  const parseAddressParts = (addr?: string | null) => {
+    if (!addr) return { street: '', neighborhood: '' };
+    if (addr.includes(' - ')) {
+      const parts = addr.split(' - ');
+      return { street: parts[0].trim(), neighborhood: parts.slice(1).join(' - ').trim() };
+    }
+    return { street: addr.trim(), neighborhood: '' };
+  };
+
+  // Sincroniza endereço do tutor selecionado
+  useEffect(() => {
+    if (!openContractModal || !selectedTutorObj) return;
+    const parsedAddr = parseAddressParts(selectedTutorObj.address);
+    const hasAddr = Boolean(selectedTutorObj.address && selectedTutorObj.address.trim().length > 0);
+    setContractForm(prev => ({
+      ...prev,
+      customerStreet: parsedAddr.street,
+      customerNeighborhood: parsedAddr.neighborhood,
+      customerReference: selectedTutorObj.reference || '',
+      transportNotes: '',
+      saveAddressToCustomer: !hasAddr,
+    }));
+  }, [openContractModal, selectedTutorObj]);
+
+  // Gera automaticamente o cronograma semanal recorrente (respeitando a quantidade de sessões do pacote, ex: 30 dias = 4 sessões, 90 dias = 12 sessões)
+  const regenerateRecurringSchedule = useCallback(
+    (plan: PetPackagePlan | null, startStr: string, dayOfWeek: number, timeStr: string) => {
+      if (!plan || !Array.isArray(plan.items) || plan.items.length === 0) {
+        setScheduledSessions([]);
+        return;
+      }
+      // Expande a fila de sessões do plano
+      const expandedServiceIds: string[] = [];
+      for (const item of plan.items) {
+        for (let q = 0; q < item.quantity; q++) {
+          expandedServiceIds.push(item.serviceId);
+        }
+      }
+      const totalCount = Math.min(24, expandedServiceIds.length);
+      const baseDate = startStr ? new Date(`${startStr}T12:00:00`) : new Date();
+      if (Number.isNaN(baseDate.getTime())) return;
+
+      // Encontra a primeira ocorrência do dia da semana escolhido a partir da data de início
+      const currentDow = baseDate.getDay();
+      let daysUntilFirst = (dayOfWeek - currentDow + 7) % 7;
+      const firstSessionDate = new Date(baseDate);
+      firstSessionDate.setDate(firstSessionDate.getDate() + daysUntilFirst);
+
+      const generated: Array<{ date: string; time: string; serviceId: string; customEdited?: boolean }> = [];
+      for (let i = 0; i < totalCount; i++) {
+        const d = new Date(firstSessionDate);
+        d.setDate(d.getDate() + i * 7);
+        const yyyy = d.getFullYear();
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        generated.push({
+          date: `${yyyy}-${mm}-${dd}`,
+          time: timeStr || '15:00',
+          serviceId: expandedServiceIds[i] || plan.items[0].serviceId,
+          customEdited: false,
+        });
+      }
+      setScheduledSessions(generated);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (!openContractModal || !selectedPlanObj) return;
+    regenerateRecurringSchedule(
+      selectedPlanObj,
+      contractForm.startDate,
+      contractForm.fixedDayOfWeek,
+      contractForm.fixedTime,
+    );
+  }, [
+    openContractModal,
+    selectedPlanObj,
+    contractForm.startDate,
+    contractForm.fixedDayOfWeek,
+    contractForm.fixedTime,
+    regenerateRecurringSchedule,
+  ]);
 
   const filteredContracts = useMemo(() => {
     return contracts.filter(c => {
@@ -379,19 +501,128 @@ export default function PetshopPackagesPage() {
       billingMode: 'paid',
       paymentMethod: 'pix',
       notes: '',
+      transportEnabled: false,
+      transportMode: 'round_trip',
+      transportFee: '40',
+      customerStreet: parseAddressParts(defaultTutor?.address).street,
+      customerNeighborhood: parseAddressParts(defaultTutor?.address).neighborhood,
+      customerReference: defaultTutor?.reference || '',
+      transportNotes: '',
+      saveAddressToCustomer: !Boolean(defaultTutor?.address && defaultTutor.address.trim().length > 0),
+      scheduleRecurring: true,
+      fixedDayOfWeek: 5,
+      fixedTime: '15:00',
     });
     setOpenContractModal(true);
   };
 
+  const handleRenewContract = (op: any) => {
+    const petObj = pets.find(p => p.id === op.pet?.id) || op.pet;
+    const tutorId = op.customer?.id || petObj?.customerId || '';
+    const tutorObj = tutors.find(t => t.id === tutorId) || op.customer;
+
+    const matchedPlan =
+      plans.find(p => p.id === op.packagePlanId) ||
+      plans.find(p => p.name?.trim().toLowerCase() === op.planName?.trim().toLowerCase()) ||
+      plans.find(p => p.active) ||
+      plans[0];
+
+    if (!matchedPlan) {
+      toast.error('Nenhum plano de pacote ativo encontrado.');
+      return;
+    }
+
+    const species = petObj?.species || 'dog';
+    const size = petObj?.size || 'small';
+    const coatType = petObj?.coatType || 'short';
+    const parsedAddr = parseAddressParts(tutorObj?.address);
+    const hasAddr = Boolean(tutorObj?.address && tutorObj.address.trim().length > 0);
+
+    setContractForm({
+      customerId: tutorId,
+      petId: petObj?.id || '',
+      packagePlanId: matchedPlan.id,
+      isShared: Boolean(op.isShared),
+      species,
+      size,
+      coatType,
+      customPrice: String(Number(matchedPlan.basePrice || 0)),
+      discountAmount: '0',
+      validityDays: matchedPlan.validityDays,
+      startDate: new Date().toISOString().slice(0, 10),
+      billingMode: 'paid',
+      paymentMethod: 'pix',
+      notes: `Renovação de pacote (${op.planName || matchedPlan.name})`,
+      transportEnabled: false,
+      transportMode: 'round_trip',
+      transportFee: '40',
+      customerStreet: parsedAddr.street,
+      customerNeighborhood: parsedAddr.neighborhood,
+      customerReference: tutorObj?.reference || '',
+      transportNotes: '',
+      saveAddressToCustomer: !hasAddr,
+      scheduleRecurring: true,
+      fixedDayOfWeek: 5,
+      fixedTime: '15:00',
+    });
+
+    regenerateRecurringSchedule(
+      matchedPlan,
+      new Date().toISOString().slice(0, 10),
+      5,
+      '15:00',
+    );
+
+    setOpenContractModal(true);
+  };
   const handleSubmitContract = async (e: FormEvent) => {
     e.preventDefault();
+    const street = contractForm.customerStreet.trim();
+    const neighborhood = contractForm.customerNeighborhood.trim();
+    const fullAddress = [street, neighborhood].filter(Boolean).join(' - ');
+
+    if (contractForm.transportEnabled && !street) {
+      toast.error('Informe a rua e número do cliente para o transporte (Táxi Dog).');
+      return;
+    }
+    if (contractForm.transportEnabled && !neighborhood) {
+      toast.error('Informe o bairro do cliente para o transporte (Táxi Dog).');
+      return;
+    }
+
     setSavingContract(true);
     try {
+      const formattedSessions =
+        contractForm.scheduleRecurring && contractForm.petId
+          ? scheduledSessions
+              .filter(s => s.date && s.time)
+              .map(s => ({
+                startsAt: new Date(`${s.date}T${s.time}:00`).toISOString(),
+                serviceIds: s.serviceId ? [s.serviceId] : undefined,
+              }))
+          : [];
+
       const { data: created } = await api.post('/petshop/packages/contracts', {
         ...contractForm,
         customPrice: Number(contractForm.customPrice || 0),
         discountAmount: Number(contractForm.discountAmount || 0),
         validityDays: Number(contractForm.validityDays || 30),
+        saveAddressToCustomer: contractForm.saveAddressToCustomer,
+        customerAddress: fullAddress || undefined,
+        customerReference: contractForm.customerReference.trim() || undefined,
+        transport: contractForm.transportEnabled
+          ? {
+              enabled: true,
+              mode: contractForm.transportMode,
+              fee: Number(contractForm.transportFee || 0),
+              street,
+              neighborhood,
+              reference: contractForm.customerReference.trim() || null,
+              notes: contractForm.transportNotes.trim() || null,
+              address: fullAddress,
+            }
+          : { enabled: false },
+        scheduledSessions: formattedSessions,
         operatorId: operator?.id,
         operatorName: operator?.name,
       });
@@ -480,9 +711,12 @@ export default function PetshopPackagesPage() {
     }
   };
 
+  const computedTransportFee = contractForm.transportEnabled
+    ? Math.max(0, Number(contractForm.transportFee || 0))
+    : 0;
   const computedFinalContractPrice = Math.max(
     0,
-    Number(contractForm.customPrice || 0) - Number(contractForm.discountAmount || 0),
+    Number(contractForm.customPrice || 0) + computedTransportFee - Number(contractForm.discountAmount || 0),
   );
 
   return (
@@ -717,6 +951,11 @@ export default function PetshopPackagesPage() {
                               {contract.isShared && (
                                 <span className="rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
                                   Compartilhado
+                                </span>
+                              )}
+                              {contract.transport?.enabled && (
+                                <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                                  🚐 Táxi Dog (+{money(contract.transport.fee || 0)})
                                 </span>
                               )}
                             </div>
@@ -1013,14 +1252,7 @@ export default function PetshopPackagesPage() {
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => {
-                        setContractForm(prev => ({
-                          ...prev,
-                          customerId: op.customer?.id || '',
-                          petId: op.pet?.id || '',
-                        }));
-                        setOpenContractModal(true);
-                      }}
+                      onClick={() => handleRenewContract(op)}
                       className={primaryButton}
                     >
                       Renovar Pacote Agora
@@ -1466,6 +1698,309 @@ export default function PetshopPackagesPage() {
                 Permitir uso compartilhado deste pacote entre outros pets deste mesmo tutor
               </label>
             </div>
+
+            {/* Transporte do Animal (Táxi Dog) & Endereço do Tutor */}
+            <div className="rounded-xl border border-amber-200/90 bg-amber-50/40 p-3.5 space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="flex cursor-pointer items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-950">
+                  <input
+                    type="checkbox"
+                    checked={contractForm.transportEnabled}
+                    onChange={e =>
+                      setContractForm(prev => ({
+                        ...prev,
+                        transportEnabled: e.target.checked,
+                      }))
+                    }
+                    className="h-4 w-4 rounded border-amber-400 text-amber-700"
+                  />
+                  <span>🚐 Incluir Transporte do Animal (Táxi Dog) no Pacote</span>
+                </label>
+                {contractForm.transportEnabled && (
+                  <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-bold text-amber-900">
+                    +{money(Number(contractForm.transportFee || 0))} no pacote
+                  </span>
+                )}
+              </div>
+
+              {contractForm.transportEnabled && (() => {
+                const tutorHasSavedAddress = Boolean(selectedTutorObj?.address && selectedTutorObj.address.trim().length > 0);
+
+                return (
+                  <div className="space-y-3 pt-1">
+                    {/* Linha 1: Modalidade + Valor */}
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-amber-950">
+                          Modalidade de Transporte *
+                        </label>
+                        <select
+                          value={contractForm.transportMode}
+                          onChange={e =>
+                            setContractForm({
+                              ...contractForm,
+                              transportMode: e.target.value as any,
+                            })
+                          }
+                          className={inputClass}
+                        >
+                          <option value="round_trip">Buscar e Levar (Ida e Volta)</option>
+                          <option value="pickup_only">Apenas Buscar (Leva por conta)</option>
+                          <option value="dropoff_only">Apenas Levar (Traz por conta)</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-amber-950">
+                          Taxa de Transporte no Pacote (R$ - Fixo ou Personalizado)
+                        </label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min={0}
+                          value={contractForm.transportFee}
+                          onChange={e =>
+                            setContractForm({ ...contractForm, transportFee: e.target.value })
+                          }
+                          placeholder="Ex: 40.00"
+                          className={inputClass}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Linha 2: Rua/Número + Bairro */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <div className="sm:col-span-2">
+                        <label className="mb-1 block text-[11px] font-semibold text-amber-950">
+                          Endereço (Rua, Av. e Número) *
+                        </label>
+                        <input
+                          type="text"
+                          required={contractForm.transportEnabled}
+                          value={contractForm.customerStreet}
+                          onChange={e =>
+                            setContractForm({ ...contractForm, customerStreet: e.target.value })
+                          }
+                          placeholder="Ex: R. Hipólito Lopes, 103"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-amber-950">
+                          Bairro *
+                        </label>
+                        <input
+                          type="text"
+                          required={contractForm.transportEnabled}
+                          value={contractForm.customerNeighborhood}
+                          onChange={e =>
+                            setContractForm({ ...contractForm, customerNeighborhood: e.target.value })
+                          }
+                          placeholder="Ex: Vila Leozina"
+                          className={inputClass}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Linha 3: Ponto de Referência + Observação do Transporte */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-amber-950">
+                          Ponto de Referência / Compl.
+                        </label>
+                        <input
+                          type="text"
+                          value={contractForm.customerReference}
+                          onChange={e =>
+                            setContractForm({ ...contractForm, customerReference: e.target.value })
+                          }
+                          placeholder="Ex: Próximo ao Campo Orlandão, Ap 12"
+                          className={inputClass}
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-amber-950">
+                          Observação do Transporte
+                        </label>
+                        <input
+                          type="text"
+                          value={contractForm.transportNotes}
+                          onChange={e =>
+                            setContractForm({ ...contractForm, transportNotes: e.target.value })
+                          }
+                          placeholder="Ex: Interfone estragado, chamar no portão..."
+                          className={inputClass}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Opção condicional: apenas se o tutor NÃO possuir endereço cadastrado */}
+                    {!tutorHasSavedAddress && (
+                      <div className="pt-2 border-t border-amber-200/60">
+                        <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-amber-50/90 border border-amber-300 cursor-pointer text-xs text-amber-950 font-medium hover:bg-amber-100/70 transition">
+                          <input
+                            type="checkbox"
+                            checked={contractForm.saveAddressToCustomer}
+                            onChange={e => setContractForm({ ...contractForm, saveAddressToCustomer: e.target.checked })}
+                            className="mt-0.5 rounded text-teal-800 focus:ring-teal-700"
+                          />
+                          <div>
+                            <span className="font-bold block text-[11px]">
+                              Cadastrar este endereço na ficha de {selectedTutorObj?.name || 'cliente'}?
+                            </span>
+                            <span className="text-[10px] text-amber-800 leading-tight block">
+                              Este cliente ainda não possui endereço registrado. Marque para salvar permanentemente no cadastro dele.
+                            </span>
+                          </div>
+                        </label>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Agendamento Recorrente Semanal com Exceções por Semana */}
+            {contractForm.petId && (
+              <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-3.5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex cursor-pointer items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-950">
+                    <input
+                      type="checkbox"
+                      checked={contractForm.scheduleRecurring}
+                      onChange={e =>
+                        setContractForm(prev => ({
+                          ...prev,
+                          scheduleRecurring: e.target.checked,
+                        }))
+                      }
+                      className="h-4 w-4 rounded border-teal-400 text-teal-700"
+                    />
+                    <span>📅 Agendar Sessões Automaticamente (Dia e Horário Fixo na Semana)</span>
+                  </label>
+                  {contractForm.scheduleRecurring && (
+                    <span className="rounded-full bg-teal-100 px-2.5 py-0.5 text-[11px] font-bold text-teal-900">
+                      {scheduledSessions.length} sessões programadas
+                    </span>
+                  )}
+                </div>
+
+                {contractForm.scheduleRecurring && (
+                  <div className="space-y-3 pt-1">
+                    <p className="text-[11px] text-teal-900 leading-relaxed">
+                      Escolha o dia da semana e horário padrão (ex: Sexta-feira às 15:00). O sistema gera todas as semanas do pacote (30, 60 ou 90 dias) e você pode alterar livremente o dia ou horário de qualquer semana específica abaixo:
+                    </p>
+
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-teal-950">
+                          Dia da Semana Fixo Padrão
+                        </label>
+                        <select
+                          value={contractForm.fixedDayOfWeek}
+                          onChange={e =>
+                            setContractForm({
+                              ...contractForm,
+                              fixedDayOfWeek: Number(e.target.value),
+                            })
+                          }
+                          className={inputClass}
+                        >
+                          <option value={1}>Toda Segunda-feira</option>
+                          <option value={2}>Toda Terça-feira</option>
+                          <option value={3}>Toda Quarta-feira</option>
+                          <option value={4}>Toda Quinta-feira</option>
+                          <option value={5}>Toda Sexta-feira</option>
+                          <option value={6}>Todo Sábado</option>
+                          <option value={0}>Todo Domingo</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-teal-950">
+                          Horário Fixo Padrão
+                        </label>
+                        <input
+                          type="time"
+                          value={contractForm.fixedTime}
+                          onChange={e =>
+                            setContractForm({
+                              ...contractForm,
+                              fixedTime: e.target.value,
+                            })
+                          }
+                          className={inputClass}
+                        />
+                      </div>
+                    </div>
+
+                    {scheduledSessions.length > 0 && (
+                      <div className="max-h-52 space-y-2 overflow-y-auto rounded-xl border border-teal-200/80 bg-white p-2.5">
+                        {scheduledSessions.map((sess, idx) => {
+                          const dObj = sess.date ? new Date(`${sess.date}T12:00:00`) : null;
+                          const weekdayLabel =
+                            dObj && !Number.isNaN(dObj.getTime())
+                              ? new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(dObj)
+                              : '';
+                          return (
+                            <div
+                              key={idx}
+                              className={`grid grid-cols-1 gap-2 rounded-lg border p-2 text-xs sm:grid-cols-12 sm:items-center ${
+                                sess.customEdited
+                                  ? 'border-amber-300 bg-amber-50/40'
+                                  : 'border-slate-200 bg-slate-50/60'
+                              }`}
+                            >
+                              <div className="sm:col-span-4 flex items-center gap-1.5 font-semibold text-slate-800">
+                                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-700 text-[10px] font-bold text-white">
+                                  {idx + 1}ª
+                                </span>
+                                <span>Semana {idx + 1}</span>
+                                {weekdayLabel && (
+                                  <span className="rounded bg-white px-1.5 py-0.5 text-[10px] uppercase text-teal-800 border border-slate-200">
+                                    {weekdayLabel}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="sm:col-span-5">
+                                <input
+                                  type="date"
+                                  value={sess.date}
+                                  onChange={e => {
+                                    const next = [...scheduledSessions];
+                                    next[idx] = {
+                                      ...next[idx],
+                                      date: e.target.value,
+                                      customEdited: true,
+                                    };
+                                    setScheduledSessions(next);
+                                  }}
+                                  className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
+                                />
+                              </div>
+                              <div className="sm:col-span-3">
+                                <input
+                                  type="time"
+                                  value={sess.time}
+                                  onChange={e => {
+                                    const next = [...scheduledSessions];
+                                    next[idx] = {
+                                      ...next[idx],
+                                      time: e.target.value,
+                                      customEdited: true,
+                                    };
+                                    setScheduledSessions(next);
+                                  }}
+                                  className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
+                                />
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Condições Comerciais Snapshot */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">

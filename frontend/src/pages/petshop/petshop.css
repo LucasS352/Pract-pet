@@ -141,3 +141,36 @@
     animation-iteration-count: 1 !important;
   }
 }
+
+/* ============================================================================
+   OTIMIZAÇÃO MOBILE COMPLETA (Android Chrome / Samsung & iOS Safari / WebKit)
+   ============================================================================ */
+.petcare-shell {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  overflow-x: clip;
+}
+
+.petcare-shell :where(a, button, input, select, textarea, [role="button"], label) {
+  touch-action: manipulation;
+}
+
+/* Previne Auto-Zoom forçado do iOS Safari em campos < 16px em telas mobile */
+@media (max-width: 767px) {
+  .petcare-shell input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+  .petcare-shell select,
+  .petcare-shell textarea {
+    font-size: 16px !important;
+  }
+}
+
+/* Utilitários de Scroll Horizontal Invisível e Suave para Abas / Filtros Mobile */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}

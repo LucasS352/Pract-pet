@@ -1,14 +1,25 @@
 import { ReceptionRegistrationModal } from './ReceptionRegistrationModal';
 import { FormEvent, useEffect, useState } from 'react';
-import { Bell, BellOff, Link2, Mail, MapPin, MessageCircle, PackageCheck, PawPrint, Pencil, Phone, Plus, Users } from 'lucide-react';
+import { Bell, BellOff, Link2, MapPin, MessageCircle, PackageCheck, PawPrint, Pencil, Phone, Plus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
-import type { Tutor } from './types';
+import { composeDetailedAddress, parseDetailedAddress, type Tutor } from './types';
 import { EmptyState, inputClass, labelClass, ListSkeleton, Modal, pageClass, PageHeader, primaryButton, SearchField, secondaryButton } from './ui';
 import { PhotoUploadField } from './PhotoUploadField';
 
-const emptyTutor = { name: '', phone: '', email: '', cpfCnpj: '', address: '', notes: '', photoUrl: '', whatsappOptIn: true };
+const emptyTutor = {
+  name: '',
+  phone: '',
+  cpfCnpj: '',
+  street: '',
+  number: '',
+  neighborhood: '',
+  reference: '',
+  notes: '',
+  photoUrl: '',
+  whatsappOptIn: true,
+};
 
 export default function PetshopTutorsPage() {
   const [items, setItems] = useState<Tutor[]>([]);
@@ -27,13 +38,16 @@ export default function PetshopTutorsPage() {
   };
 
   const handleOpenEdit = (tutor: Tutor) => {
+    const parsed = parseDetailedAddress(tutor.address);
     setEditingTutor(tutor);
     setForm({
       name: tutor.name || '',
       phone: tutor.phone || '',
-      email: tutor.email || '',
       cpfCnpj: tutor.cpfCnpj || '',
-      address: tutor.address || '',
+      street: parsed.street,
+      number: parsed.number,
+      neighborhood: parsed.neighborhood,
+      reference: tutor.reference || '',
       notes: tutor.notes || '',
       photoUrl: tutor.photoUrl || '',
       whatsappOptIn: tutor.whatsappOptIn !== false,
@@ -51,11 +65,23 @@ export default function PetshopTutorsPage() {
     event.preventDefault();
     setSaving(true);
     try {
+      const fullAddress = composeDetailedAddress(form.street, form.number, form.neighborhood);
+      const payload = {
+        name: form.name.trim(),
+        phone: form.phone.trim(),
+        cpfCnpj: form.cpfCnpj.trim() || undefined,
+        address: fullAddress || undefined,
+        reference: form.reference?.trim() || undefined,
+        notes: form.notes?.trim() || undefined,
+        photoUrl: form.photoUrl || undefined,
+        whatsappOptIn: form.whatsappOptIn,
+      };
+
       if (editingTutor) {
-        await api.patch(`/petshop/tutors/${editingTutor.id}`, form);
+        await api.patch(`/petshop/tutors/${editingTutor.id}`, payload);
         toast.success('Tutor atualizado com sucesso!');
       } else {
-        await api.post('/petshop/tutors', form);
+        await api.post('/petshop/tutors', payload);
         toast.success('Tutor cadastrado com sucesso!');
       }
       setOpen(false);
@@ -127,7 +153,7 @@ export default function PetshopTutorsPage() {
           </div>
           {tutor.cpfCnpj && <p className="mt-1 truncate text-xs text-[var(--pc-text-muted)]">{tutor.cpfCnpj}</p>}
         </div>
-        <div className="min-w-0 space-y-1"><p className="flex items-center gap-2 truncate text-xs text-[var(--pc-text-secondary)]"><Phone aria-hidden="true" size={14} className="shrink-0 text-[var(--pc-text-muted)]" />{tutor.phone}</p>{tutor.email && <p className="flex items-center gap-2 truncate text-xs text-[var(--pc-text-secondary)]"><Mail aria-hidden="true" size={14} className="shrink-0 text-[var(--pc-text-muted)]" />{tutor.email}</p>}</div>
+        <div className="min-w-0 space-y-1"><p className="flex items-center gap-2 truncate text-xs text-[var(--pc-text-secondary)]"><Phone aria-hidden="true" size={14} className="shrink-0 text-[var(--pc-text-muted)]" />{tutor.phone}</p></div>
         <div className="min-w-0">
           <p className="flex items-center gap-2 text-xs text-[var(--pc-text-secondary)]"><PawPrint aria-hidden="true" size={14} className="shrink-0 text-[var(--pc-text-muted)]" /><span className="truncate">{tutor.pets?.length || 0} pet(s){tutor.pets?.length ? ` · ${tutor.pets.map(pet => pet.name).join(', ')}` : ''}</span></p>
           {tutor.petPackages && tutor.petPackages.length > 0 && (
@@ -155,23 +181,72 @@ export default function PetshopTutorsPage() {
     </section>
 
     {open && !editingTutor && <ReceptionRegistrationModal onClose={() => setOpen(false)} onSaved={() => { setOpen(false); void load(false); }} />}
-    {open && editingTutor && <Modal title={editingTutor ? 'Editar tutor' : 'Novo tutor'} onClose={() => { setOpen(false); setEditingTutor(null); }}><form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
-      <PhotoUploadField label="Foto do tutor" subjectName={form.name} value={form.photoUrl} onChange={photoUrl => setForm({ ...form, photoUrl })} />
-      <label className="sm:col-span-2"><span className={labelClass}>Nome completo *</span><input className={inputClass} required autoComplete="name" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} /></label>
-      <label><span className={labelClass}>WhatsApp / telefone *</span><input type="tel" className={inputClass} required autoComplete="tel" value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} /></label>
-      <label><span className={labelClass}>E-mail</span><input type="email" className={inputClass} autoComplete="email" value={form.email} onChange={event => setForm({ ...form, email: event.target.value })} /></label>
-      <label><span className={labelClass}>CPF</span><input className={inputClass} value={form.cpfCnpj} onChange={event => setForm({ ...form, cpfCnpj: event.target.value })} /></label>
-      <label><span className={labelClass}>Endereço</span><input className={inputClass} autoComplete="street-address" value={form.address} onChange={event => setForm({ ...form, address: event.target.value })} /></label>
-      <label className="sm:col-span-2"><span className={labelClass}>Observações</span><textarea className={inputClass} rows={3} value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></label>
-      <label className="sm:col-span-2 flex cursor-pointer items-center gap-2.5 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs font-medium text-zinc-800">
-        <input
-          type="checkbox"
-          checked={form.whatsappOptIn}
-          onChange={event => setForm({ ...form, whatsappOptIn: event.target.checked })}
-        />
-        <span>Autoriza receber confirmações e lembretes automáticos via WhatsApp</span>
-      </label>
-      <button disabled={saving} className={`${primaryButton} sm:col-span-2`}>{saving ? 'Salvando…' : editingTutor ? 'Salvar alterações' : 'Cadastrar tutor'}</button>
-    </form></Modal>}
+    {open && editingTutor && <Modal title="Editar tutor" onClose={() => { setOpen(false); setEditingTutor(null); }} maxWidth="sm:max-w-2xl">
+      <form onSubmit={submit} className="grid gap-4 sm:grid-cols-2">
+        {/* 1. Imagem / Foto do tutor no topo */}
+        <div className="sm:col-span-2">
+          <PhotoUploadField label="Foto do tutor (opcional)" subjectName={form.name} value={form.photoUrl} onChange={photoUrl => setForm({ ...form, photoUrl })} />
+        </div>
+
+        {/* 2. Nome completo do tutor */}
+        <label className="sm:col-span-2">
+          <span className={labelClass}>Nome completo *</span>
+          <input className={inputClass} required autoComplete="name" placeholder="Ex: Juliana Mantovani" value={form.name} onChange={event => setForm({ ...form, name: event.target.value })} />
+        </label>
+
+        {/* 3. WhatsApp / telefone com DDD */}
+        <label className="sm:col-span-2">
+          <span className={labelClass}>WhatsApp / telefone com DDD *</span>
+          <input type="tel" className={inputClass} required autoComplete="tel" placeholder="Ex: (14) 99114-6769" value={form.phone} onChange={event => setForm({ ...form, phone: event.target.value })} />
+        </label>
+
+        {/* CPF opcional (sem e-mail) */}
+        <label className="sm:col-span-2">
+          <span className={labelClass}>CPF (opcional)</span>
+          <input className={inputClass} placeholder="000.000.000-00" value={form.cpfCnpj} onChange={event => setForm({ ...form, cpfCnpj: event.target.value })} />
+        </label>
+
+        {/* 4. Endereço estruturado: Rua / Avenida e Número */}
+        <div className="sm:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-12">
+          <label className="sm:col-span-8">
+            <span className={labelClass}>Endereço (Rua / Avenida)</span>
+            <input autoComplete="street-address" className={inputClass} placeholder="Ex: R. Hipólito Lopes" value={form.street} onChange={event => setForm({ ...form, street: event.target.value })} />
+          </label>
+          <label className="sm:col-span-4">
+            <span className={labelClass}>Número</span>
+            <input className={inputClass} placeholder="Ex: 103" value={form.number} onChange={event => setForm({ ...form, number: event.target.value })} />
+          </label>
+        </div>
+
+        {/* Bairro e Referência */}
+        <label>
+          <span className={labelClass}>Bairro</span>
+          <input className={inputClass} placeholder="Ex: Vila Leozina" value={form.neighborhood} onChange={event => setForm({ ...form, neighborhood: event.target.value })} />
+        </label>
+        <label>
+          <span className={labelClass}>Ponto de referência / Complemento</span>
+          <input className={inputClass} placeholder="Ex: Próximo ao Campo Orlandão" value={form.reference} onChange={event => setForm({ ...form, reference: event.target.value })} />
+        </label>
+
+        {/* Observações */}
+        <label className="sm:col-span-2">
+          <span className={labelClass}>Observações do tutor</span>
+          <textarea className={inputClass} rows={2} placeholder="Preferências de contato, restrições ou notas gerais..." value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} />
+        </label>
+
+        {/* Checkbox WhatsApp */}
+        <label className="sm:col-span-2 flex cursor-pointer items-center gap-2.5 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs font-medium text-zinc-800">
+          <input
+            type="checkbox"
+            className="rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+            checked={form.whatsappOptIn}
+            onChange={event => setForm({ ...form, whatsappOptIn: event.target.checked })}
+          />
+          <span>Autoriza receber confirmações e lembretes automáticos via WhatsApp</span>
+        </label>
+
+        <button disabled={saving} className={`${primaryButton} sm:col-span-2 mt-2`}>{saving ? 'Salvando…' : 'Salvar alterações'}</button>
+      </form>
+    </Modal>}
   </div>;
 }

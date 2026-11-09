@@ -35,9 +35,19 @@ type Rule = {
   stageKey: string;
   serviceId: string | null;
   operatorId: string | null;
+  size?: string;
   kind: string;
   value: string;
   version: number;
+};
+
+const sizeLabelMap: Record<string, string> = {
+  all: 'Todos os portes',
+  mini: 'Mini',
+  small: 'Pequeno (P)',
+  medium: 'Médio (M)',
+  large: 'Grande (G)',
+  giant: 'Gigante (GG)',
 };
 
 type Row = {
@@ -50,7 +60,7 @@ type Row = {
   amount: string;
   state: string;
   operatorId: string;
-  appointment: { id: string; startsAt: string; pet: { name: string }; customer?: { name: string } };
+  appointment: { id: string; startsAt: string; pet: { name: string; size?: string | null }; customer?: { name: string } };
   appointmentService: { serviceId: string; nameSnapshot: string };
   operator: { name: string };
   adjustments: { amount: string; reason: string }[];
@@ -104,7 +114,7 @@ export default function PetshopCommissionsPage() {
   const [operators, setOperators] = useState<{ id: string; name: string }[]>([]);
   const [services, setServices] = useState<{ id: string; name: string }[]>([]);
   const [stages, setStages] = useState<{ key: string; label: string; trackProfessional?: boolean }[]>([]);
-  const [rule, setRule] = useState({ stageKey: '', serviceId: '', operatorId: '', kind: 'NONE', value: '0' });
+  const [rule, setRule] = useState({ stageKey: '', serviceId: '', operatorId: '', size: 'all', kind: 'NONE', value: '0' });
   const [busy, setBusy] = useState(false);
   const [showFullExtract, setShowFullExtract] = useState(false);
   const [showRulesConfig, setShowRulesConfig] = useState(false);
@@ -170,10 +180,11 @@ export default function PetshopCommissionsPage() {
         ...rule,
         serviceId: rule.serviceId || null,
         operatorId: rule.operatorId || null,
+        size: rule.size || 'all',
       });
       toast.success('Regra de comissão salva.');
       await load();
-      setRule({ stageKey: '', serviceId: '', operatorId: '', kind: 'NONE', value: '0' });
+      setRule({ stageKey: '', serviceId: '', operatorId: '', size: 'all', kind: 'NONE', value: '0' });
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Não foi possível salvar a regra.');
     } finally {
@@ -752,6 +763,11 @@ export default function PetshopCommissionsPage() {
                     <td className="p-2.5 font-medium text-zinc-900">{r.operator.name}</td>
                     <td className="p-2.5 text-xs">
                       <span className="font-semibold text-zinc-800">{r.appointment.pet.name}</span>
+                      {r.appointment.pet.size && (
+                        <span className="ml-1.5 rounded-md bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">
+                          {sizeLabelMap[r.appointment.pet.size] || r.appointment.pet.size}
+                        </span>
+                      )}
                       <br />
                       <Link
                         className="font-mono text-[#0d6e5a] underline hover:text-[#0b5c4b]"
@@ -820,9 +836,9 @@ export default function PetshopCommissionsPage() {
             <div className="flex items-center gap-2.5">
               <Settings2 size={18} className="text-[#0d6e5a]" />
               <div>
-                <h3 className="text-sm font-bold text-zinc-900">Configuração de Regras de Comissão</h3>
+                <h3 className="text-sm font-bold text-zinc-900">Configuração de Regras de Comissão (Incluindo Porte do Pet)</h3>
                 <p className="text-xs text-zinc-500">
-                  Defina regras específicas por etapa, serviço e profissional com hierarquia de precedência.
+                  Defina regras específicas por etapa, porte do animal (P, M, G, GG), serviço e profissional com hierarquia de precedência.
                 </p>
               </div>
             </div>
@@ -831,7 +847,7 @@ export default function PetshopCommissionsPage() {
 
           {showRulesConfig && (
             <div className="border-t border-zinc-100 p-5">
-              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+              <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Etapa Rastreada</label>
                   <select
@@ -863,6 +879,22 @@ export default function PetshopCommissionsPage() {
                         {s.name}
                       </option>
                     ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">Porte do Pet (Opcional)</label>
+                  <select
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+                    value={rule.size}
+                    onChange={e => setRule({ ...rule, size: e.target.value })}
+                  >
+                    <option value="all">Todos os portes</option>
+                    <option value="mini">Mini</option>
+                    <option value="small">Pequeno (P)</option>
+                    <option value="medium">Médio (M)</option>
+                    <option value="large">Grande (G)</option>
+                    <option value="giant">Gigante (GG)</option>
                   </select>
                 </div>
 
@@ -927,7 +959,10 @@ export default function PetshopCommissionsPage() {
                     <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 p-3">
                       <span className="text-zinc-700">
                         <strong>Etapa: {r.stageKey}</strong> ·{' '}
-                        {services.find(s => s.id === r.serviceId)?.name || 'Todos os serviços'} ·{' '}
+                        <span className="rounded-md bg-teal-50 px-1.5 py-0.5 text-[11px] font-semibold text-teal-800">
+                          {sizeLabelMap[r.size || 'all'] || 'Todos os portes'}
+                        </span>{' '}
+                        · {services.find(s => s.id === r.serviceId)?.name || 'Todos os serviços'} ·{' '}
                         {operators.find(o => o.id === r.operatorId)?.name || 'Todos os profissionais'}
                       </span>
                       <span className="font-semibold text-zinc-900">

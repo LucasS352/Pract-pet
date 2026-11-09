@@ -31,12 +31,37 @@ export type Tutor = {
   email?: string | null;
   cpfCnpj?: string | null;
   address?: string | null;
+  reference?: string | null;
   notes?: string | null;
   photoUrl?: string | null;
   whatsappOptIn?: boolean;
   pets?: Pet[];
   petPackages?: CustomerPetPackage[];
 };
+
+export function parseDetailedAddress(raw?: string | null) {
+  if (!raw) return { street: '', number: '', neighborhood: '' };
+  const parts = raw.split(' - ');
+  const main = parts[0] || '';
+  const neighborhood = parts.slice(1).join(' - ').trim();
+  const commaIdx = main.lastIndexOf(',');
+  if (commaIdx !== -1) {
+    return {
+      street: main.substring(0, commaIdx).trim(),
+      number: main.substring(commaIdx + 1).trim(),
+      neighborhood,
+    };
+  }
+  return { street: main.trim(), number: '', neighborhood };
+}
+
+export function composeDetailedAddress(street?: string | null, number?: string | null, neighborhood?: string | null) {
+  const cleanStreet = (street || '').trim();
+  const cleanNumber = (number || '').trim();
+  const cleanNeigh = (neighborhood || '').trim();
+  const streetWithNumber = [cleanStreet, cleanNumber].filter(Boolean).join(', ');
+  return [streetWithNumber, cleanNeigh].filter(Boolean).join(' - ');
+}
 
 export type Vaccination = {
   id: string;
@@ -406,6 +431,18 @@ export type AppointmentServiceItem = {
   } | null;
 };
 
+export type PetTransportInfo = {
+  enabled: boolean;
+  mode: 'round_trip' | 'pickup_only' | 'dropoff_only' | string;
+  fee: number;
+  coveredByPackage?: boolean;
+  street?: string | null;
+  neighborhood?: string | null;
+  address?: string | null;
+  reference?: string | null;
+  notes?: string | null;
+};
+
 export type Appointment = {
   id: string;
   startsAt: string;
@@ -413,6 +450,7 @@ export type Appointment = {
   status: string;
   notes?: string | null;
   checkInNotes?: string | null;
+  transport?: PetTransportInfo | null;
   checkedInAt?: string | null;
   readyAt?: string | null;
   completedAt?: string | null;
@@ -504,8 +542,9 @@ export type CustomerPetPackage = {
   comandaId?: string | null;
   saleId?: string | null;
   notes?: string | null;
+  transport?: PetTransportInfo | null;
   createdAt: string;
-  customer: { id: string; name: string; phone: string };
+  customer: { id: string; name: string; phone: string; address?: string | null; reference?: string | null };
   pet?: {
     id: string;
     name: string;
@@ -539,7 +578,8 @@ export type PetshopNotificationRule = {
     | 'BEFORE_APPOINTMENT'
     | 'PET_READY'
     | 'PACKAGE_LAST_SESSION'
-    | 'PACKAGE_EXPIRING';
+    | 'PACKAGE_EXPIRING'
+    | 'INACTIVE_CUSTOMER';
   triggerMinutesBefore?: number | null;
   messageTemplate: string;
   includePhoto: boolean;

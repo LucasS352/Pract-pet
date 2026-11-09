@@ -1,5 +1,7 @@
 import { ReceptionRegistrationModal } from './ReceptionRegistrationModal';
 import { PaymentModal } from '@/components/PaymentModal';
+import { CancelAppointmentModal } from './CancelAppointmentModal';
+import { RescheduleAppointmentModal } from './RescheduleAppointmentModal';
 import { buildWhatsAppMessage } from './appointment-media';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
@@ -11,6 +13,8 @@ import {
   BellRing,
   Building2,
   CalendarDays,
+  Car,
+  MapPin,
   Camera,
   Check,
   CheckCircle2,
@@ -54,6 +58,7 @@ import {
   secondaryButton,
 } from './ui';
 import { PhotoUploadField } from './PhotoUploadField';
+import { TaxiDogWidget } from './TaxiDogWidget';
 
 type ViewMode = 'day' | 'week' | 'timeline' | 'professionals';
 
@@ -225,6 +230,8 @@ export default function PetshopAgendaPage() {
   const [selectedProfessional, setSelectedProfessional] = useState('all');
   const [selectedService, setSelectedService] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
+  const [selectedSex, setSelectedSex] = useState('all');
+  const [selectedSize, setSelectedSize] = useState('all');
   const [hideCompleted, setHideCompleted] = useState(false);
 
   // Modais e ações
@@ -239,15 +246,39 @@ export default function PetshopAgendaPage() {
   const [chargingId, setChargingId] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Atribuição de profissional no detalhe do atendimento
+  // Modais de cancelamento e reagendamento fácil
+  const [appointmentToCancel, setAppointmentToCancel] = useState<Appointment | null>(null);
+  const [appointmentToReschedule, setAppointmentToReschedule] = useState<Appointment | null>(null);
+
+  // Atribuição de profissional, reagendamento e adição de serviços no meio do atendimento
   const [editingProfessional, setEditingProfessional] = useState(false);
   const [selectedProfId, setSelectedProfId] = useState('');
   const [savingProfessional, setSavingProfessional] = useState(false);
+
+  const [editingReschedule, setEditingReschedule] = useState(false);
+  const [rescheduleStartsAt, setRescheduleStartsAt] = useState('');
+  const [savingReschedule, setSavingReschedule] = useState(false);
+
+  const [addingExtraService, setAddingExtraService] = useState(false);
+  const [extraServiceId, setExtraServiceId] = useState('');
+  const [extraServicePrice, setExtraServicePrice] = useState('');
+  const [savingExtraService, setSavingExtraService] = useState(false);
 
   useEffect(() => {
     if (selectedAppointment) {
       setSelectedProfId(selectedAppointment.professional?.id || selectedAppointment.professionalId || '');
       setEditingProfessional(false);
+      setEditingReschedule(false);
+      setAddingExtraService(false);
+      setExtraServiceId('');
+      setExtraServicePrice('');
+      try {
+        const dt = new Date(selectedAppointment.startsAt);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        setRescheduleStartsAt(`${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}`);
+      } catch {
+        setRescheduleStartsAt('');
+      }
     }
   }, [selectedAppointment]);
 
@@ -268,6 +299,15 @@ export default function PetshopAgendaPage() {
     professionalId: '',
     serviceIds: [] as string[],
     notes: '',
+    transportEnabled: false,
+    transportMode: 'both' as 'pickup' | 'dropoff' | 'both',
+    transportFee: '40',
+    transportCoveredByPackage: false,
+    customerStreet: '',
+    customerNeighborhood: '',
+    customerReference: '',
+    transportNotes: '',
+    saveAddressToCustomer: true,
   });
   const [availablePackages, setAvailablePackages] = useState<CustomerPetPackage[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
@@ -275,6 +315,15 @@ export default function PetshopAgendaPage() {
   const [packagesRequest, retryPackages] = useState(0);
   const coveredServiceIds = useMemo(() => new Set(availablePackages.flatMap(pkg => pkg.items.filter(item => Number(item.availableQuantity) > 0).map(item => item.serviceId))), [availablePackages]);
   const [packageSelections, setPackageSelections] = useState<Record<string, string>>({});
+
+  const parseAddressParts = (addr?: string | null) => {
+    if (!addr) return { street: '', neighborhood: '' };
+    if (addr.includes(' - ')) {
+      const parts = addr.split(' - ');
+      return { street: parts[0].trim(), neighborhood: parts.slice(1).join(' - ').trim() };
+    }
+    return { street: addr.trim(), neighborhood: '' };
+  };
 
   // A troca de pet/data invalida a consulta anterior e sua cobertura.
   useEffect(() => {
@@ -297,6 +346,22 @@ export default function PetshopAgendaPage() {
           if (pkg) selections[serviceId] = pkg.id;
         }
         setPackageSelections(selections);
+        const pkgWithTransport = pkgs.find(p => p.transport?.enabled);
+        if (pkgWithTransport?.transport) {
+          const t = pkgWithTransport.transport;
+          const parsed = parseAddressParts(t.address);
+          setForm(prev => ({
+            ...prev,
+            transportEnabled: true,
+            transportMode: (t.mode as 'both' | 'pickup' | 'dropoff') || 'both',
+            transportFee: '0',
+            transportCoveredByPackage: true,
+            customerStreet: prev.customerStreet || t.street || parsed.street || '',
+            customerNeighborhood: prev.customerNeighborhood || t.neighborhood || parsed.neighborhood || '',
+            customerReference: prev.customerReference || t.reference || '',
+            transportNotes: prev.transportNotes || t.notes || '',
+          }));
+        }
       })
       .catch(() => { if (!controller.signal.aborted) setPackagesError(true); })
       .finally(() => { if (!controller.signal.aborted) setLoadingPackages(false); });
@@ -365,7 +430,26 @@ export default function PetshopAgendaPage() {
 
   useEffect(() => {
     if (searchParams.get('new') === '1') {
-      setForm({ petId: searchParams.get('petId') || '', startsAt: `${formatISOYMD(new Date())}T09:00`, professionalId: '', serviceIds: [], notes: '' });
+      const pid = searchParams.get('petId') || '';
+      const petObj = pets.find(p => p.id === pid);
+      const parsedAddr = parseAddressParts(petObj?.customer?.address);
+      const hasAddr = Boolean(petObj?.customer?.address && petObj.customer.address.trim().length > 0);
+      setForm({
+        petId: pid,
+        startsAt: `${formatISOYMD(new Date())}T09:00`,
+        professionalId: '',
+        serviceIds: [],
+        notes: '',
+        transportEnabled: false,
+        transportMode: 'both',
+        transportFee: '40',
+        transportCoveredByPackage: false,
+        customerStreet: parsedAddr.street,
+        customerNeighborhood: parsedAddr.neighborhood,
+        customerReference: petObj?.customer?.reference || '',
+        transportNotes: '',
+        saveAddressToCustomer: !hasAddr,
+      });
       setOpenNew(true);
       setSearchParams({}, { replace: true });
     }
@@ -433,9 +517,19 @@ export default function PetshopAgendaPage() {
         }
       }
 
+      // Sexo (Macho / Fêmea)
+      if (selectedSex !== 'all') {
+        if (item.pet?.sex !== selectedSex) return false;
+      }
+
+      // Porte do Animal
+      if (selectedSize !== 'all') {
+        if (normalizeSizeKey(item.pet?.size) !== selectedSize) return false;
+      }
+
       return true;
     });
-  }, [items, searchTerm, selectedProfessional, selectedService, selectedStatus, hideCompleted]);
+  }, [items, searchTerm, selectedProfessional, selectedService, selectedStatus, selectedSex, selectedSize, hideCompleted]);
 
   // Agrupamento por dia (para visualização em colunas na semana)
   const completedCount = useMemo(
@@ -499,6 +593,15 @@ export default function PetshopAgendaPage() {
       professionalId: '',
       serviceIds: [],
       notes: '',
+      transportEnabled: false,
+      transportMode: 'both',
+      transportFee: '40',
+      transportCoveredByPackage: false,
+      customerStreet: '',
+      customerNeighborhood: '',
+      customerReference: '',
+      transportNotes: '',
+      saveAddressToCustomer: true,
     });
     setOpenNew(true);
   };
@@ -507,6 +610,20 @@ export default function PetshopAgendaPage() {
   const submitNew = async (event: FormEvent) => {
     event.preventDefault();
     if (!form.serviceIds.length || loadingPackages || packagesError) { toast.error('Selecione os serviços e aguarde a consulta dos pacotes.'); return; }
+
+    const street = form.customerStreet.trim();
+    const neighborhood = form.customerNeighborhood.trim();
+    const fullAddress = [street, neighborhood].filter(Boolean).join(' - ');
+
+    if (form.transportEnabled && !street) {
+      toast.error('Informe a rua e número do cliente para o transporte (Táxi Dog).');
+      return;
+    }
+    if (form.transportEnabled && !neighborhood) {
+      toast.error('Informe o bairro do cliente para o transporte (Táxi Dog).');
+      return;
+    }
+
     setSaving(true);
     try {
       const activeSelections: Record<string, string> = {};
@@ -516,19 +633,130 @@ export default function PetshopAgendaPage() {
         }
       }
       await api.post('/petshop/appointments', {
-        ...form,
+        petId: form.petId,
         startsAt: new Date(form.startsAt).toISOString(),
+        professionalId: form.professionalId || undefined,
+        serviceIds: form.serviceIds,
+        notes: form.notes,
         packageSelections: Object.keys(activeSelections).length > 0 ? activeSelections : undefined,
+        saveAddressToCustomer: form.saveAddressToCustomer,
+        customerAddress: fullAddress || undefined,
+        customerReference: form.customerReference.trim() || undefined,
+        transport: form.transportEnabled
+          ? {
+              enabled: true,
+              mode: form.transportMode,
+              fee: form.transportCoveredByPackage ? 0 : Math.max(0, Number(form.transportFee || 0)),
+              coveredByPackage: form.transportCoveredByPackage,
+              street,
+              neighborhood,
+              reference: form.customerReference.trim() || undefined,
+              notes: form.transportNotes.trim() || undefined,
+              address: fullAddress,
+            }
+          : undefined,
       });
+      if (form.saveAddressToCustomer && fullAddress) {
+        setPets(curr =>
+          curr.map(p =>
+            p.id === form.petId && p.customer
+              ? { ...p, customer: { ...p.customer, address: fullAddress, reference: form.customerReference.trim() } }
+              : p,
+          ),
+        );
+      }
       toast.success('Agendamento criado com sucesso!');
       setOpenNew(false);
-      setForm({ petId: '', startsAt: '', professionalId: '', serviceIds: [], notes: '' });
+      setForm({
+        petId: '',
+        startsAt: '',
+        professionalId: '',
+        serviceIds: [],
+        notes: '',
+        transportEnabled: false,
+        transportMode: 'both',
+        transportFee: '40',
+        transportCoveredByPackage: false,
+        customerStreet: '',
+        customerNeighborhood: '',
+        customerReference: '',
+        transportNotes: '',
+        saveAddressToCustomer: true,
+      });
       setPackageSelections({});
       loadAppointments(false);
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Erro ao criar agendamento.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Reagendar atendimento (data e hora)
+  const handleSaveReschedule = async () => {
+    if (!selectedAppointment || !rescheduleStartsAt) return;
+    setSavingReschedule(true);
+    try {
+      const { data: updated } = await api.patch(`/petshop/appointments/${selectedAppointment.id}`, {
+        startsAt: new Date(rescheduleStartsAt).toISOString(),
+      });
+      setItems(curr => curr.map(row => (row.id === selectedAppointment.id ? updated : row)));
+      setSelectedAppointment(updated);
+      setEditingReschedule(false);
+      toast.success('Atendimento reagendado com sucesso!');
+      loadAppointments(false);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erro ao reagendar atendimento.');
+    } finally {
+      setSavingReschedule(false);
+    }
+  };
+
+  // Adicionar serviço extra no meio do atendimento (ex: banho anti-pulgas, desembolo, hidratação)
+  const handleAddExtraService = async () => {
+    if (!selectedAppointment || !extraServiceId) {
+      toast.error('Selecione o serviço a ser adicionado.');
+      return;
+    }
+    setSavingExtraService(true);
+    try {
+      const customPriceNum = extraServicePrice.trim() !== '' ? Number(extraServicePrice) : undefined;
+      const { data: updated } = await api.patch(`/petshop/appointments/${selectedAppointment.id}`, {
+        addServices: [
+          {
+            serviceId: extraServiceId,
+            priceSnapshot: Number.isFinite(customPriceNum) ? customPriceNum : undefined,
+          },
+        ],
+      });
+      setItems(curr => curr.map(row => (row.id === selectedAppointment.id ? updated : row)));
+      setSelectedAppointment(updated);
+      setAddingExtraService(false);
+      setExtraServiceId('');
+      setExtraServicePrice('');
+      toast.success('Serviço adicional incluído no atendimento!');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erro ao adicionar serviço.');
+    } finally {
+      setSavingExtraService(false);
+    }
+  };
+
+  // Remover serviço extra avulso
+  const handleRemoveAppointmentService = async (appointmentServiceId: string) => {
+    if (!selectedAppointment) return;
+    setSavingExtraService(true);
+    try {
+      const { data: updated } = await api.patch(`/petshop/appointments/${selectedAppointment.id}`, {
+        removeAppointmentServiceId: appointmentServiceId,
+      });
+      setItems(curr => curr.map(row => (row.id === selectedAppointment.id ? updated : row)));
+      setSelectedAppointment(updated);
+      toast.success('Serviço removido do atendimento.');
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Erro ao remover serviço.');
+    } finally {
+      setSavingExtraService(false);
     }
   };
 
@@ -575,8 +803,13 @@ export default function PetshopAgendaPage() {
         s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed',
       );
 
-      // Se TODOS os serviços do agendamento são cobertos por pacote e o valor adicional é R$ 0,00:
-      if (billableServices.length === 0 && hasCoveredServices) {
+      const transportExtra =
+        item.transport?.enabled && !item.transport.coveredByPackage && Number(item.transport.fee || 0) > 0
+          ? Number(item.transport.fee)
+          : 0;
+
+      // Se TODOS os serviços do agendamento são cobertos por pacote e não há taxa avulsa de transporte:
+      if (billableServices.length === 0 && hasCoveredServices && transportExtra === 0) {
         const { data: completed } = await api.patch(`/petshop/appointments/${item.id}/status`, { status: 'delivered' });
         setItems(curr => curr.map(row => row.id === item.id ? completed : row));
         setSelectedAppointment(completed);
@@ -657,7 +890,7 @@ export default function PetshopAgendaPage() {
   const openStageModal = (item: Appointment) => {
     setStageModalItem(item);
     setStageForm({
-      status: item.status === 'scheduled' || item.status === 'requested' ? 'bathing' : item.status,
+      status: item.status === 'scheduled' || item.status === 'confirmed' || item.status === 'requested' ? 'bathing' : item.status,
       stagePhotoUrl: item.stagePhotoUrl || '',
       stageNotes: item.stageNotes || '',
       notifyTutor: false,
@@ -673,18 +906,15 @@ export default function PetshopAgendaPage() {
         status: stageForm.status,
         stagePhotoUrl: stageForm.stagePhotoUrl || null,
         stageNotes: stageForm.stageNotes || null,
+        notifyTutor: stageForm.notifyTutor && Boolean(stageForm.stagePhotoUrl),
       });
       setItems(curr => curr.map(row => (row.id === stageModalItem.id ? updated : row)));
       if (selectedAppointment?.id === stageModalItem.id) {
         setSelectedAppointment(updated);
       }
       toast.success('Foto e etapa salvas no painel do cliente!');
-      const shouldNotify = stageForm.notifyTutor;
-      const notesToSend = stageForm.stageNotes;
       setStageModalItem(null);
-      if (shouldNotify) {
-        await notifyTutorWhatsApp(updated, notesToSend);
-      }
+      if (stageForm.notifyTutor && stageForm.stagePhotoUrl) toast.success('Foto colocada na fila do WhatsApp do tutor.');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Erro ao salvar foto.');
     } finally {
@@ -825,7 +1055,7 @@ export default function PetshopAgendaPage() {
           </button>
 
           {/* Seletor Segmentado de Visualização (Dia, Semana, Timeline, Profissionais) */}
-          <div className="flex items-center rounded-xl border border-zinc-200 bg-zinc-100/80 p-1">
+          <div className="flex items-center overflow-x-auto no-scrollbar max-w-full rounded-xl border border-zinc-200 bg-zinc-100/80 p-1">
             <button
               type="button"
               onClick={() => setViewMode('day')}
@@ -972,7 +1202,7 @@ export default function PetshopAgendaPage() {
           </button>
 
           {/* Botão de Ajustes / Limpar Filtros */}
-          {(searchTerm || selectedProfessional !== 'all' || selectedService !== 'all' || selectedStatus !== 'all') && (
+          {(searchTerm || selectedProfessional !== 'all' || selectedService !== 'all' || selectedStatus !== 'all' || selectedSex !== 'all' || selectedSize !== 'all') && (
             <button
               type="button"
               onClick={() => {
@@ -980,6 +1210,8 @@ export default function PetshopAgendaPage() {
                 setSelectedProfessional('all');
                 setSelectedService('all');
                 setSelectedStatus('all');
+                setSelectedSex('all');
+                setSelectedSize('all');
               }}
               title="Limpar todos os filtros"
               className="grid h-10 w-10 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 transition cursor-pointer"
@@ -1006,10 +1238,47 @@ export default function PetshopAgendaPage() {
 
       {/* 4. Conteúdo Principal da Agenda (Semana + Sidebar lateral direita) */}
       {viewMode === 'week' && (
-        <div className="flex flex-col 2xl:flex-row gap-4 items-start">
+        <div className="flex flex-col 2xl:flex-row gap-4 items-stretch">
           {/* Grade de 7 Colunas (Segunda a Domingo) */}
-          <div className="flex-1 min-w-0 w-full overflow-x-auto pb-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3">
+          <div className="flex-1 min-w-0 w-full flex flex-col overflow-x-auto">
+            {/* Seletor Rápido de Dias no Mobile (< md) */}
+            <div className="mb-3 grid grid-cols-7 gap-1 rounded-2xl border border-zinc-200 bg-white p-1.5 shadow-2xs md:hidden">
+              {weekDays.map(d => {
+                const dKey = formatISOYMD(d);
+                const count = (appointmentsByDay.get(dKey) || []).length;
+                const isSelected = formatISOYMD(anchorDate) === dKey;
+                const isTodayCell = isCurrentDay(d);
+                return (
+                  <button
+                    key={`mob-strip-${dKey}`}
+                    type="button"
+                    onClick={() => setAnchorDate(d)}
+                    className={`flex flex-col items-center justify-center rounded-xl py-2 px-1 transition ${
+                      isSelected
+                        ? 'bg-teal-700 text-white shadow-xs'
+                        : isTodayCell
+                          ? 'bg-emerald-50 text-emerald-900 border border-emerald-200'
+                          : 'text-zinc-600 hover:bg-zinc-50'
+                    }`}
+                  >
+                    <span className={`text-[10px] font-bold uppercase ${isSelected ? 'text-teal-100' : 'text-zinc-400'}`}>
+                      {formatDayOfWeek(d).slice(0, 3)}
+                    </span>
+                    <strong className="text-sm font-extrabold tabular-nums mt-0.5">{d.getDate()}</strong>
+                    <span className={`mt-1 rounded-full px-1.5 py-0.2 text-[9px] font-extrabold tabular-nums ${
+                      isSelected
+                        ? 'bg-white/25 text-white'
+                        : count > 0
+                          ? 'bg-teal-100 text-teal-800'
+                          : 'bg-zinc-100 text-zinc-400'
+                    }`}>
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3 flex-1 items-stretch md:min-h-[calc(100vh-250px)]">
               {weekDays.map(dayDate => {
                 const dayKey = formatISOYMD(dayDate);
                 const dayList = appointmentsByDay.get(dayKey) || [];
@@ -1018,7 +1287,7 @@ export default function PetshopAgendaPage() {
                 return (
                   <div
                     key={dayKey}
-                    className={`flex flex-col rounded-2xl border transition-all ${
+                    className={`${formatISOYMD(anchorDate) === dayKey ? 'flex' : 'hidden md:flex'} flex-col h-full rounded-2xl border transition-all ${
                       isTodayActive
                         ? 'border-emerald-300 bg-emerald-50/20 shadow-xs'
                         : 'border-zinc-200/90 bg-zinc-50/50'
@@ -1057,7 +1326,7 @@ export default function PetshopAgendaPage() {
                     </div>
 
                     {/* Lista de Atendimentos do Dia */}
-                    <div className="p-2.5 flex-1 space-y-2 min-h-[100px] xl:min-h-[350px] max-h-[660px] overflow-y-auto overscroll-contain pr-1.5 focus:outline-none custom-scrollbar">
+                    <div className="p-2.5 flex-1 space-y-2 min-h-[260px] xl:min-h-[820px] max-h-[1200px] overflow-y-auto overscroll-contain pr-1.5 focus:outline-none custom-scrollbar">
                       {loading ? (
                         <div className="space-y-2 py-4">
                           <div className="h-20 bg-zinc-200/60 rounded-xl animate-pulse" />
@@ -1097,10 +1366,10 @@ export default function PetshopAgendaPage() {
                                     {item.pet?.name}
                                   </h4>
                                   {item.pet?.sex === 'male' && (
-                                    <span className="text-[9px] font-bold text-sky-700 bg-sky-50 border border-sky-200/80 rounded px-1 py-0.2 shrink-0" title="Macho (Gravatinha)">♂</span>
+                                    <span className="inline-flex items-center rounded-md bg-sky-100 border border-sky-300 px-1.5 py-0.5 text-[9px] font-extrabold text-sky-900 shrink-0" title="Macho (Gravatinha)">Macho</span>
                                   )}
                                   {item.pet?.sex === 'female' && (
-                                    <span className="text-[9px] font-bold text-rose-700 bg-rose-50 border border-rose-200/80 rounded px-1 py-0.2 shrink-0" title="Fêmea (Lacinho)">♀</span>
+                                    <span className="inline-flex items-center rounded-md bg-pink-100 border border-pink-300 px-1.5 py-0.5 text-[9px] font-extrabold text-pink-900 shrink-0" title="Fêmea (Lacinho)">Fêmea</span>
                                   )}
                                 </div>
                               </div>
@@ -1121,8 +1390,23 @@ export default function PetshopAgendaPage() {
                                 </div>
                               </div>
 
-                                {/* Rodapé: Badge de Status + Pacote */}
-                                <div className="flex items-center justify-between pt-0.5 border-t border-zinc-100">
+                                {/* Badges informativos de Serviços */}
+                                {item.services && item.services.length > 0 && (
+                                  <div className="flex flex-wrap gap-1 mb-1.5">
+                                    {item.services.filter(s => !s.comboParentId).slice(0, 3).map(s => (
+                                      <span
+                                        key={s.id}
+                                        className="inline-block rounded bg-zinc-100 border border-zinc-200/80 px-1.5 py-0.2 text-[9px] font-semibold text-zinc-700 truncate max-w-[140px]"
+                                        title={s.nameSnapshot}
+                                      >
+                                        {s.nameSnapshot}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+
+                                {/* Rodapé: Badge de Status + Pacote + Transporte + Ações Rápidas */}
+                                <div className="flex items-center justify-between pt-1 border-t border-zinc-100 gap-1">
                                   <div className="flex items-center gap-1 flex-wrap">
                                     {renderStatusBadge(item.status)}
                                     {item.services?.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && (
@@ -1133,15 +1417,51 @@ export default function PetshopAgendaPage() {
                                         <PackageCheck size={9} /> Pacote
                                       </span>
                                     )}
+                                    {item.transport?.enabled && (
+                                      <span
+                                        title={`Transporte (${item.transport.mode === 'pickup' ? 'Apenas Buscar' : item.transport.mode === 'dropoff' ? 'Apenas Levar' : 'Buscar e Levar'})${item.transport.address ? ` · ${item.transport.address}` : ''}`}
+                                        className="inline-flex items-center gap-0.5 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-800"
+                                      >
+                                        🚐 Táxi Dog
+                                      </span>
+                                    )}
                                   </div>
-                                  {item.stagePhotoUrl && (
-                                    <span
-                                      title="Foto da etapa registrada"
-                                      className="text-teal-700 text-[10px] flex items-center gap-0.5"
-                                    >
-                                      <Camera size={11} />
-                                    </span>
-                                  )}
+                                  <div className="flex items-center gap-1">
+                                    {item.stagePhotoUrl && (
+                                      <span
+                                        title="Foto da etapa registrada"
+                                        className="text-teal-700 text-[10px] flex items-center gap-0.5"
+                                      >
+                                        <Camera size={11} />
+                                      </span>
+                                    )}
+                                    {item.status !== 'delivered' && (
+                                      <button
+                                        type="button"
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          setAppointmentToReschedule(item);
+                                        }}
+                                        title="Reagendar horário"
+                                        className="h-5 w-5 grid place-items-center rounded text-zinc-400 hover:text-teal-800 hover:bg-teal-50 transition cursor-pointer"
+                                      >
+                                        <CalendarDays size={11} />
+                                      </button>
+                                    )}
+                                    {item.status !== 'delivered' && item.status !== 'cancelled' && (
+                                      <button
+                                        type="button"
+                                        onClick={e => {
+                                          e.stopPropagation();
+                                          setAppointmentToCancel(item);
+                                        }}
+                                        title="Cancelar agendamento"
+                                        className="h-5 w-5 grid place-items-center rounded text-zinc-400 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                                      >
+                                        <XCircle size={11} />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
                             </article>
                           );
@@ -1243,18 +1563,21 @@ export default function PetshopAgendaPage() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-zinc-200 bg-white p-4">
-              <h3 className="text-sm font-semibold">Agendar um atendimento</h3>
-              <p className="mt-2 text-xs text-zinc-500">Confira os horários e o profissional na agenda antes de confirmar.</p>
-              <button type="button" onClick={() => handleOpenNewForDay(anchorDate)} className="mt-3 min-h-11 text-sm font-semibold text-teal-800">Novo agendamento</button>
-            </div>
+            <TaxiDogWidget
+              appointments={filteredItems}
+              onSelectAppointment={setSelectedAppointment}
+              onChangeStatus={changeStatus}
+              title="Táxi Dog · Coletas & Entregas"
+              subtitle="Coletas e entregas agendadas na semana"
+            />
           </aside>
         </div>
       )}
 
       {/* 5. Visualização em Modo DIA */}
       {viewMode === 'day' && (
-        <section className="pc-panel overflow-hidden bg-white rounded-2xl border border-zinc-200" aria-label="Atendimentos do dia">
+        <div className="flex flex-col 2xl:flex-row gap-4 items-stretch">
+          <section className="flex-1 min-w-0 w-full pc-panel overflow-hidden bg-white rounded-2xl border border-zinc-200" aria-label="Atendimentos do dia">
           <div className="p-4 border-b border-zinc-200 flex flex-wrap items-center justify-between gap-3 bg-zinc-50/70">
             <div>
               <h2 className="text-base font-bold text-zinc-900">
@@ -1356,6 +1679,12 @@ export default function PetshopAgendaPage() {
                               <PackageCheck size={10} /> Pacote
                             </span>
                           )}
+                          {item.transport?.enabled && (
+                            <span className="ml-2 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                              🚐 Táxi Dog ({item.transport.mode === 'pickup' ? 'Buscar' : item.transport.mode === 'dropoff' ? 'Levar' : 'Buscar/Levar'})
+                              {!item.transport.coveredByPackage && item.transport.fee > 0 ? ` + ${money(item.transport.fee)}` : ''}
+                            </span>
+                          )}
                         </p>
 
                         <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
@@ -1400,7 +1729,7 @@ export default function PetshopAgendaPage() {
                               })}
                             </div>
                           );
-                        })() : (item.status === 'scheduled' || item.status === 'requested') ? (
+                        })() : (item.status === 'scheduled' || item.status === 'confirmed' || item.status === 'requested') ? (
                           <div className="mt-3 flex items-center gap-2">
                             <button
                               type="button"
@@ -1458,7 +1787,18 @@ export default function PetshopAgendaPage() {
               })}
             </div>
           )}
-        </section>
+          </section>
+          <aside className="w-full 2xl:w-80 shrink-0">
+            <TaxiDogWidget
+              appointments={filteredItems}
+              onSelectAppointment={setSelectedAppointment}
+              onChangeStatus={changeStatus}
+              title="Táxi Dog do Dia"
+              subtitle={`Coletas e entregas em ${formatShortDate(anchorDate)}`}
+              dateLabel={formatShortDate(anchorDate)}
+            />
+          </aside>
+        </div>
       )}
 
       {/* 6. Visualização em Modo TIMELINE / HORÁRIOS */}
@@ -1616,7 +1956,7 @@ export default function PetshopAgendaPage() {
                       {steps.length} etapas para este serviço
                     </span>
                   </div>
-                  {(selectedAppointment.status === 'scheduled' || selectedAppointment.status === 'requested') && (
+                  {(selectedAppointment.status === 'scheduled' || selectedAppointment.status === 'confirmed' || selectedAppointment.status === 'requested') && (
                     <button
                       type="button"
                       disabled={updatingId === selectedAppointment.id}
@@ -1657,16 +1997,105 @@ export default function PetshopAgendaPage() {
               );
             })()}
 
-            {/* Serviços e Valores */}
+            {/* Serviços e Valores + Adicionar Serviço no Meio do Atendimento */}
             <div className="rounded-xl border border-zinc-200 bg-white p-3.5">
-              <p className="text-xs font-bold text-zinc-700 uppercase tracking-wider mb-2">
-                Serviços Contratados & Cobertura
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+                <p className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
+                  Serviços Contratados & Cobertura
+                </p>
+                {selectedAppointment.status !== 'delivered' && selectedAppointment.status !== 'cancelled' && !addingExtraService && (
+                  <button
+                    type="button"
+                    onClick={() => setAddingExtraService(true)}
+                    className="inline-flex items-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-800 hover:bg-teal-100 transition cursor-pointer"
+                    title="Adicionar serviço extra durante o atendimento (ex: Banho Anti-Pulgas, Hidratação, Desembolo)"
+                  >
+                    <Plus size={12} /> Adicionar serviço ao atendimento
+                  </button>
+                )}
+              </div>
+
+              {addingExtraService && (
+                <div className="mb-3 rounded-xl border border-teal-300 bg-teal-50/70 p-3 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-teal-900">
+                      Incluir Serviço Adicional (ex: Anti-pulgas, Hidratação, Tosa Higiênica)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setAddingExtraService(false)}
+                      className="text-[11px] text-zinc-500 hover:text-zinc-800"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[10px] font-bold text-zinc-600 mb-1">Serviço *</label>
+                      <select
+                        value={extraServiceId}
+                        onChange={e => {
+                          const sid = e.target.value;
+                          setExtraServiceId(sid);
+                          const svcObj = services.find(s => s.id === sid);
+                          if (svcObj) {
+                            const eff = getEffectiveServicePrice(svcObj, selectedAppointment.pet);
+                            setExtraServicePrice(String(eff.price));
+                          } else {
+                            setExtraServicePrice('');
+                          }
+                        }}
+                        className="w-full rounded-lg border border-teal-300 bg-white px-2.5 py-1.5 text-xs font-medium text-zinc-800"
+                      >
+                        <option value="">Selecione o serviço extra...</option>
+                        {services.map(svc => {
+                          const eff = getEffectiveServicePrice(svc, selectedAppointment.pet);
+                          return (
+                            <option key={svc.id} value={svc.id}>
+                              {svc.name} ({money(eff.price)})
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-zinc-600 mb-1">Valor a cobrar (R$)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={extraServicePrice}
+                        onChange={e => setExtraServicePrice(e.target.value)}
+                        placeholder="0,00"
+                        className="w-full rounded-lg border border-teal-300 bg-white px-2.5 py-1.5 text-xs font-bold text-zinc-900"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      disabled={savingExtraService || !extraServiceId}
+                      onClick={handleAddExtraService}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 disabled:opacity-50 cursor-pointer"
+                    >
+                      {savingExtraService ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />}
+                      Confirmar inclusão no atendimento
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="divide-y divide-zinc-100">
                 {selectedAppointment.services.map(svc => {
                   const isCovered = svc.coverageStatus === 'reserved' || svc.coverageStatus === 'consumed';
                   const isComboChild = Boolean(svc.comboParentId);
                   const isComboParent = Boolean(svc.isCombo);
+                  const canRemove =
+                    selectedAppointment.status !== 'delivered' &&
+                    selectedAppointment.status !== 'cancelled' &&
+                    !isCovered &&
+                    !isComboChild &&
+                    selectedAppointment.services.filter(s => !s.comboParentId).length > 1;
                   return (
                     <div
                       key={svc.id}
@@ -1706,12 +2135,57 @@ export default function PetshopAgendaPage() {
                           </p>
                         )}
                       </div>
-                      <span className={`font-bold tabular-nums shrink-0 ${isCovered || isComboChild ? 'text-teal-700' : 'text-zinc-900'}`}>
-                        {isCovered ? 'Coberto (R$ 0,00)' : isComboChild ? 'Incluso (R$ 0,00)' : money(Number(svc.priceSnapshot || 0))}
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className={`font-bold tabular-nums ${isCovered || isComboChild ? 'text-teal-700' : 'text-zinc-900'}`}>
+                          {isCovered ? 'Coberto (R$ 0,00)' : isComboChild ? 'Incluso (R$ 0,00)' : money(Number(svc.priceSnapshot || 0))}
+                        </span>
+                        {canRemove && (
+                          <button
+                            type="button"
+                            disabled={savingExtraService}
+                            onClick={() => handleRemoveAppointmentService(svc.id)}
+                            title="Remover este serviço do atendimento"
+                            className="rounded p-1 text-zinc-400 hover:bg-rose-50 hover:text-rose-600 transition cursor-pointer"
+                          >
+                            <X size={13} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   );
                 })}
+                {selectedAppointment.transport?.enabled && (
+                  <div className="py-2.5 px-3 rounded-xl border border-amber-200 bg-amber-50/70 text-xs mt-1 space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-1.5 font-bold text-amber-950">
+                        <Car size={14} className="text-amber-700" />
+                        <span>
+                          Transporte (Táxi Dog · {selectedAppointment.transport.mode === 'pickup' || selectedAppointment.transport.mode === 'pickup_only' ? 'Apenas Buscar' : selectedAppointment.transport.mode === 'dropoff' || selectedAppointment.transport.mode === 'dropoff_only' ? 'Apenas Levar' : 'Buscar e Levar'})
+                        </span>
+                      </div>
+                      <span className="font-extrabold tabular-nums text-amber-900 shrink-0">
+                        {selectedAppointment.transport.coveredByPackage
+                          ? 'Incluso no Pacote'
+                          : money(Number(selectedAppointment.transport.fee || 0))}
+                      </span>
+                    </div>
+                    {(selectedAppointment.transport.address || selectedAppointment.customer?.address) && (
+                      <p className="text-[11px] text-amber-900 flex items-start gap-1">
+                        <MapPin size={12} className="text-amber-700 shrink-0 mt-0.5" />
+                        <span>
+                          {selectedAppointment.transport.street || selectedAppointment.transport.address || selectedAppointment.customer?.address}
+                          {selectedAppointment.transport.neighborhood ? ` · Bairro ${selectedAppointment.transport.neighborhood}` : ''}
+                          {selectedAppointment.transport.reference ? ` (${selectedAppointment.transport.reference})` : ''}
+                        </span>
+                      </p>
+                    )}
+                    {selectedAppointment.transport.notes && (
+                      <p className="text-[11px] text-amber-800 italic bg-amber-100/70 rounded px-1.5 py-0.5 border border-amber-200 font-medium">
+                        Obs: {selectedAppointment.transport.notes}
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="pt-2 border-t border-zinc-200 flex justify-between items-center text-xs">
                 <span className="font-bold text-zinc-700">Total adicional a receber:</span>
@@ -1719,7 +2193,10 @@ export default function PetshopAgendaPage() {
                   {money(
                     selectedAppointment.services
                       .filter(s => s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
-                      .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0),
+                      .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0) +
+                      (selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage
+                        ? Number(selectedAppointment.transport.fee || 0)
+                        : 0),
                   )}
                 </span>
               </div>
@@ -1813,15 +2290,60 @@ export default function PetshopAgendaPage() {
               </div>
 
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 flex flex-col justify-between">
-                <span className="text-zinc-500 block mb-1.5 font-medium">Horário agendado</span>
-                <div>
-                  <strong className="font-semibold text-zinc-800 block tabular-nums text-sm">
-                    {timeStr(selectedAppointment.startsAt)} às {timeStr(selectedAppointment.endsAt)}
-                  </strong>
-                  <span className="text-[10px] text-zinc-400 block">
-                    Duração estimada: {selectedAppointment.services.reduce((acc, s) => acc + (s.durationMinutes || 0), 0)} min
-                  </span>
+                <div className="flex items-center justify-between gap-1 mb-1.5">
+                  <span className="text-zinc-500 font-medium">Horário agendado</span>
+                  {selectedAppointment.status !== 'delivered' && selectedAppointment.status !== 'cancelled' && !editingReschedule && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingReschedule(true)}
+                      className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 transition-colors shadow-xs cursor-pointer"
+                      title="Reagendar data e horário deste atendimento"
+                    >
+                      <CalendarDays size={12} />
+                      Reagendar
+                    </button>
+                  )}
                 </div>
+
+                {editingReschedule ? (
+                  <div className="space-y-2 mt-1">
+                    <input
+                      type="datetime-local"
+                      value={rescheduleStartsAt}
+                      onChange={e => setRescheduleStartsAt(e.target.value)}
+                      disabled={savingReschedule}
+                      className="w-full rounded-lg border border-teal-300 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-800 shadow-xs outline-none focus:ring-2 focus:ring-teal-500"
+                    />
+                    <div className="flex items-center justify-end gap-1.5">
+                      <button
+                        type="button"
+                        disabled={savingReschedule}
+                        onClick={() => setEditingReschedule(false)}
+                        className="rounded px-2 py-1 text-[11px] font-medium text-zinc-500 hover:bg-zinc-200/60"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        disabled={savingReschedule || !rescheduleStartsAt}
+                        onClick={handleSaveReschedule}
+                        className="inline-flex items-center gap-1 rounded-md bg-teal-600 px-2.5 py-1 text-[11px] font-semibold text-white hover:bg-teal-700 disabled:opacity-50 shadow-xs cursor-pointer"
+                      >
+                        {savingReschedule ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+                        Confirmar data
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div>
+                    <strong className="font-semibold text-zinc-800 block tabular-nums text-sm">
+                      {new Date(selectedAppointment.startsAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} · {timeStr(selectedAppointment.startsAt)} às {timeStr(selectedAppointment.endsAt)}
+                    </strong>
+                    <span className="text-[10px] text-zinc-400 block">
+                      Duração estimada: {selectedAppointment.services.reduce((acc, s) => acc + (s.durationMinutes || 0), 0)} min
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1983,14 +2505,15 @@ export default function PetshopAgendaPage() {
             )}
 
             {/* Botões de Ação */}
+            {/* Rodapé de Ações do Modal de Detalhes */}
             <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-zinc-200">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <button
                   type="button"
                   onClick={() => openStageModal(selectedAppointment)}
-                  className="flex items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
+                  className="flex items-center gap-1.5 rounded-xl border border-zinc-300 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
                 >
-                  <Camera size={15} className="text-teal-700" />
+                  <Camera size={14} className="text-teal-700" />
                   {selectedAppointment.stagePhotoUrl ? 'Trocar Foto' : 'Enviar Foto'}
                 </button>
 
@@ -1998,19 +2521,45 @@ export default function PetshopAgendaPage() {
                   type="button"
                   disabled={notifyingId === selectedAppointment.id}
                   onClick={() => notifyTutorWhatsApp(selectedAppointment)}
-                  className={`flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-semibold transition cursor-pointer ${
+                  className={`flex items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-semibold transition cursor-pointer ${
                     selectedAppointment.status === 'ready'
                       ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
                       : 'border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100'
                   }`}
                 >
-                  {selectedAppointment.status === 'ready' ? <BellRing size={15} /> : <MessageCircle size={15} />}
+                  {selectedAppointment.status === 'ready' ? <BellRing size={14} /> : <MessageCircle size={14} />}
                   {notifyingId === selectedAppointment.id
                     ? 'Preparando…'
                     : selectedAppointment.status === 'ready'
                       ? 'Avisar: Pode Buscar!'
                       : 'Avisar Tutor'}
                 </button>
+
+                {/* Botão de Reagendar Fácil */}
+                {selectedAppointment.status !== 'delivered' && (
+                  <button
+                    type="button"
+                    onClick={() => setAppointmentToReschedule(selectedAppointment)}
+                    className="flex items-center gap-1.5 rounded-xl border border-teal-300 bg-teal-50/70 px-3 py-2 text-xs font-bold text-teal-900 hover:bg-teal-100 transition cursor-pointer"
+                    title="Mudar data, horário ou profissional"
+                  >
+                    <CalendarDays size={14} className="text-teal-700" />
+                    Reagendar
+                  </button>
+                )}
+
+                {/* Botão de Cancelar Fácil */}
+                {selectedAppointment.status !== 'delivered' && selectedAppointment.status !== 'cancelled' && (
+                  <button
+                    type="button"
+                    onClick={() => setAppointmentToCancel(selectedAppointment)}
+                    className="flex items-center gap-1 rounded-xl border border-rose-200 bg-rose-50/60 px-2.5 py-2 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer"
+                    title="Cancelar agendamento ou marcar no-show"
+                  >
+                    <XCircle size={14} className="text-rose-600" />
+                    Cancelar
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -2020,9 +2569,19 @@ export default function PetshopAgendaPage() {
                     <span>✓ Já Cobrado e Concluído</span>
                   </div>
                 ) : selectedAppointment.status === 'cancelled' ? (
-                  <div className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs font-bold text-rose-800 shadow-2xs">
-                    <XCircle size={15} className="text-rose-600" />
-                    <span>Atendimento Cancelado</span>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-800 shadow-2xs">
+                      <XCircle size={14} className="text-rose-600" />
+                      <span>Atendimento Cancelado</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setAppointmentToReschedule(selectedAppointment)}
+                      className="flex items-center gap-1 rounded-xl border border-teal-300 bg-teal-50 px-3 py-1.5 text-xs font-bold text-teal-900 hover:bg-teal-100 transition cursor-pointer"
+                    >
+                      <CalendarDays size={13} />
+                      Reativar / Reagendar
+                    </button>
                   </div>
                 ) : (
                   <button
@@ -2065,7 +2624,7 @@ export default function PetshopAgendaPage() {
       )}
 
       {paymentItem && <PaymentModal isOpen onClose={() => setPaymentItem(null)} isOnline={navigator.onLine} tenantConfig={tenant}
-        petshopReceipt={{ customer: paymentItem.customer.name, total: paymentItem.services.filter(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus || '')).reduce((sum, s) => sum + Math.max(0, Number(s.priceSnapshot) - Number(s.coveredAmount || 0)), 0), submit: async payments => { const { data } = await api.post(`/petshop/appointments/${paymentItem.id}/receive`, { payments }); return data; } }}
+        petshopReceipt={{ customer: paymentItem.customer.name, total: paymentItem.services.filter(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus || '')).reduce((sum, s) => sum + Math.max(0, Number(s.priceSnapshot) - Number(s.coveredAmount || 0)), 0) + (paymentItem.transport?.enabled && !paymentItem.transport.coveredByPackage ? Number(paymentItem.transport.fee || 0) : 0), submit: async payments => { const { data } = await api.post(`/petshop/appointments/${paymentItem.id}/receive`, { payments }); return data; } }}
         onSuccess={() => { setSelectedAppointment(null); loadAppointments(false); toast.success('Pagamento registrado.'); }} />}
 
       {/* 9. MODAL DE FOTO E RECADO DA ETAPA */}
@@ -2124,9 +2683,10 @@ export default function PetshopAgendaPage() {
                 type="checkbox"
                 checked={stageForm.notifyTutor}
                 onChange={e => setStageForm({ ...stageForm, notifyTutor: e.target.checked })}
+                disabled={!stageForm.stagePhotoUrl}
               />
               <span>
-                Abrir WhatsApp após salvar para avisar <strong>{stageModalItem.customer?.name?.split(' ')[0]}</strong> com o link direto
+                Enviar a foto desta etapa pelo WhatsApp conectado para <strong>{stageModalItem.customer?.name?.split(' ')[0]}</strong>
               </span>
             </label>
 
@@ -2165,7 +2725,24 @@ export default function PetshopAgendaPage() {
                 required
                 className={inputClass}
                 value={form.petId}
-                onChange={e => { setAvailablePackages([]); setPackageSelections({}); setForm({ ...form, petId: e.target.value, serviceIds: [] }); }}
+                onChange={e => {
+                  const pid = e.target.value;
+                  const petObj = pets.find(p => p.id === pid);
+                  const parsedAddr = parseAddressParts(petObj?.customer?.address);
+                  const hasAddr = Boolean(petObj?.customer?.address && petObj.customer.address.trim().length > 0);
+                  setAvailablePackages([]);
+                  setPackageSelections({});
+                  setForm({
+                    ...form,
+                    petId: pid,
+                    serviceIds: [],
+                    customerStreet: parsedAddr.street,
+                    customerNeighborhood: parsedAddr.neighborhood,
+                    customerReference: petObj?.customer?.reference || '',
+                    transportNotes: '',
+                    saveAddressToCustomer: !hasAddr,
+                  });
+                }}
               >
                 <option value="">Selecione o pet</option>
                 {pets.map(pet => (
@@ -2397,15 +2974,154 @@ export default function PetshopAgendaPage() {
               </div>
             </fieldset>
 
+            {/* Transporte do Animal (Táxi Dog) & Endereço do Tutor no Avulso */}
+            {form.petId && (
+              <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3.5 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-800">
+                    <input
+                      type="checkbox"
+                      checked={form.transportEnabled}
+                      onChange={e =>
+                        setForm(prev => ({
+                          ...prev,
+                          transportEnabled: e.target.checked,
+                        }))
+                      }
+                      className="h-4 w-4 rounded border-zinc-300 text-teal-600 focus:ring-teal-500"
+                    />
+                    <span>🚐 Incluir Transporte do Animal (Táxi Dog) neste agendamento</span>
+                  </label>
+                  {form.transportEnabled && (
+                    <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-0.5 text-[11px] font-bold text-amber-900">
+                      {form.transportCoveredByPackage ? 'Incluso no Pacote' : `+ ${money(Number(form.transportFee || 0))}`}
+                    </span>
+                  )}
+                </div>
+
+                {form.transportEnabled && (() => {
+                  const selectedPetObj = pets.find(p => p.id === form.petId);
+                  const customerHasSavedAddress = Boolean(selectedPetObj?.customer?.address && selectedPetObj.customer.address.trim().length > 0);
+
+                  return (
+                    <div className="space-y-3 pt-2.5 border-t border-amber-200/70">
+                      {/* Linha 1: Modalidade + Valor */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label>
+                          <span className={labelClass}>Modalidade do Transporte *</span>
+                          <select
+                            value={form.transportMode}
+                            onChange={e => setForm(prev => ({ ...prev, transportMode: e.target.value as any }))}
+                            className={inputClass}
+                          >
+                            <option value="both">Buscar e Levar (Ida e Volta)</option>
+                            <option value="pickup">Apenas Buscar (Coleta)</option>
+                            <option value="dropoff">Apenas Levar (Entrega)</option>
+                          </select>
+                        </label>
+
+                        <label>
+                          <span className={labelClass}>Valor do Transporte (R$) — Fixo ou por Distância</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            disabled={form.transportCoveredByPackage}
+                            value={form.transportCoveredByPackage ? '0' : form.transportFee}
+                            onChange={e => setForm(prev => ({ ...prev, transportFee: e.target.value }))}
+                            className={inputClass}
+                          />
+                        </label>
+                      </div>
+
+                      {/* Linha 2: Rua e Número + Bairro */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <label className="sm:col-span-2">
+                          <span className={labelClass}>Endereço (Rua, Av. e Número) *</span>
+                          <input
+                            type="text"
+                            required={form.transportEnabled}
+                            placeholder="Ex: R. Hipólito Lopes, 103"
+                            value={form.customerStreet}
+                            onChange={e => setForm(prev => ({ ...prev, customerStreet: e.target.value }))}
+                            className={inputClass}
+                          />
+                        </label>
+                        <label>
+                          <span className={labelClass}>Bairro *</span>
+                          <input
+                            type="text"
+                            required={form.transportEnabled}
+                            placeholder="Ex: Vila Leozina"
+                            value={form.customerNeighborhood}
+                            onChange={e => setForm(prev => ({ ...prev, customerNeighborhood: e.target.value }))}
+                            className={inputClass}
+                          />
+                        </label>
+                      </div>
+
+                      {/* Linha 3: Ponto de Referência + Observação do Transporte */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <label>
+                          <span className={labelClass}>Ponto de Referência / Compl.</span>
+                          <input
+                            type="text"
+                            placeholder="Ex: Próximo ao Campo Orlandão, Ap 12"
+                            value={form.customerReference}
+                            onChange={e => setForm(prev => ({ ...prev, customerReference: e.target.value }))}
+                            className={inputClass}
+                          />
+                        </label>
+                        <label>
+                          <span className={labelClass}>Observação do Transporte</span>
+                          <input
+                            type="text"
+                            placeholder="Ex: Interfone estragado, chamar no portão..."
+                            value={form.transportNotes}
+                            onChange={e => setForm(prev => ({ ...prev, transportNotes: e.target.value }))}
+                            className={inputClass}
+                          />
+                        </label>
+                      </div>
+
+                      {/* Opção condicional: apenas se o cliente NÃO possuir endereço cadastrado */}
+                      {!customerHasSavedAddress && (
+                        <div className="pt-2 border-t border-amber-200/60">
+                          <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-amber-50/90 border border-amber-300 cursor-pointer text-xs text-amber-950 font-medium hover:bg-amber-100/70 transition">
+                            <input
+                              type="checkbox"
+                              checked={form.saveAddressToCustomer}
+                              onChange={e => setForm(prev => ({ ...prev, saveAddressToCustomer: e.target.checked }))}
+                              className="mt-0.5 rounded text-teal-800 focus:ring-teal-700"
+                            />
+                            <div>
+                              <span className="font-bold block text-[11px]">
+                                Cadastrar este endereço na ficha de {selectedPetObj?.customer?.name || 'cliente'}?
+                              </span>
+                              <span className="text-[10px] text-amber-800 leading-tight block">
+                                Este cliente ainda não possui endereço registrado. Marque para salvar permanentemente no cadastro dele.
+                              </span>
+                            </div>
+                          </label>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {form.petId && !loadingPackages && !packagesError && (
               <div className="sm:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm" aria-live="polite">
                 {form.serviceIds.length ? <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium text-zinc-600">Valor adicional a receber:</span>
-                  <strong className="font-bold tabular-nums text-teal-800">{money(form.serviceIds.reduce((sum, serviceId) => {
-                    if (packageSelections[serviceId]) return sum;
-                    const service = services.find(s => s.id === serviceId);
-                    return sum + (service ? getEffectiveServicePrice(service, pets.find(p => p.id === form.petId)).price : 0);
-                  }, 0))}</strong>
+                  <strong className="font-bold tabular-nums text-teal-800">{money(
+                    form.serviceIds.reduce((sum, serviceId) => {
+                      if (packageSelections[serviceId]) return sum;
+                      const service = services.find(s => s.id === serviceId);
+                      return sum + (service ? getEffectiveServicePrice(service, pets.find(p => p.id === form.petId)).price : 0);
+                    }, 0) + (form.transportEnabled && !form.transportCoveredByPackage ? Math.max(0, Number(form.transportFee || 0)) : 0)
+                  )}</strong>
                 </div> : <p className="text-xs text-zinc-500">Selecione os serviços para conferir a cobertura e o valor adicional.</p>}
               </div>
             )}
@@ -2429,6 +3145,37 @@ export default function PetshopAgendaPage() {
             </button>
           </form>
         </Modal>
+      )}
+
+      {/* MODAL DE CANCELAMENTO FÁCIL */}
+      {appointmentToCancel && (
+        <CancelAppointmentModal
+          appointment={appointmentToCancel}
+          onClose={() => setAppointmentToCancel(null)}
+          onSuccess={updated => {
+            setItems(curr => curr.map(row => (row.id === updated.id ? updated : row)));
+            if (selectedAppointment?.id === updated.id) {
+              setSelectedAppointment(updated);
+            }
+            loadAppointments(false);
+          }}
+        />
+      )}
+
+      {/* MODAL DE REAGENDAMENTO FÁCIL */}
+      {appointmentToReschedule && (
+        <RescheduleAppointmentModal
+          appointment={appointmentToReschedule}
+          operators={operators}
+          onClose={() => setAppointmentToReschedule(null)}
+          onSuccess={updated => {
+            setItems(curr => curr.map(row => (row.id === updated.id ? updated : row)));
+            if (selectedAppointment?.id === updated.id) {
+              setSelectedAppointment(updated);
+            }
+            loadAppointments(false);
+          }}
+        />
       )}
     </div>
   );

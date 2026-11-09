@@ -95,13 +95,13 @@ export function PetHeroShowcase({ compact = false }: { compact?: boolean }) {
 
 export function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: ReactNode }) {
   return (
-    <div className="relative mb-6 flex flex-col gap-4 overflow-hidden rounded-2xl border border-[var(--pc-border)] bg-gradient-to-r from-white via-[#f9fcfb] to-[#eaf4f1] px-5 py-5 shadow-2xs sm:flex-row sm:items-center sm:justify-between sm:px-6">
+    <div className="relative mb-4 sm:mb-6 flex flex-col gap-3 sm:gap-4 overflow-hidden rounded-2xl border border-[var(--pc-border)] bg-gradient-to-r from-white via-[#f9fcfb] to-[#eaf4f1] px-4 py-4 shadow-2xs sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-5">
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-[var(--pc-action)]">{eyebrow}</p>
         <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em] text-[var(--pc-text)]">{title}</h1>
         <p className="mt-1 text-sm text-[var(--pc-text-secondary)]">{description}</p>
       </div>
-      <div className="flex flex-wrap items-center gap-5">
+      <div className="flex flex-wrap items-center gap-2.5 sm:gap-5 w-full sm:w-auto [&>button]:w-full sm:[&>button]:w-auto [&>div]:w-full sm:[&>div]:w-auto">
         <PetHeroShowcase compact />
         {action}
       </div>
@@ -152,7 +152,7 @@ export function Modal({ title, onClose, children, maxWidth = 'sm:max-w-2xl' }: {
     };
   }, []);
 
-  return <div className="fixed inset-0 z-[80] grid place-items-end bg-slate-950/45 p-0 backdrop-blur-[2px] sm:place-items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`max-h-[92dvh] w-full overflow-auto rounded-t-xl bg-white shadow-2xl sm:rounded-xl ${maxWidth}`}><div className="sticky top-0 z-10 flex items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-5 py-4 backdrop-blur"><h2 id={titleId} className="text-lg font-semibold">{title}</h2><button type="button" onClick={onClose} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-lg text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)]"><X aria-hidden="true" size={18} /></button></div><div className="p-5">{children}</div></div></div>;
+  return <div className="fixed inset-0 z-[80] grid place-items-end bg-slate-950/50 p-0 backdrop-blur-[2px] sm:place-items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`max-h-[90dvh] sm:max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl bg-white pb-[calc(1rem+env(safe-area-inset-bottom))] shadow-2xl sm:rounded-2xl sm:pb-0 ${maxWidth}`}><div className="sticky top-0 z-20 flex items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-4 py-3.5 sm:px-5 sm:py-4 backdrop-blur"><h2 id={titleId} className="text-base sm:text-lg font-bold text-slate-900 truncate pr-2">{title}</h2><button type="button" onClick={onClose} aria-label="Fechar" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100/80 text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)]"><X aria-hidden="true" size={18} /></button></div><div className="p-4 sm:p-5">{children}</div></div></div>;
 }
 
 export function SearchField({ value, onChange, placeholder, label = 'Buscar' }: { value: string; onChange: (value: string) => void; placeholder: string; label?: string }) {
@@ -182,7 +182,7 @@ export function CatalogTabs() {
       isActive ? 'bg-[var(--pc-text)] text-white shadow-xs' : 'text-[var(--pc-text-secondary)] hover:bg-white hover:text-[var(--pc-text)]'
     }`;
   return (
-    <nav aria-label="Seções do catálogo e estoque" className="mb-5 flex w-full flex-wrap items-center gap-1.5 overflow-x-auto rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-1.5">
+    <nav aria-label="Seções do catálogo e estoque" className="mb-5 flex w-full items-center gap-1.5 overflow-x-auto no-scrollbar rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-1.5">
       <NavLink to="/petshop/servicos" className={tabClass}>Serviços</NavLink>
       <NavLink to="/petshop/produtos" className={tabClass}>Produtos</NavLink>
       <NavLink to="/petshop/edicao-massa" className={tabClass}>Edição em Massa</NavLink>
@@ -202,7 +202,7 @@ export function TeamTabs() {
         : 'border border-zinc-200/90 bg-white text-zinc-700 hover:bg-zinc-50 hover:text-zinc-900'
     }`;
   return (
-    <nav aria-label="Seções da equipe" className="mb-6 flex flex-wrap items-center gap-2.5">
+    <nav aria-label="Seções da equipe" className="mb-5 flex w-full items-center gap-2 overflow-x-auto no-scrollbar pb-0.5">
       <NavLink to="/petshop/equipe" end className={tabClass}>
         <Users size={16} />
         <span>Colaboradores & PINs</span>
@@ -219,4 +219,4 @@ export const inputClass = 'min-h-11 w-full rounded-lg border border-[var(--pc-bo
 export const primaryButton = 'min-h-11 cursor-pointer rounded-lg bg-[var(--pc-action)] px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-[var(--pc-action-hover)] disabled:cursor-not-allowed disabled:opacity-50';
 export const secondaryButton = 'min-h-11 cursor-pointer rounded-lg border border-[var(--pc-border-strong)] bg-white px-4 py-2.5 text-sm font-semibold text-[var(--pc-text)] transition hover:bg-[var(--pc-surface-subtle)] disabled:cursor-not-allowed disabled:opacity-50';
 export const labelClass = 'mb-1.5 block text-xs font-medium text-[var(--pc-text-secondary)]';
-export const pageClass = 'mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8';
+export const pageClass = 'mx-auto w-full max-w-[1600px] p-3.5 sm:p-6 lg:p-8';

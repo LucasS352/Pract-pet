@@ -300,12 +300,16 @@ export default function PetshopPetsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
+  // Visualização: Lista Operacional vs Relatório de Pets & Clientes
+  const [viewMode, setViewMode] = useState<'list' | 'report'>('list');
+
   // Filtros
   const [search, setSearch] = useState('');
   const [speciesFilter, setSpeciesFilter] = useState('all');
   const [sizeFilter, setSizeFilter] = useState('all');
   const [sexFilter, setSexFilter] = useState('all');
   const [vaccineStatusFilter, setVaccineStatusFilter] = useState('all');
+  const [inactivityFilter, setInactivityFilter] = useState('all');
 
   // Modais de Criação e Edição de Pet
   const [petModalOpen, setPetModalOpen] = useState(false);
@@ -507,10 +511,21 @@ export default function PetshopPetsPage() {
     let dogsCount = 0;
     let catsCount = 0;
     let specialCareCount = 0;
+    let malesCount = 0;
+    let femalesCount = 0;
+    let smallCount = 0;
+    let mediumCount = 0;
+    let largeCount = 0;
 
     for (const pet of items) {
       if (pet.species === 'dog') dogsCount++;
       if (pet.species === 'cat') catsCount++;
+      if (pet.sex === 'male') malesCount++;
+      if (pet.sex === 'female') femalesCount++;
+      const sz = (pet.size || '').toLowerCase();
+      if (sz === 'mini' || sz === 'small' || sz === 'p') smallCount++;
+      else if (sz === 'medium' || sz === 'm') mediumCount++;
+      else if (sz === 'large' || sz === 'giant' || sz === 'g' || sz === 'gg') largeCount++;
       if (pet.allergies || pet.behavior || pet.notes) specialCareCount++;
 
       const vacs = pet.vaccinations || [];
@@ -543,6 +558,13 @@ export default function PetshopPetsPage() {
       dogsPct: totalPets ? Math.round((dogsCount / totalPets) * 100) : 0,
       cats: catsCount,
       catsPct: totalPets ? Math.round((catsCount / totalPets) * 100) : 0,
+      males: malesCount,
+      malesPct: totalPets ? Math.round((malesCount / totalPets) * 100) : 0,
+      females: femalesCount,
+      femalesPct: totalPets ? Math.round((femalesCount / totalPets) * 100) : 0,
+      smallCount,
+      mediumCount,
+      largeCount,
       specialCare: specialCareCount,
       specialCarePct: totalPets ? Math.round((specialCareCount / totalPets) * 100) : 0,
       overdue: overdueCount,
@@ -559,6 +581,18 @@ export default function PetshopPetsPage() {
     }
   }, [hasVaccines, activeTab]);
 
+  const getDaysSinceLastVisit = (pet: Pet): { days: number | null; lastDateStr: string | null } => {
+    const lastAppt = Array.isArray(pet.appointments) && pet.appointments.length > 0 ? pet.appointments[0] : null;
+    if (!lastAppt?.startsAt) return { days: null, lastDateStr: null };
+    const d = new Date(lastAppt.startsAt);
+    if (Number.isNaN(d.getTime())) return { days: null, lastDateStr: null };
+    const diffDays = Math.floor((today.getTime() - d.getTime()) / 86_400_000);
+    return {
+      days: diffDays,
+      lastDateStr: d.toLocaleDateString('pt-BR'),
+    };
+  };
+
   // Lista Filtrada
   const filteredPets = useMemo(() => {
     return items.filter(pet => {
@@ -569,12 +603,33 @@ export default function PetshopPetsPage() {
 
       // Porte
       if (sizeFilter !== 'all') {
-        if ((pet.size || '').toLowerCase() !== sizeFilter.toLowerCase()) return false;
+        const petSize = (pet.size || '').toLowerCase();
+        const filterSize = sizeFilter.toLowerCase();
+        const matchesSize =
+          filterSize === 'small' ? ['small', 'mini', 'p'].includes(petSize) :
+          filterSize === 'medium' ? ['medium', 'm'].includes(petSize) :
+          filterSize === 'large' ? ['large', 'giant', 'g', 'gg'].includes(petSize) :
+          petSize === filterSize;
+        if (!matchesSize) return false;
       }
 
       // Sexo (Macho / Fêmea - Brinde e Adereços)
       if (sexFilter !== 'all') {
         if (pet.sex !== sexFilter) return false;
+      }
+
+      // Filtro de Inatividade / Retorno
+      if (inactivityFilter !== 'all') {
+        const { days } = getDaysSinceLastVisit(pet);
+        if (inactivityFilter === '15plus') {
+          if (days === null || days < 15) return false;
+        } else if (inactivityFilter === '30plus') {
+          if (days === null || days < 30) return false;
+        } else if (inactivityFilter === 'never') {
+          if (days !== null) return false;
+        } else if (inactivityFilter === 'with_package') {
+          if (!pet.petPackages?.length) return false;
+        }
       }
 
       // Status da vacina
@@ -598,7 +653,94 @@ export default function PetshopPetsPage() {
 
       return true;
     });
-  }, [items, speciesFilter, sizeFilter, sexFilter, vaccineStatusFilter]);
+  }, [items, speciesFilter, sizeFilter, sexFilter, vaccineStatusFilter, inactivityFilter]);
+
+  const reportSummary = useMemo(() => {
+    let males = 0;
+    let females = 0;
+    let smallCount = 0;
+    let mediumCount = 0;
+    let largeCount = 0;
+    let withPackage = 0;
+    let inactive15Plus = 0;
+    const uniqueTutors = new Set<string>();
+
+    for (const p of filteredPets) {
+      if (p.customerId) uniqueTutors.add(p.customerId);
+      if (p.sex === 'male') males++;
+      else if (p.sex === 'female') females++;
+
+      const sz = (p.size || '').toLowerCase();
+      if (sz === 'mini' || sz === 'small' || sz === 'p') smallCount++;
+      else if (sz === 'medium' || sz === 'm') mediumCount++;
+      else if (sz === 'large' || sz === 'giant' || sz === 'g' || sz === 'gg') largeCount++;
+
+      if (p.petPackages && p.petPackages.length > 0) withPackage++;
+      const { days } = getDaysSinceLastVisit(p);
+      if (days !== null && days >= 15) inactive15Plus++;
+    }
+
+    return {
+      totalPets: filteredPets.length,
+      totalTutors: uniqueTutors.size,
+      males,
+      females,
+      smallCount,
+      mediumCount,
+      largeCount,
+      withPackage,
+      inactive15Plus,
+    };
+  }, [filteredPets]);
+
+  const exportReportCsv = () => {
+    const header = [
+      'Pet',
+      'Espécie',
+      'Raça',
+      'Sexo',
+      'Porte',
+      'Pelagem',
+      'Peso (kg)',
+      'Tutor',
+      'Telefone / WhatsApp',
+      'Endereço do Cliente',
+      'Total Atendimentos',
+      'Última Visita',
+      'Dias sem Vir',
+      'Pacote Ativo',
+    ];
+    const rows = filteredPets.map(p => {
+      const { days, lastDateStr } = getDaysSinceLastVisit(p);
+      const activePkg = p.petPackages?.[0]?.planNameSnapshot || 'Avulso';
+      return [
+        p.name,
+        speciesLabel(p.species),
+        p.breed || 'SRD',
+        p.sex === 'male' ? 'Macho' : p.sex === 'female' ? 'Fêmea' : 'Não inf.',
+        shortSizeLabel(p.size),
+        coatLabels[p.coatType || ''] || p.coatType || '—',
+        p.weight || '',
+        p.customer?.name || '',
+        p.customer?.phone || '',
+        p.customer?.address || 'Sem endereço',
+        p._count?.appointments ?? 0,
+        lastDateStr || 'Nunca veio',
+        days !== null ? (days <= 0 ? 'Agendado / Hoje' : `${days} dias`) : '—',
+        activePkg,
+      ];
+    });
+    const csv = [header, ...rows]
+      .map(line => line.map(val => `"${String(val ?? '').replaceAll('"', '""')}"`).join(';'))
+      .join('\n');
+    const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relatorio-pets-clientes-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <div className={pageClass}>
@@ -619,134 +761,186 @@ export default function PetshopPetsPage() {
         }
       />
 
-      {/* 2. Faixa de Indicadores (4 KPIs da Imagem de Referência) */}
+      {/* 2. Faixa Principal de Indicadores: Total de Pets, Machos, Fêmeas e Porte */}
       <section
-        className="mb-5 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5"
-        aria-label="Resumo de pets e saúde"
+        className="mb-5 grid grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3.5"
+        aria-label="Resumo de pets, machos, fêmeas e portes"
       >
         {/* KPI 1: Pets cadastrados */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => { setSexFilter('all'); setSizeFilter('all'); setSpeciesFilter('all'); }}
+          className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between text-left hover:border-teal-300 transition cursor-pointer"
+        >
           <div className="flex items-center gap-3.5">
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+            <div className="grid h-11 w-11 place-items-center rounded-xl bg-emerald-50 text-emerald-700 shrink-0">
               <PawPrint size={22} />
             </div>
             <div>
-              <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                  {kpis.total}
-                </span>
-                <span className="inline-flex items-center gap-0.5 rounded-md bg-emerald-50 px-1.5 py-0.5 text-[11px] font-bold text-emerald-700">
-                  + 12%
-                </span>
-              </div>
+              <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
+                {kpis.total}
+              </span>
               <p className="text-xs font-semibold text-zinc-700">Pets cadastrados</p>
-              <p className="text-[11px] text-zinc-400">+ 3 nos últimos 30 dias</p>
+              <p className="text-[11px] text-zinc-400">
+                {kpis.dogs} cães · {kpis.cats} gatos
+              </p>
             </div>
           </div>
-        </div>
+        </button>
 
-        {hasVaccines ? (
-          <>
-            {/* KPI 2: Vacinas atrasadas */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
+        {/* KPI 2: Quantidade de Machos */}
+        <button
+          type="button"
+          onClick={() => setSexFilter(sexFilter === 'male' ? 'all' : 'male')}
+          className={`rounded-2xl border p-4 shadow-xs flex items-center justify-between text-left transition cursor-pointer ${
+            sexFilter === 'male'
+              ? 'border-sky-400 bg-sky-50/70 ring-1 ring-sky-400/30'
+              : 'border-zinc-200/90 bg-white hover:border-sky-300'
+          }`}
+        >
           <div className="flex items-center gap-3.5">
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-rose-50 text-rose-700">
-              <ShieldAlert size={22} />
+            <div className="grid h-11 w-11 place-items-center rounded-xl bg-sky-100 text-sky-800 font-extrabold text-sm shrink-0">
+              Macho
             </div>
             <div>
-              <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                {kpis.overdue}
-              </span>
-              <p className="text-xs font-semibold text-zinc-700">Vacinas atrasadas</p>
-              <p className="text-[11px] text-zinc-400">{kpis.overduePct}% do total de pets</p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold tracking-tight text-sky-900 tabular-nums">
+                  {kpis.males}
+                </span>
+                <span className="rounded-md bg-sky-100 px-1.5 py-0.5 text-[10px] font-bold text-sky-800">
+                  {kpis.malesPct}%
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-zinc-700">Machos cadastrados</p>
+              <p className="text-[11px] text-zinc-400">
+                {sexFilter === 'male' ? 'Filtro ativo (clique p/ todos)' : 'Clique para filtrar machos'}
+              </p>
             </div>
           </div>
-        </div>
+        </button>
 
-        {/* KPI 3: Próximos vencimentos */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
+        {/* KPI 3: Quantidade de Fêmeas */}
+        <button
+          type="button"
+          onClick={() => setSexFilter(sexFilter === 'female' ? 'all' : 'female')}
+          className={`rounded-2xl border p-4 shadow-xs flex items-center justify-between text-left transition cursor-pointer ${
+            sexFilter === 'female'
+              ? 'border-pink-400 bg-pink-50/70 ring-1 ring-pink-400/30'
+              : 'border-zinc-200/90 bg-white hover:border-pink-300'
+          }`}
+        >
           <div className="flex items-center gap-3.5">
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-amber-50 text-amber-700">
-              <CalendarDays size={22} />
+            <div className="grid h-11 w-11 place-items-center rounded-xl bg-pink-100 text-pink-800 font-extrabold text-sm shrink-0">
+              Fêmea
             </div>
             <div>
-              <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                {kpis.dueSoon}
-              </span>
-              <p className="text-xs font-semibold text-zinc-700">Próximos vencimentos</p>
-              <p className="text-[11px] text-zinc-400">nos próximos 30 dias</p>
+              <div className="flex items-baseline gap-2">
+                <span className="text-2xl font-bold tracking-tight text-pink-900 tabular-nums">
+                  {kpis.females}
+                </span>
+                <span className="rounded-md bg-pink-100 px-1.5 py-0.5 text-[10px] font-bold text-pink-800">
+                  {kpis.femalesPct}%
+                </span>
+              </div>
+              <p className="text-xs font-semibold text-zinc-700">Fêmeas cadastradas</p>
+              <p className="text-[11px] text-zinc-400">
+                {sexFilter === 'female' ? 'Filtro ativo (clique p/ todos)' : 'Clique para filtrar fêmeas'}
+              </p>
             </div>
           </div>
-        </div>
+        </button>
 
-        {/* KPI 4: Sem carteira atualizada */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
-          <div className="flex items-center gap-3.5">
-            <div className="grid h-11 w-11 place-items-center rounded-xl bg-sky-50 text-sky-700">
-              <FileText size={22} />
-            </div>
-            <div>
-              <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                {kpis.without}
-              </span>
-              <p className="text-xs font-semibold text-zinc-700">Sem carteira atualizada</p>
-              <p className="text-[11px] text-zinc-400">{kpis.withoutPct}% do total de pets</p>
-            </div>
+        {/* KPI 4: Distribuição por Porte (P, M, G) */}
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex flex-col justify-center">
+          <div className="flex items-center justify-between mb-1.5">
+            <span className="text-xs font-semibold text-zinc-700 flex items-center gap-1.5">
+              <Scale size={14} className="text-teal-700" /> Pets por Porte
+            </span>
+            {sizeFilter !== 'all' && (
+              <button
+                type="button"
+                onClick={() => setSizeFilter('all')}
+                className="text-[10px] font-bold text-teal-700 hover:underline cursor-pointer"
+              >
+                Todos
+              </button>
+            )}
+          </div>
+          <div className="grid grid-cols-3 gap-1.5 text-center">
+            <button
+              type="button"
+              onClick={() => setSizeFilter(sizeFilter === 'small' ? 'all' : 'small')}
+              className={`rounded-lg border py-1 px-1.5 transition cursor-pointer ${
+                sizeFilter === 'small' ? 'border-sky-400 bg-sky-100 font-bold' : 'border-zinc-100 bg-zinc-50 hover:bg-zinc-100'
+              }`}
+            >
+              <strong className="block text-sm font-extrabold text-zinc-900 tabular-nums">{kpis.smallCount}</strong>
+              <span className="block text-[9px] text-zinc-500 font-semibold">Peq / Mini</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSizeFilter(sizeFilter === 'medium' ? 'all' : 'medium')}
+              className={`rounded-lg border py-1 px-1.5 transition cursor-pointer ${
+                sizeFilter === 'medium' ? 'border-teal-400 bg-teal-100 font-bold' : 'border-zinc-100 bg-zinc-50 hover:bg-zinc-100'
+              }`}
+            >
+              <strong className="block text-sm font-extrabold text-teal-800 tabular-nums">{kpis.mediumCount}</strong>
+              <span className="block text-[9px] text-zinc-500 font-semibold">Médio (M)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setSizeFilter(sizeFilter === 'large' ? 'all' : 'large')}
+              className={`rounded-lg border py-1 px-1.5 transition cursor-pointer ${
+                sizeFilter === 'large' ? 'border-amber-400 bg-amber-100 font-bold' : 'border-zinc-100 bg-zinc-50 hover:bg-zinc-100'
+              }`}
+            >
+              <strong className="block text-sm font-extrabold text-amber-800 tabular-nums">{kpis.largeCount}</strong>
+              <span className="block text-[9px] text-zinc-500 font-semibold">Grande / GG</span>
+            </button>
           </div>
         </div>
-          </>
-        ) : (
-          <>
-            {/* KPI 2: Cães Cadastrados */}
-            <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
-              <div className="flex items-center gap-3.5">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-sky-50 text-sky-700">
-                  <Dog size={22} />
-                </div>
-                <div>
-                  <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                    {kpis.dogs}
-                  </span>
-                  <p className="text-xs font-semibold text-zinc-700">Cães cadastrados</p>
-                  <p className="text-[11px] text-zinc-400">{kpis.dogsPct}% da base de pets</p>
-                </div>
-              </div>
-            </div>
-
-            {/* KPI 3: Gatos Cadastrados */}
-            <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
-              <div className="flex items-center gap-3.5">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-violet-50 text-violet-700">
-                  <Cat size={22} />
-                </div>
-                <div>
-                  <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                    {kpis.cats}
-                  </span>
-                  <p className="text-xs font-semibold text-zinc-700">Gatos cadastrados</p>
-                  <p className="text-[11px] text-zinc-400">{kpis.catsPct}% da base de pets</p>
-                </div>
-              </div>
-            </div>
-
-            {/* KPI 4: Cuidados Especiais / Alergias */}
-            <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center justify-between">
-              <div className="flex items-center gap-3.5">
-                <div className="grid h-11 w-11 place-items-center rounded-xl bg-amber-50 text-amber-700">
-                  <AlertTriangle size={22} />
-                </div>
-                <div>
-                  <span className="text-2xl font-bold tracking-tight text-zinc-900 tabular-nums">
-                    {kpis.specialCare}
-                  </span>
-                  <p className="text-xs font-semibold text-zinc-700">Alergias & Cuidados</p>
-                  <p className="text-[11px] text-zinc-400">{kpis.specialCarePct}% requerem atenção</p>
-                </div>
-              </div>
-            </div>
-          </>
-        )}
       </section>
+
+      {/* Abas de Alternância: Lista Operacional vs Relatório Gerencial de Pets & Clientes */}
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-zinc-200 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setViewMode('list')}
+            className={`inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-xs sm:text-sm font-semibold transition ${
+              viewMode === 'list'
+                ? 'bg-zinc-900 text-white shadow-xs'
+                : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50'
+            }`}
+          >
+            <PawPrint size={16} />
+            Fichas de Pets ({filteredPets.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode('report')}
+            className={`inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl px-4 py-2 text-xs sm:text-sm font-semibold transition ${
+              viewMode === 'report'
+                ? 'bg-teal-700 text-white shadow-xs'
+                : 'bg-white text-zinc-600 border border-zinc-200 hover:bg-zinc-50'
+            }`}
+          >
+            <FileText size={16} />
+            Relatório de Pets & Clientes
+          </button>
+        </div>
+
+        {viewMode === 'report' && (
+          <button
+            type="button"
+            onClick={exportReportCsv}
+            className="inline-flex min-h-10 cursor-pointer items-center gap-2 rounded-xl border border-teal-200 bg-teal-50 px-4 py-2 text-xs font-bold text-teal-900 hover:bg-teal-100 transition"
+          >
+            <FileText size={15} />
+            Exportar Relatório (CSV / Excel)
+          </button>
+        )}
+      </div>
 
       {/* 3. Barra de Busca e Filtros */}
       <section
@@ -794,23 +988,37 @@ export default function PetshopPetsPage() {
             onChange={e => setSizeFilter(e.target.value)}
             className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
           >
-            <option value="all">Porte</option>
-            <option value="small">Pequeno (small)</option>
-            <option value="medium">Médio (medium)</option>
-            <option value="large">Grande (large)</option>
-            <option value="giant">Gigante (giant)</option>
+            <option value="all">Todos os Portes</option>
+            <option value="mini">Mini</option>
+            <option value="small">Pequeno (P)</option>
+            <option value="medium">Médio (M)</option>
+            <option value="large">Grande (G)</option>
+            <option value="giant">Gigante (GG)</option>
           </select>
 
-          {/* Sexo (Brindes: Laços & Gravatas) */}
+          {/* Sexo (Macho / Fêmea) */}
           <select
             value={sexFilter}
             onChange={e => setSexFilter(e.target.value)}
             className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
-            title="Filtrar por sexo (auxílio para separação de brindes)"
+            title="Filtrar por sexo (Macho / Fêmea)"
           >
-            <option value="all">Sexo (Brindes)</option>
-            <option value="male">♂ Macho (Gravatas)</option>
-            <option value="female">♀ Fêmea (Laços)</option>
+            <option value="all">Macho e Fêmea</option>
+            <option value="male">♂ Somente Machos</option>
+            <option value="female">♀ Somente Fêmeas</option>
+          </select>
+
+          {/* Filtro de Frequência / Retorno */}
+          <select
+            value={inactivityFilter}
+            onChange={e => setInactivityFilter(e.target.value)}
+            className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+          >
+            <option value="all">Frequência / Retorno</option>
+            <option value="15plus">Ausentes há +15 dias</option>
+            <option value="30plus">Ausentes há +30 dias</option>
+            <option value="with_package">Com pacote ativo</option>
+            <option value="never">Sem atendimento registrado</option>
           </select>
 
           {/* Status da Vacina */}
@@ -830,7 +1038,7 @@ export default function PetshopPetsPage() {
           )}
 
           {/* Botão Limpar Filtros */}
-          {(search || speciesFilter !== 'all' || sizeFilter !== 'all' || sexFilter !== 'all' || vaccineStatusFilter !== 'all') && (
+          {(search || speciesFilter !== 'all' || sizeFilter !== 'all' || sexFilter !== 'all' || vaccineStatusFilter !== 'all' || inactivityFilter !== 'all') && (
             <button
               type="button"
               onClick={() => {
@@ -839,6 +1047,7 @@ export default function PetshopPetsPage() {
                 setSizeFilter('all');
                 setSexFilter('all');
                 setVaccineStatusFilter('all');
+                setInactivityFilter('all');
               }}
               className="flex h-10 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs font-semibold text-teal-800 hover:bg-teal-100 transition cursor-pointer"
             >
@@ -849,7 +1058,196 @@ export default function PetshopPetsPage() {
         </div>
       </section>
 
-      {/* 4. Tabela de Pets Cadastrados */}
+      {/* 4. Aba de Relatório Consolidado de Pets & Clientes */}
+      {viewMode === 'report' ? (
+        <div className="space-y-5">
+          {/* Cards de Distribuição do Relatório (Macho/Fêmea, Porte, Pacotes e Ausentes) */}
+          <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                Distribuição por Sexo
+              </span>
+              <div className="mt-2 flex items-center justify-between">
+                <div>
+                  <span className="text-xl font-bold text-sky-700">♂ {reportSummary.males}</span>
+                  <p className="text-[11px] text-zinc-500">Machos (Gravatas)</p>
+                </div>
+                <div className="h-8 w-px bg-zinc-200" />
+                <div className="text-right">
+                  <span className="text-xl font-bold text-pink-600">♀ {reportSummary.females}</span>
+                  <p className="text-[11px] text-zinc-500">Fêmeas (Laços)</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                Distribuição por Porte
+              </span>
+              <div className="mt-2 flex items-center justify-between text-xs">
+                <div>
+                  <strong className="block text-base font-bold text-zinc-900">{reportSummary.smallCount}</strong>
+                  <span className="text-zinc-500">Mini / P</span>
+                </div>
+                <div>
+                  <strong className="block text-base font-bold text-teal-700">{reportSummary.mediumCount}</strong>
+                  <span className="text-zinc-500">Médio (M)</span>
+                </div>
+                <div>
+                  <strong className="block text-base font-bold text-amber-700">{reportSummary.largeCount}</strong>
+                  <span className="text-zinc-500">Grande / GG</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
+                Tutores & Pacotes Ativos
+              </span>
+              <div className="mt-2 flex items-baseline justify-between">
+                <div>
+                  <strong className="text-xl font-bold text-zinc-900">{reportSummary.totalTutors}</strong>
+                  <p className="text-[11px] text-zinc-500">Tutores no filtro</p>
+                </div>
+                <div className="text-right">
+                  <strong className="text-xl font-bold text-emerald-700">{reportSummary.withPackage}</strong>
+                  <p className="text-[11px] text-zinc-500">Pets com pacote</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-4 shadow-2xs">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-amber-800">
+                Alerta de Retorno (+15 dias)
+              </span>
+              <div className="mt-2 flex items-center justify-between">
+                <div>
+                  <strong className="text-2xl font-bold text-amber-950">{reportSummary.inactive15Plus}</strong>
+                  <p className="text-[11px] text-amber-800">Pets sem agendar há 15+ dias</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInactivityFilter(inactivityFilter === '15plus' ? 'all' : '15plus')}
+                  className="rounded-xl bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700 cursor-pointer"
+                >
+                  {inactivityFilter === '15plus' ? 'Ver Todos' : 'Filtrar Ausentes'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Tabela Completa do Relatório de Pets & Clientes */}
+          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xs">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-bold uppercase tracking-wider text-zinc-600">
+                  <tr>
+                    <th className="px-4 py-3.5">Pet / Raça</th>
+                    <th className="px-4 py-3.5">Sexo & Porte</th>
+                    <th className="px-4 py-3.5">Tutor & Contato</th>
+                    <th className="px-4 py-3.5">Endereço Cadastrado</th>
+                    <th className="px-4 py-3.5 text-center">Visitas</th>
+                    <th className="px-4 py-3.5">Último Atendimento / Dias</th>
+                    <th className="px-4 py-3.5">Modalidade / Pacote</th>
+                    <th className="px-4 py-3.5 text-right">Ação Rápida</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-zinc-100">
+                  {filteredPets.map(pet => {
+                    const { days, lastDateStr } = getDaysSinceLastVisit(pet);
+                    const activePkg = pet.petPackages?.[0];
+                    return (
+                      <tr key={pet.id} className="hover:bg-zinc-50/80 transition">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2.5">
+                            <PetAvatar pet={pet} size="sm" />
+                            <div>
+                              <strong className="block text-xs font-bold text-zinc-900">{pet.name}</strong>
+                              <span className="text-[11px] text-zinc-500">
+                                {speciesLabel(pet.species)} · {pet.breed || 'SRD'}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {pet.sex === 'male' ? (
+                              <span className="rounded-md bg-sky-50 border border-sky-200 px-2 py-0.5 text-[11px] font-bold text-sky-700">
+                                ♂ Macho
+                              </span>
+                            ) : pet.sex === 'female' ? (
+                              <span className="rounded-md bg-pink-50 border border-pink-200 px-2 py-0.5 text-[11px] font-bold text-pink-700">
+                                ♀ Fêmea
+                              </span>
+                            ) : (
+                              <span className="text-zinc-400">—</span>
+                            )}
+                            <span className={`rounded-md border px-2 py-0.5 text-[11px] font-semibold ${sizeBadgeStyle(pet.size)}`}>
+                              {shortSizeLabel(pet.size)}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3">
+                          <strong className="block text-zinc-900">{pet.customer?.name}</strong>
+                          <span className="text-[11px] text-zinc-500">{pet.customer?.phone}</span>
+                        </td>
+                        <td className="px-4 py-3 max-w-[220px]">
+                          {pet.customer?.address ? (
+                            <span className="line-clamp-2 text-zinc-700" title={pet.customer.address}>
+                              {pet.customer.address}
+                            </span>
+                          ) : (
+                            <span className="text-[11px] italic text-amber-700">Sem endereço</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-center font-bold text-zinc-800">
+                          {pet._count?.appointments ?? 0}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {lastDateStr ? (
+                            <div>
+                              <span className="block font-medium text-zinc-800">{lastDateStr}</span>
+                              {days !== null && days >= 15 ? (
+                                <span className="inline-block mt-0.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
+                                  Há {days} dias sem vir
+                                </span>
+                              ) : days !== null && days > 0 ? (
+                                <span className="text-[11px] text-emerald-700 font-medium">Há {days} dia(s)</span>
+                              ) : (
+                                <span className="text-[11px] text-teal-700 font-semibold">Agendado / Recente</span>
+                              )}
+                            </div>
+                          ) : (
+                            <span className="text-zinc-400">Sem histórico</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {activePkg ? (
+                            <span className="inline-flex items-center gap-1 rounded-full bg-teal-50 border border-teal-200 px-2.5 py-0.5 text-[11px] font-semibold text-teal-800">
+                              <PackageCheck size={12} /> {activePkg.planNameSnapshot}
+                            </span>
+                          ) : (
+                            <span className="text-zinc-500">Cliente Avulso</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <button
+                            type="button"
+                            onClick={() => navigate(`/petshop/agenda?new=1&petId=${pet.id}`)}
+                            className="rounded-lg bg-teal-700 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-teal-800 cursor-pointer"
+                          >
+                            + Agendar
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : (
       <section className="pc-panel rounded-2xl border border-zinc-200 bg-white shadow-xs min-h-[300px]" aria-label="Tabela de pets">
         {loading ? (
           <ListSkeleton rows={5} />
@@ -1101,6 +1499,7 @@ export default function PetshopPetsPage() {
           </div>
         )}
       </section>
+      )}
 
       {/* 5. MODAL / DRAWER DA FICHA COMPLETA, HISTÓRICO E CARTEIRINHA */}
       {selectedPet && (

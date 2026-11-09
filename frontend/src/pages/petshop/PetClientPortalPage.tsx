@@ -1,24 +1,39 @@
 import { uniqueStagePhotos } from './appointment-media';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AlertCircle,
   BellRing,
+  Calendar,
+  CalendarCheck2,
   CalendarDays,
   Camera,
+  Car,
+  Check,
   CheckCircle2,
   Clock3,
   Download,
+  ExternalLink,
   Heart,
+  Info,
+  MapPin,
+  Package,
   PawPrint,
   RefreshCw,
   Scissors,
+  Search,
   ShieldCheck,
+  Sparkles,
   Syringe,
   UserRound,
+  X,
+  XCircle,
+  Loader2,
 } from 'lucide-react';
+import { toast } from 'sonner';
 import { useParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
-import { money, resolveAppointmentStages, resolveAppointmentSteps, type StageHistoryEntry } from './types';
+import { resolveAppointmentSteps, type StageHistoryEntry } from './types';
 import { inputClass, labelClass, PetAvatar, PetHeroShowcase, primaryButton } from './ui';
 import './petshop.css';
 
@@ -48,7 +63,7 @@ function playReadyChime() {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
     if (!AudioCtx) return;
     const ctx = new AudioCtx();
-    const notes = [523.25, 659.25, 783.99, 1046.5]; // C5, E5, G5, C6
+    const notes = [523.25, 659.25, 783.99, 1046.5];
     notes.forEach((freq, idx) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
@@ -62,9 +77,41 @@ function playReadyChime() {
       osc.start(ctx.currentTime + idx * 0.12);
       osc.stop(ctx.currentTime + idx * 0.12 + 0.36);
     });
-  } catch {
-    // Ignorado caso o navegador bloqueie autoplay de áudio
+  } catch {}
+}
+
+function resolvePortalServicePrice(service: any, pet?: any): { price: number; durationMinutes: number } {
+  const basePrice = Number(service?.price || 0);
+  const baseDuration = Number(service?.durationMinutes || 60);
+  if (!pet || !Array.isArray(service?.pricingRules) || service.pricingRules.length === 0) {
+    return { price: basePrice, durationMinutes: baseDuration };
   }
+  const species = pet.species || 'all';
+  const size = pet.size || 'all';
+  const coatType = pet.coatType || 'all';
+  let bestRule: any = null;
+  let bestScore = -1;
+  for (const r of service.pricingRules) {
+    const spOk = r.species === 'all' || r.species === species;
+    const szOk = r.size === 'all' || r.size === size;
+    const ctOk = r.coatType === 'all' || r.coatType === coatType;
+    if (!spOk || !szOk || !ctOk) continue;
+    let score = 0;
+    if (r.size === size && size !== 'all') score += 4;
+    if (r.coatType === coatType && coatType !== 'all') score += 2;
+    if (r.species === species && species !== 'all') score += 1;
+    if (score > bestScore) {
+      bestScore = score;
+      bestRule = r;
+    }
+  }
+  if (bestRule) {
+    return {
+      price: Number(bestRule.price ?? basePrice),
+      durationMinutes: Number(bestRule.durationMinutes || baseDuration),
+    };
+  }
+  return { price: basePrice, durationMinutes: baseDuration };
 }
 
 function formatTime(value?: string | null) {
@@ -83,7 +130,28 @@ export default function PetClientPortalPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [lightboxPhoto, setLightboxPhoto] = useState<{ url: string; caption?: string; petName: string } | null>(null);
-  const [form, setForm] = useState({ petId: '', startsAt: '', serviceIds: [] as string[], notes: '' });
+  const [activeTab, setActiveTab] = useState<'schedule' | 'appointments' | 'pets' | 'packages'>('schedule');
+  const [serviceSearch, setServiceSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('all');
+
+  // Estado do formulário de agendamento
+  const [form, setForm] = useState({
+    petId: '',
+    startsAt: '',
+    serviceIds: [] as string[],
+    transport: false,
+    transportType: 'round_trip', // round_trip, pickup_only, dropoff_only
+    notes: '',
+  });
+
+  // Modais de cancelamento e reagendamento pelo cliente tutor
+  const [clientCancelModal, setClientCancelModal] = useState<any | null>(null);
+  const [clientCancelReason, setClientCancelReason] = useState('');
+  const [clientCancelSaving, setClientCancelSaving] = useState(false);
+
+  const [clientRescheduleModal, setClientRescheduleModal] = useState<any | null>(null);
+  const [clientRescheduleStartsAt, setClientRescheduleStartsAt] = useState('');
+  const [clientRescheduleSaving, setClientRescheduleSaving] = useState(false);
 
   const previousStatusesRef = useRef<Record<string, string>>({});
   const token = new URLSearchParams(window.location.hash.replace(/^#/, '')).get('token') || '';
@@ -102,7 +170,7 @@ export default function PetClientPortalPage() {
         } as any);
         const payload = response.data;
 
-        // Detecta se algum pet acabou de mudar para "ready" (Pronto para buscar)
+        // Notificação sonora caso algum pet fique pronto
         const appointments: any[] = payload.appointments || [];
         appointments.forEach(app => {
           const prev = previousStatusesRef.current[app.id];
@@ -141,25 +209,138 @@ export default function PetClientPortalPage() {
     void load(false);
   }, [load]);
 
-  // Atualização em tempo real automática a cada 12s enquanto a aba estiver visível
+  // Atualização em tempo real a cada 15s
   useEffect(() => {
     if (!token) return;
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
         void load(true);
       }
-    }, 12_000);
+    }, 15_000);
     return () => clearInterval(interval);
   }, [load, token]);
 
+  const selectedPet = useMemo(() => {
+    if (!data?.customer?.pets?.length) return null;
+    return data.customer.pets.find((p: any) => p.id === form.petId) || data.customer.pets[0];
+  }, [data, form.petId]);
+
+  // Checa se o pet selecionado tem pacote ativo com sessões disponíveis
+  const activePackageForSelectedPet = useMemo(() => {
+    if (!data?.packages?.length || !selectedPet) return null;
+    return data.packages.find((pkg: any) => pkg.petId === selectedPet.id && pkg.status === 'active');
+  }, [data, selectedPet]);
+
+  // Verifica se um serviço específico é coberto pelo pacote ativo do pet
+  const isServiceCoveredByPackage = useCallback(
+    (serviceId: string) => {
+      if (!activePackageForSelectedPet?.items?.length) return false;
+      const item = activePackageForSelectedPet.items.find((i: any) => i.serviceId === serviceId);
+      return item && item.totalQty > item.usedQty;
+    },
+    [activePackageForSelectedPet],
+  );
+
+  const categories = useMemo(() => {
+    if (!data?.services?.length) return [];
+    const set = new Set<string>();
+    data.services.forEach((s: any) => {
+      if (s.category) set.add(s.category);
+    });
+    return Array.from(set);
+  }, [data]);
+
+  const filteredServices = useMemo(() => {
+    if (!data?.services?.length) return [];
+    return data.services.filter((svc: any) => {
+      const matchSearch =
+        !serviceSearch ||
+        svc.name.toLowerCase().includes(serviceSearch.toLowerCase()) ||
+        (svc.description && svc.description.toLowerCase().includes(serviceSearch.toLowerCase()));
+      const matchCat = categoryFilter === 'all' || svc.category === categoryFilter;
+      return matchSearch && matchCat;
+    });
+  }, [data, serviceSearch, categoryFilter]);
+
+  const liveAppointments = useMemo(
+    () => (data?.appointments || []).filter((item: any) => liveStatuses.has(item.status)),
+    [data],
+  );
+
+  const upcomingAppointments = useMemo(
+    () => (data?.appointments || []).filter((item: any) => !liveStatuses.has(item.status)),
+    [data],
+  );
+
+  // Cálculo do total estimado e duração dos serviços selecionados
+  const summaryEstimate = useMemo(() => {
+    if (!data?.services?.length || !form.serviceIds.length) {
+      return { total: 0, durationMinutes: 0, coveredCount: 0 };
+    }
+    let total = 0;
+    let durationMinutes = 0;
+    let coveredCount = 0;
+
+    data.services.forEach((svc: any) => {
+      if (form.serviceIds.includes(svc.id)) {
+        const resolved = resolvePortalServicePrice(svc, selectedPet);
+        durationMinutes += resolved.durationMinutes;
+        if (isServiceCoveredByPackage(svc.id)) {
+          coveredCount++;
+        } else {
+          total += resolved.price;
+        }
+      }
+    });
+
+    return { total, durationMinutes, coveredCount };
+  }, [data, form.serviceIds, selectedPet, isServiceCoveredByPackage]);
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (!form.petId) {
+      setError('Por favor, selecione o pet.');
+      return;
+    }
+    if (!form.serviceIds.length) {
+      setError('Por favor, selecione ao menos um serviço para o atendimento.');
+      return;
+    }
+    if (!form.startsAt) {
+      setError('Por favor, informe a data e horário desejados.');
+      return;
+    }
+    if (form.transport && !data.customer?.address?.trim()) {
+      setError('Para solicitar Táxi Dog, confirme primeiro seu endereço com o pet shop.');
+      return;
+    }
+
     setSending(true);
     setError('');
+
+    // Prepara as notas com transporte se flegado
+    let compiledNotes = form.notes.trim();
+    if (form.transport) {
+      const transportLabels: Record<string, string> = {
+        round_trip: 'Buscar e Levar (Ida e Volta)',
+        pickup_only: 'Apenas Buscar no Tutor',
+        dropoff_only: 'Apenas Levar para Casa',
+      };
+      const clientAddr = data.customer?.address || 'Endereço a confirmar';
+      const transportNote = `[Solicitado Táxi Dog: ${transportLabels[form.transportType] || 'Sim'} · Endereço: ${clientAddr}]`;
+      compiledNotes = compiledNotes ? `${compiledNotes}\n${transportNote}` : transportNote;
+    }
+
     try {
       await api.post(
         `/petshop/public/${shopId}/appointments`,
-        { ...form, startsAt: new Date(form.startsAt).toISOString() },
+        {
+          petId: form.petId,
+          serviceIds: form.serviceIds,
+          startsAt: new Date(form.startsAt).toISOString(),
+          notes: compiledNotes,
+          transport: form.transport ? { enabled: true, mode: form.transportType, address: data.customer?.address || '' } : undefined,
+        },
         { headers: { 'X-Pet-Portal-Token': token }, skipAuthRedirect: true } as any,
       );
       setSent(true);
@@ -171,15 +352,58 @@ export default function PetClientPortalPage() {
     }
   };
 
-  const liveAppointments = useMemo(
-    () => (data?.appointments || []).filter((item: any) => liveStatuses.has(item.status)),
-    [data],
-  );
+  const handleSelectDay = (offsetDays: number) => {
+    const d = new Date();
+    d.setDate(d.getDate() + offsetDays);
+    d.setHours(9, 0, 0, 0);
+    // Formata para YYYY-MM-DDTHH:mm
+    const tzOffset = d.getTimezoneOffset() * 60000;
+    const localISOTime = new Date(d.getTime() - tzOffset).toISOString().slice(0, 16);
+    setForm(prev => ({ ...prev, startsAt: localISOTime }));
+  };
 
-  const upcomingAppointments = useMemo(
-    () => (data?.appointments || []).filter((item: any) => !liveStatuses.has(item.status)),
-    [data],
-  );
+  const handleClientCancelConfirm = async () => {
+    if (!clientCancelModal) return;
+    setClientCancelSaving(true);
+    try {
+      await api.patch(
+        `/petshop/public/${shopId}/appointments/${clientCancelModal.id}/cancel`,
+        { reason: clientCancelReason.trim() || 'Cancelado pelo tutor via portal' },
+        { headers: { 'X-Pet-Portal-Token': token }, skipAuthRedirect: true } as any,
+      );
+      toast.success('Agendamento cancelado com sucesso.');
+      setClientCancelModal(null);
+      setClientCancelReason('');
+      await load(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Erro ao cancelar agendamento.');
+    } finally {
+      setClientCancelSaving(false);
+    }
+  };
+
+  const handleClientRescheduleConfirm = async () => {
+    if (!clientRescheduleModal || !clientRescheduleStartsAt) {
+      toast.error('Selecione uma nova data e horário.');
+      return;
+    }
+    setClientRescheduleSaving(true);
+    try {
+      await api.patch(
+        `/petshop/public/${shopId}/appointments/${clientRescheduleModal.id}/reschedule`,
+        { startsAt: new Date(clientRescheduleStartsAt).toISOString() },
+        { headers: { 'X-Pet-Portal-Token': token }, skipAuthRedirect: true } as any,
+      );
+      toast.success('Horário reagendado com sucesso!');
+      setClientRescheduleModal(null);
+      setClientRescheduleStartsAt('');
+      await load(true);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Erro ao reagendar horário.');
+    } finally {
+      setClientRescheduleSaving(false);
+    }
+  };
 
   if (error && !data) {
     return (
@@ -205,10 +429,10 @@ export default function PetClientPortalPage() {
   }
 
   return (
-    <div className="petcare-shell min-h-screen">
-      {/* Cabeçalho da Loja */}
+    <div className="petcare-shell min-h-screen pb-16">
+      {/* 1. Header do Pet Shop */}
       <header className="sticky top-0 z-30 border-b border-[var(--pc-border)] bg-white/95 backdrop-blur">
-        <div className="mx-auto flex min-h-16 max-w-6xl items-center justify-between gap-3 px-4 sm:px-6">
+        <div className="mx-auto flex min-h-16 max-w-5xl items-center justify-between gap-3 px-4 sm:px-6">
           <div className="flex items-center gap-3">
             {data.shop.logoUrl ? (
               <img
@@ -216,436 +440,816 @@ export default function PetClientPortalPage() {
                 alt={`Logo de ${data.shop.name}`}
                 width={40}
                 height={40}
-                className="h-10 w-10 rounded-lg object-contain"
+                className="h-10 w-10 rounded-xl object-contain border border-zinc-200"
               />
             ) : (
               <div
                 aria-hidden="true"
-                className="grid h-10 w-10 place-items-center rounded-lg bg-[var(--pc-text)] text-white"
+                className="grid h-10 w-10 place-items-center rounded-xl bg-teal-800 text-white font-bold"
               >
-                <PawPrint size={19} />
+                <PawPrint size={20} />
               </div>
             )}
             <div>
-              <p className="text-sm font-semibold">{data.shop.name}</p>
-              <p className="flex items-center gap-1.5 text-xs text-[var(--pc-text-muted)]">
-                <span className="inline-block h-2 w-2 rounded-full bg-[var(--pc-success)]" />
-                Área do Tutor · Atualização em tempo real
+              <p className="text-sm font-bold text-zinc-900 leading-tight">{data.shop.name}</p>
+              <p className="flex items-center gap-1.5 text-xs text-zinc-500 font-medium">
+                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                Agendamento Online
               </p>
             </div>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void load(false)}
-            disabled={refreshing}
-            className="flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--pc-border-strong)] bg-white px-3 text-xs font-semibold text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)]"
-          >
-            <RefreshCw size={14} className={refreshing ? 'animate-spin text-[var(--pc-action)]' : ''} />
-            <span className="hidden sm:inline">Atualizar</span>
-            {lastUpdated && (
-              <span className="text-[11px] font-normal text-[var(--pc-text-muted)]">
-                {formatTime(lastUpdated.toISOString())}
-              </span>
-            )}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void load(false)}
+              disabled={refreshing}
+              title="Atualizar dados"
+              className="flex min-h-9 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+            >
+              <RefreshCw size={13} className={refreshing ? 'animate-spin text-teal-700' : ''} />
+              <span className="hidden sm:inline">Atualizar</span>
+              {lastUpdated && (
+                <span className="text-[11px] font-normal text-zinc-400">
+                  {formatTime(lastUpdated.toISOString())}
+                </span>
+              )}
+            </button>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-        {/* Boas-vindas */}
-        <div className="mb-6 flex flex-col gap-4 overflow-hidden rounded-2xl border border-[var(--pc-border)] bg-gradient-to-r from-white via-[#f9fcfb] to-[#eaf4f1] px-5 py-5 shadow-2xs sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div>
-            <p className="text-sm font-medium text-[var(--pc-action)]">Olá, {data.customer.name.split(' ')[0]}!</p>
-            <h1 className="mt-1 text-2xl font-semibold tracking-[-0.025em]">Acompanhamento dos seus pets</h1>
-            <p className="mt-1 text-sm text-[var(--pc-text-secondary)]">
-              Acompanhe cada etapa do atendimento ao vivo, veja as fotos enviadas e consulte a carteira de vacinação.
-            </p>
-          </div>
-          <PetHeroShowcase compact />
-        </div>
-
-        {/* DESTAQUE: ACOMPANHAMENTO AO VIVO DO PET (Quando há pet em atendimento ou pronto hoje) */}
+      <main className="mx-auto max-w-5xl px-4 py-5 sm:px-6">
+        {/* 2. Banner de Acompanhamento ao Vivo Simplificado (Apenas se houver pet hoje) */}
         {liveAppointments.length > 0 && (
-          <section className="mb-8 space-y-5" aria-label="Acompanhamento em tempo real">
-            {liveAppointments.map((appointment: any) => {
-              const rawSteps = resolveAppointmentSteps(appointment);
+          <section className="mb-5 space-y-2.5" aria-label="Status do atendimento de hoje">
+            {liveAppointments.map((app: any) => {
+              const isReady = app.status === 'ready';
+              const rawSteps = resolveAppointmentSteps(app);
               const appointmentSteps = rawSteps.map(s => {
                 const defaultTrack = trackerSteps.find(t => t.key === s.key);
                 return {
                   key: s.key,
                   label: s.label || defaultTrack?.label || s.key,
-                  shortDesc: defaultTrack?.shortDesc || 'Etapa do atendimento',
                 };
               });
-              const currentStepIndex = appointmentSteps.findIndex(s => s.key === appointment.status);
-              const isReady = appointment.status === 'ready';
-              const history: StageHistoryEntry[] = Array.isArray(appointment.stageHistory)
-                ? appointment.stageHistory
-                : [];
-              const photosFromHistory = uniqueStagePhotos(history);
+              const currentStepIndex = appointmentSteps.findIndex(s => s.key === app.status);
 
               return (
-                <article
-                  key={appointment.id}
-                  className={`overflow-hidden rounded-2xl border-2 bg-white shadow-sm transition-all ${
+                <div
+                  key={app.id}
+                  className={`rounded-2xl border p-3.5 sm:p-4 transition-all shadow-xs ${
                     isReady
-                      ? 'border-[var(--pc-success)] ring-4 ring-[var(--pc-success)]/10'
-                      : 'border-[var(--pc-action)]/40'
+                      ? 'border-emerald-300 bg-emerald-50/80 text-emerald-950'
+                      : 'border-teal-200 bg-teal-50/60 text-teal-950'
                   }`}
                 >
-                  {/* Banner Superior de Pronto para Buscar ou Ao Vivo */}
-                  <div
-                    className={`flex flex-wrap items-center justify-between gap-3 px-5 py-3.5 ${
-                      isReady
-                        ? 'bg-[var(--pc-success)] text-white'
-                        : 'bg-gradient-to-r from-[#0f766e] to-[#115e59] text-white'
-                    }`}
-                  >
-                    <div className="flex min-w-0 items-center gap-2.5">
-                      {isReady ? (
-                        <BellRing aria-hidden="true" size={20} className="shrink-0" />
-                      ) : (
-                        <Clock3 aria-hidden="true" size={19} className="shrink-0" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wider opacity-90">
-                          {isReady ? 'Atendimento Concluído!' : 'Acompanhamento Ao Vivo'}
-                        </p>
-                        <h2 className="petcare-live-status-title mt-0.5 text-base font-semibold sm:text-lg">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <PetAvatar pet={app.pet} size="md" />
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-bold ${
+                              isReady ? 'bg-emerald-600 text-white' : 'bg-teal-700 text-white'
+                            }`}
+                          >
+                            {isReady ? <BellRing size={12} /> : <Clock3 size={12} />}
+                            {isReady ? app.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(app.transport.mode) ? 'Pronto para entrega!' : 'Pronto para buscar!' : appointmentStatus[app.status] || 'Em atendimento'}
+                          </span>
+                          <span className="text-xs text-zinc-500 font-medium">
+                            Início às {formatTime(app.startsAt)}
+                          </span>
+                        </div>
+                        <h2 className="text-sm font-bold text-zinc-900 mt-0.5">
                           {isReady
-                            ? `${appointment.pet.name} já está pronto(a)! Você já pode vir buscar!`
-                            : `${appointment.pet.name} está: ${appointmentStatus[appointment.status]}`}
+                            ? app.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(app.transport.mode)
+                              ? `✨ ${app.pet.name} está prontinho(a)! Avisaremos quando o Táxi Dog sair para a entrega.`
+                              : `✨ ${app.pet.name} está prontinho(a)! Você já pode vir buscar!`
+                            : `🐾 ${app.pet.name} está sendo cuidado(a) com muito carinho.`}
                         </h2>
-                      </div>
-                    </div>
-                    <span className="rounded-full bg-white/20 px-3 py-1 text-xs font-semibold backdrop-blur-xs">
-                      Início às {formatTime(appointment.startsAt)}
-                    </span>
-                  </div>
-
-                  <div className="p-5 sm:p-6">
-                    {/* Identificação do Pet e Serviços */}
-                    <div className="flex flex-col gap-4 border-b border-[var(--pc-border)] pb-5 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex items-center gap-3.5">
-                        <PetAvatar pet={appointment.pet} size="lg" />
-                        <div>
-                          <h3 className="text-base font-semibold text-[var(--pc-text)]">{appointment.pet.name}</h3>
-                          <p className="text-xs text-[var(--pc-text-secondary)]">
-                            {appointment.services.map((s: any) => s.nameSnapshot).join(' + ')}
-                          </p>
-                          {appointment.professional?.name && (
-                            <p className="mt-1 flex items-center gap-1 text-xs text-[var(--pc-text-muted)]">
-                              <UserRound size={13} /> Cuidado por <strong>{appointment.professional.name}</strong>
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      <div className="rounded-xl bg-[var(--pc-surface-subtle)] px-4 py-2.5 text-right">
-                        <span className="block text-[11px] text-[var(--pc-text-muted)]">Total dos serviços</span>
-                        <strong className="text-base font-semibold text-[var(--pc-text)]">
-                          {money(
-                            appointment.services.reduce(
-                              (sum: number, s: any) => sum + Number(s.priceSnapshot || 0),
-                              0,
-                            ),
-                          )}
-                        </strong>
+                        <p className="text-xs text-zinc-600">
+                          {app.services.map((s: any) => s.nameSnapshot).join(' + ')}
+                          {app.transport?.enabled && ' · 🚐 Com Táxi Dog'}
+                        </p>
                       </div>
                     </div>
 
-                    {/* Stepper de Etapas Ao Vivo */}
-                    <div className="mt-6">
-                      <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-[var(--pc-text-muted)]">
-                        Progresso do Atendimento
-                      </p>
-                      <ol
-                        className="grid gap-2.5"
-                        style={{ gridTemplateColumns: `repeat(${appointmentSteps.length}, minmax(0, 1fr))` }}
+                    {/* Botão de Foto se enviada */}
+                    {app.stagePhotoUrl && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setLightboxPhoto({
+                            url: getFullUrl(app.stagePhotoUrl),
+                            caption: app.stageNotes,
+                            petName: app.pet.name,
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 self-start sm:self-center rounded-xl bg-white border border-teal-200 px-3 py-1.5 text-xs font-semibold text-teal-800 shadow-2xs hover:bg-teal-50 transition"
                       >
-                        {appointmentSteps.map((step, index) => {
-                          const completed = index < currentStepIndex || isReady;
-                          const active = index === currentStepIndex;
-                          const historyEntry = [...history].reverse().find(h => h.status === step.key);
-
-                          return (
-                            <li
-                              key={step.key}
-                              className={`relative flex items-start gap-3 rounded-xl border p-3 transition sm:flex-col sm:gap-2 ${
-                                active
-                                  ? isReady
-                                    ? 'border-[var(--pc-success)] bg-[var(--pc-success-soft)]'
-                                    : 'border-[var(--pc-action)] bg-[var(--pc-action-soft)] ring-2 ring-[var(--pc-action)]/15'
-                                  : completed
-                                    ? 'border-[var(--pc-action)]/30 bg-[#f6fbf9]'
-                                    : 'border-[var(--pc-border)] bg-[var(--pc-surface-subtle)]/60 opacity-65'
-                              }`}
-                            >
-                              <div className="contents sm:flex sm:w-full sm:items-center sm:justify-between sm:gap-2">
-                                <span
-                                  className={`grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-bold ${
-                                    active
-                                      ? isReady
-                                        ? 'bg-[var(--pc-success)] text-white'
-                                        : 'bg-[var(--pc-action)] text-white'
-                                      : completed
-                                        ? 'bg-[var(--pc-action)] text-white'
-                                        : 'bg-white text-[var(--pc-text-muted)] border border-[var(--pc-border-strong)]'
-                                  }`}
-                                >
-                                  {completed && !active ? '✓' : index + 1}
-                                </span>
-                                {historyEntry?.at && (
-                                  <span className="hidden text-[11px] font-medium tabular-nums text-[var(--pc-text-muted)] sm:inline-block">
-                                    {formatTime(historyEntry.at)}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="min-w-0 flex-1">
-                                <div className="flex min-w-0 items-center justify-between gap-2">
-                                  <p className="min-w-0 text-xs font-semibold text-[var(--pc-text)]">{step.label}</p>
-                                  {historyEntry?.at && (
-                                    <span className="shrink-0 text-[11px] font-medium tabular-nums text-[var(--pc-text-muted)] sm:hidden">
-                                      {formatTime(historyEntry.at)}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="mt-0.5 text-[11px] leading-4 text-[var(--pc-text-secondary)]">
-                                  {step.shortDesc}
-                                </p>
-                              </div>
-                            </li>
-                          );
-                        })}
-                      </ol>
-                    </div>
-
-                    {/* Foto e Recado da Etapa enviadas pela equipe */}
-                    {(appointment.stagePhotoUrl || appointment.stageNotes) && (
-                      <div className="mt-6 overflow-hidden rounded-2xl border border-[var(--pc-action)]/25 bg-gradient-to-br from-[#f4fbf9] via-white to-[#eaf4f1] p-4 sm:p-5">
-                        <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
-                          {appointment.stagePhotoUrl && (
-                            <div className="relative shrink-0 overflow-hidden rounded-xl border border-[var(--pc-border)] bg-white shadow-xs sm:w-56">
-                              <img
-                                src={getFullUrl(appointment.stagePhotoUrl)}
-                                alt={`Foto de ${appointment.pet.name} no atendimento`}
-                                className="h-52 w-full cursor-pointer object-cover transition hover:scale-[1.02]"
-                                onClick={() =>
-                                  setLightboxPhoto({
-                                    url: getFullUrl(appointment.stagePhotoUrl),
-                                    caption: appointment.stageNotes,
-                                    petName: appointment.pet.name,
-                                  })
-                                }
-                              />
-                              <span className="absolute left-2.5 top-2.5 inline-flex items-center gap-1 rounded-full bg-black/65 px-2.5 py-1 text-[11px] font-semibold text-white backdrop-blur-xs">
-                                <Camera size={12} /> Registro da etapa
-                              </span>
-                            </div>
-                          )}
-
-                          <div className="min-w-0 flex-1 space-y-2.5">
-                            <div className="inline-flex items-center gap-1.5 rounded-full bg-[var(--pc-action-soft)] px-3 py-1 text-xs font-semibold text-[var(--pc-action-hover)]">
-                              <Heart size={13} className="fill-current" /> Momento do seu pet
-                            </div>
-                            <h4 className="text-base font-semibold text-[var(--pc-text)]">
-                              Veja como {appointment.pet.name} está sendo cuidado(a)!
-                            </h4>
-                            {appointment.stageNotes ? (
-                              <blockquote className="rounded-xl border border-[var(--pc-border)] bg-white p-3.5 text-sm italic leading-6 text-[var(--pc-text-secondary)]">
-                                “{appointment.stageNotes}”
-                              </blockquote>
-                            ) : (
-                              <p className="text-xs text-[var(--pc-text-secondary)]">
-                                Nossa equipe enviou este registro especial durante a etapa de{' '}
-                                <strong>{appointmentStatus[appointment.status]?.toLowerCase()}</strong>.
-                              </p>
-                            )}
-
-                            {appointment.stagePhotoUrl && (
-                              <div className="flex flex-wrap items-center gap-2 pt-1">
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setLightboxPhoto({
-                                      url: getFullUrl(appointment.stagePhotoUrl),
-                                      caption: appointment.stageNotes,
-                                      petName: appointment.pet.name,
-                                    })
-                                  }
-                                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--pc-action)] px-3.5 text-xs font-semibold text-white transition hover:bg-[var(--pc-action-hover)]"
-                                >
-                                  <Camera size={14} /> Ampliar foto
-                                </button>
-                                <a
-                                  href={getFullUrl(appointment.stagePhotoUrl)}
-                                  download={`foto-${appointment.pet.name.toLowerCase()}.webp`}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-[var(--pc-border-strong)] bg-white px-3.5 text-xs font-semibold text-[var(--pc-text)] transition hover:bg-[var(--pc-surface-subtle)]"
-                                >
-                                  <Download size={14} /> Salvar foto
-                                </a>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-
-                        {/* Galeria de fotos caso tenham enviado mais de uma foto ao longo das etapas */}
-                        {photosFromHistory.length > 1 && (
-                          <div className="mt-4 border-t border-[var(--pc-border)] pt-3">
-                            <p className="mb-2 text-xs font-semibold text-[var(--pc-text-secondary)]">
-                              Fotos enviadas hoje ({photosFromHistory.length})
-                            </p>
-                            <div className="flex gap-2 overflow-x-auto pb-1">
-                              {photosFromHistory.map((entry, idx) => (
-                                <button
-                                  key={`${entry.at}-${idx}`}
-                                  type="button"
-                                  onClick={() =>
-                                    setLightboxPhoto({
-                                      url: getFullUrl(entry.photoUrl!),
-                                      caption: entry.notes || undefined,
-                                      petName: appointment.pet.name,
-                                    })
-                                  }
-                                  className="group relative h-16 w-16 shrink-0 overflow-hidden rounded-lg border border-[var(--pc-border-strong)] bg-white shadow-xs"
-                                  title={entry.label || 'Foto da etapa'}
-                                >
-                                  <img
-                                    src={getFullUrl(entry.photoUrl!)}
-                                    alt=""
-                                    className="h-full w-full object-cover transition group-hover:scale-105"
-                                  />
-                                  {entry.label && (
-                                    <span className="absolute bottom-0 inset-x-0 bg-black/65 text-[8px] text-white text-center py-0.5 truncate px-0.5 font-semibold">
-                                      {entry.label}
-                                    </span>
-                                  )}
-                                </button>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                        <Camera size={13} />
+                        Ver foto enviada
+                      </button>
                     )}
                   </div>
-                </article>
+
+                  {/* Mini trilha de progresso discreta */}
+                  <div className="mt-3 pt-2.5 border-t border-black/5 flex items-center justify-between text-[11px] font-medium text-zinc-500">
+                    <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                      {appointmentSteps.map((st, idx) => {
+                        const isDone = idx < currentStepIndex || isReady;
+                        const isCurrent = idx === currentStepIndex && !isReady;
+                        return (
+                          <span
+                            key={st.key}
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-semibold whitespace-nowrap ${
+                              isCurrent
+                                ? 'bg-teal-700 text-white shadow-2xs'
+                                : isDone
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : 'bg-black/5 text-zinc-400'
+                            }`}
+                          >
+                            {isDone ? '✓ ' : ''}
+                            {st.label}
+                          </span>
+                        );
+                      })}
+                    </div>
+                    <span className="hidden sm:inline text-[11px] text-zinc-400">
+                      Avisos automáticos enviados no seu WhatsApp
+                    </span>
+                  </div>
+                </div>
               );
             })}
           </section>
         )}
 
-        <div className="grid min-w-0 gap-6 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start">
-          <div className="min-w-0 space-y-6">
-            {/* Meus Pets */}
-            <section aria-labelledby="pets-title">
-              <h2 id="pets-title" className="mb-3 text-base font-semibold">
-                {data?.shop?.modulos?.petshopVacinas !== false ? 'Meus pets e carteira de vacinação' : 'Meus pets cadastrados'}
-              </h2>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {data.customer.pets.map((pet: any) => (
-                  <article key={pet.id} className="pc-panel p-4 sm:p-5">
-                    <div className="flex items-center gap-3">
-                      <PetAvatar pet={pet} size="lg" />
-                      <div>
-                        <h3 className="text-sm font-semibold">{pet.name}</h3>
-                        <p className="mt-0.5 text-xs text-[var(--pc-text-muted)]">
-                          {pet.breed || (pet.species === 'cat' ? 'Gato' : 'Cachorro')}
-                          {pet.weight ? ` · ${Number(pet.weight)} kg` : ''}
-                        </p>
-                      </div>
-                    </div>
-                    {data?.shop?.modulos?.petshopVacinas !== false && (
-                      <div className="mt-4 border-t border-[var(--pc-border)] pt-4">
-                        <p className="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--pc-text-secondary)]">
-                          <Syringe aria-hidden="true" size={15} className="text-[var(--pc-action)]" />
-                          Carteira de vacinação
-                        </p>
-                        {pet.vaccinations.length ? (
-                          pet.vaccinations.slice(0, 4).map((vaccine: any) => (
-                            <div key={vaccine.id} className="flex items-start justify-between gap-3 py-1.5 text-xs">
-                              <span className="font-medium">{vaccine.vaccineName}</span>
-                              <span className="shrink-0 text-right text-[var(--pc-text-muted)]">
-                                {vaccine.nextDueAt
-                                  ? `Próxima: ${new Date(vaccine.nextDueAt).toLocaleDateString('pt-BR')}`
-                                  : vaccine.appliedAt
-                                    ? new Date(vaccine.appliedAt).toLocaleDateString('pt-BR')
-                                    : 'Registrada'}
-                              </span>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="text-xs leading-5 text-[var(--pc-text-muted)]">Nenhuma vacina registrada.</p>
-                        )}
-                      </div>
-                    )}
-                  </article>
-                ))}
-              </div>
-            </section>
+        {/* 3. Saudação & Apresentação */}
+        <div className="mb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-gradient-to-r from-teal-900 via-teal-800 to-teal-900 p-5 text-white shadow-xs">
+          <div>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-teal-700/60 border border-teal-500/30 px-3 py-1 text-xs font-semibold text-teal-100">
+              <Sparkles size={13} /> Área Exclusiva do Cliente
+            </span>
+            <h1 className="mt-2 text-xl sm:text-2xl font-bold tracking-tight">
+              Olá, {data.customer.name.split(' ')[0]}!
+            </h1>
+            <p className="mt-1 text-xs sm:text-sm text-teal-100/90 max-w-xl">
+              Agende os cuidados do seu pet com rapidez, consulte os serviços disponíveis e acompanhe seus horários.
+            </p>
+          </div>
 
-            {/* Próximos agendamentos */}
-            <section className="pc-panel overflow-hidden" aria-labelledby="appointments-title">
-              <div className="flex items-center gap-2 border-b border-[var(--pc-border)] px-4 py-4 sm:px-5">
-                <CalendarDays aria-hidden="true" size={17} className="text-[var(--pc-action)]" />
-                <h2 id="appointments-title" className="text-sm font-semibold">
-                  Próximos horários agendados
-                </h2>
+          <div className="flex items-center gap-2 self-start sm:self-center">
+            {data.packages?.length > 0 && (
+              <div className="rounded-xl bg-white/10 backdrop-blur-xs border border-white/15 px-3 py-2 text-right">
+                <span className="block text-[10px] uppercase font-bold text-teal-200">Seu Pacote Ativo</span>
+                <span className="text-xs font-semibold text-white">
+                  {data.packages[0]?.name || 'Plano de Cuidados'}
+                </span>
               </div>
+            )}
+          </div>
+        </div>
+
+        {/* 4. Abas Principais de Navegação (Cabe 100% no celular sem cortar) */}
+        <nav
+          className={`mb-6 grid gap-1.5 p-1.5 bg-zinc-100 rounded-2xl border border-zinc-200/80 ${
+            data.packages?.length > 0 ? 'grid-cols-4' : 'grid-cols-3'
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => setActiveTab('schedule')}
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-1.5 text-xs font-bold transition text-center cursor-pointer select-none ${
+              activeTab === 'schedule'
+                ? 'bg-teal-800 text-white shadow-xs'
+                : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/70'
+            }`}
+          >
+            <Calendar size={14} className="shrink-0" />
+            <span className="truncate">Agendar</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('appointments')}
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-1.5 text-xs font-bold transition text-center cursor-pointer select-none ${
+              activeTab === 'appointments'
+                ? 'bg-teal-800 text-white shadow-xs'
+                : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/70'
+            }`}
+          >
+            <CalendarCheck2 size={14} className="shrink-0" />
+            <span className="truncate">Horários</span>
+            {upcomingAppointments.length > 0 && (
+              <span
+                className={`rounded-full px-1.5 text-[9px] font-extrabold ${
+                  activeTab === 'appointments'
+                    ? 'bg-white text-teal-800'
+                    : 'bg-teal-100 text-teal-800'
+                }`}
+              >
+                {upcomingAppointments.length}
+              </span>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('pets')}
+            className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-1.5 text-xs font-bold transition text-center cursor-pointer select-none ${
+              activeTab === 'pets'
+                ? 'bg-teal-800 text-white shadow-xs'
+                : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/70'
+            }`}
+          >
+            <PawPrint size={14} className="shrink-0" />
+            <span className="truncate">Pets ({data.customer.pets.length})</span>
+          </button>
+
+          {data.packages?.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('packages')}
+              className={`flex items-center justify-center gap-1.5 rounded-xl py-2.5 px-1.5 text-xs font-bold transition text-center cursor-pointer select-none ${
+                activeTab === 'packages'
+                  ? 'bg-teal-800 text-white shadow-xs'
+                  : 'text-zinc-600 hover:text-zinc-900 hover:bg-zinc-200/70'
+              }`}
+            >
+              <Package size={14} className="shrink-0" />
+              <span className="truncate">Pacotes</span>
+            </button>
+          )}
+        </nav>
+
+        {/* 5. ABA 1: NOVO AGENDAMENTO (FOCO PRINCIPAL) */}
+        {activeTab === 'schedule' && (
+          <section aria-labelledby="schedule-heading">
+            {sent ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-6 sm:p-8 text-center animate-in fade-in duration-200 max-w-xl mx-auto shadow-sm">
+                <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl bg-emerald-600 text-white shadow-sm mb-3">
+                  <CheckCircle2 size={30} />
+                </div>
+                <h2 className="text-xl font-bold text-emerald-950">Solicitação Enviada com Sucesso!</h2>
+                <p className="mt-2 text-sm text-emerald-800 leading-relaxed">
+                  Recebemos seu pedido de agendamento para <strong>{selectedPet?.name}</strong>. Nossa equipe irá
+                  confirmar a disponibilidade e você receberá uma notificação pelo WhatsApp!
+                </p>
+
+                <div className="mt-5 rounded-xl border border-emerald-200 bg-white p-4 text-left text-xs space-y-1.5 shadow-2xs">
+                  <p className="text-zinc-500 font-semibold uppercase tracking-wider text-[10px]">Resumo do Pedido</p>
+                  <p className="text-zinc-900 font-medium">
+                    📅 <strong>Data e Hora:</strong>{' '}
+                    {form.startsAt ? new Date(form.startsAt).toLocaleString('pt-BR') : 'A definir'}
+                  </p>
+                  <p className="text-zinc-900 font-medium">
+                    🐾 <strong>Pet:</strong> {selectedPet?.name}
+                  </p>
+                  {form.transport && (
+                    <p className="text-amber-800 font-semibold">
+                      🚐 <strong>Com Táxi Dog Solicitado</strong>
+                    </p>
+                  )}
+                </div>
+
+                <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSent(false);
+                      setForm(prev => ({ ...prev, serviceIds: [], notes: '' }));
+                    }}
+                    className="rounded-xl bg-emerald-800 px-5 py-2.5 text-xs font-bold text-white shadow-xs hover:bg-emerald-900 transition cursor-pointer"
+                  >
+                    Agendar para outro Pet
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('appointments')}
+                    className="rounded-xl border border-emerald-300 bg-white px-5 py-2.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-50 transition cursor-pointer"
+                  >
+                    Ver Meus Horários
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <form onSubmit={submit} className="space-y-6">
+                {/* Passo 1: Seleção do Pet */}
+                <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 sm:p-5 shadow-xs">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h2 className="text-base font-bold text-zinc-900 flex items-center gap-2">
+                        <span className="grid h-6 w-6 place-items-center rounded-full bg-teal-800 text-white text-xs font-extrabold">
+                          1
+                        </span>
+                        Para qual pet é o agendamento?
+                      </h2>
+                      <p className="text-xs text-zinc-500 mt-0.5">
+                        Selecione o animal para agendamento dos cuidados
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                    {data.customer.pets.map((pet: any) => {
+                      const isSelected = form.petId === pet.id;
+                      const pkg = data.packages?.find(
+                        (p: any) => p.petId === pet.id && p.status === 'active',
+                      );
+                      const sizeLabels: Record<string, string> = {
+                        mini: 'Mini / Porte Pequeno',
+                        small: 'Porte Pequeno',
+                        medium: 'Porte Médio',
+                        large: 'Porte Grande',
+                        giant: 'Porte Gigante',
+                      };
+
+                      return (
+                        <div
+                          key={pet.id}
+                          onClick={() => setForm(prev => ({ ...prev, petId: pet.id }))}
+                          className={`relative flex items-center gap-3.5 p-3.5 rounded-2xl border-2 cursor-pointer transition ${
+                            isSelected
+                              ? 'border-teal-700 bg-teal-50/70 shadow-xs'
+                              : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50/50'
+                          }`}
+                        >
+                          <PetAvatar pet={pet} size="lg" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center justify-between">
+                              <h3 className="text-sm font-bold text-zinc-900 truncate">{pet.name}</h3>
+                              {isSelected && (
+                                <span className="grid h-5 w-5 place-items-center rounded-full bg-teal-700 text-white text-[10px]">
+                                  <Check size={12} strokeWidth={3} />
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-zinc-500 truncate">
+                              {pet.breed || (pet.species === 'cat' ? 'Gato' : 'Cão')}
+                            </p>
+                            <p className="text-[11px] text-zinc-400 font-medium">
+                              {sizeLabels[pet.size] || 'Porte padrão'}
+                            </p>
+
+                            {pkg && (
+                              <span className="mt-1.5 inline-flex items-center gap-1 rounded-md bg-emerald-100 border border-emerald-300 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                                <Package size={10} /> Pacote Ativo
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Passo 2: Seleção de Serviços com Preços Dinâmicos */}
+                <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 sm:p-5 shadow-xs">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+                    <div>
+                      <h2 className="text-base font-bold text-zinc-900 flex items-center gap-2">
+                        <span className="grid h-6 w-6 place-items-center rounded-full bg-teal-800 text-white text-xs font-extrabold">
+                          2
+                        </span>
+                        Quais serviços você gostaria de solicitar?
+                      </h2>
+                      <p className="text-xs text-zinc-500 mt-0.5">
+                        Selecione os cuidados desejados para{' '}
+                        <strong className="text-zinc-800">{selectedPet?.name || 'seu pet'}</strong>
+                      </p>
+                    </div>
+
+                    {/* Busca Rápida de Serviços */}
+                    <div className="relative w-full sm:w-64">
+                      <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                      <input
+                        type="text"
+                        placeholder="Buscar serviço..."
+                        value={serviceSearch}
+                        onChange={e => setServiceSearch(e.target.value)}
+                        className="w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-8 pr-3 py-1.5 text-xs focus:bg-white focus:border-teal-700 outline-none transition"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Filtro de Categorias se houver */}
+                  {categories.length > 0 && (
+                    <div className="flex gap-1.5 overflow-x-auto pb-3 mb-3 no-scrollbar border-b border-zinc-100">
+                      <button
+                        type="button"
+                        onClick={() => setCategoryFilter('all')}
+                        className={`rounded-lg px-3 py-1 text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                          categoryFilter === 'all'
+                            ? 'bg-teal-800 text-white'
+                            : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                        }`}
+                      >
+                        Todos ({data.services.length})
+                      </button>
+                      {categories.map(cat => (
+                        <button
+                          key={cat}
+                          type="button"
+                          onClick={() => setCategoryFilter(cat)}
+                          className={`rounded-lg px-3 py-1 text-xs font-semibold whitespace-nowrap transition cursor-pointer ${
+                            categoryFilter === cat
+                              ? 'bg-teal-800 text-white'
+                              : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
+                          }`}
+                        >
+                          {cat}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Grid de Serviços */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {filteredServices.map((svc: any) => {
+                      const isChecked = form.serviceIds.includes(svc.id);
+                      const resolved = resolvePortalServicePrice(svc, selectedPet);
+                      const isCovered = isServiceCoveredByPackage(svc.id);
+
+                      return (
+                        <div
+                          key={svc.id}
+                          onClick={() => {
+                            setForm(prev => ({
+                              ...prev,
+                              serviceIds: isChecked
+                                ? prev.serviceIds.filter(id => id !== svc.id)
+                                : [...prev.serviceIds, svc.id],
+                            }));
+                          }}
+                          className={`flex flex-col justify-between p-3.5 rounded-2xl border-2 cursor-pointer transition select-none ${
+                            isChecked
+                              ? 'border-teal-700 bg-teal-50/80 shadow-xs'
+                              : 'border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50/50'
+                          }`}
+                        >
+                          <div>
+                            <div className="flex items-start justify-between gap-2">
+                              <h3 className="text-sm font-bold text-zinc-900 leading-snug">{svc.name}</h3>
+                              <div
+                                className={`grid h-5 w-5 place-items-center rounded-md border transition shrink-0 ${
+                                  isChecked
+                                    ? 'bg-teal-700 border-teal-700 text-white'
+                                    : 'border-zinc-300 bg-white'
+                                }`}
+                              >
+                                {isChecked && <Check size={13} strokeWidth={3} />}
+                              </div>
+                            </div>
+                            {svc.description && (
+                              <p className="text-xs text-zinc-500 mt-1 line-clamp-2 leading-relaxed">
+                                {svc.description}
+                              </p>
+                            )}
+                          </div>
+
+                          <div className="mt-3 pt-2.5 border-t border-zinc-100 flex items-center justify-between">
+                            <span className="flex items-center gap-1 text-[11px] font-medium text-zinc-400">
+                              <Clock3 size={12} />
+                              {resolved.durationMinutes} min
+                            </span>
+
+                            {isCovered && (
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-100 px-2 py-0.5 text-xs font-bold text-emerald-800">
+                                <Package size={12} /> Incluso no Pacote
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {filteredServices.length === 0 && (
+                    <p className="text-center text-xs text-zinc-400 py-6">
+                      Nenhum serviço encontrado com esse filtro.
+                    </p>
+                  )}
+                </div>
+
+                {/* Passo 3: Data e Horário */}
+                <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 sm:p-5 shadow-xs">
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <h2 className="text-base font-bold text-zinc-900 flex items-center gap-2">
+                        <span className="grid h-6 w-6 place-items-center rounded-full bg-teal-800 text-white text-xs font-extrabold">
+                          3
+                        </span>
+                        Quando você prefere trazer o pet?
+                      </h2>
+                      <p className="text-xs text-zinc-500 mt-0.5">
+                        Escolha uma data e horário sugeridos. Confirmaremos na sequência.
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Atalhos Rápidos de Dias */}
+                  <div className="flex flex-wrap gap-2 mb-3">
+                    <button
+                      type="button"
+                      onClick={() => handleSelectDay(0)}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition cursor-pointer"
+                    >
+                      Hoje às 09:00
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectDay(1)}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition cursor-pointer"
+                    >
+                      Amanhã às 09:00
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectDay(2)}
+                      className="rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition cursor-pointer"
+                    >
+                      Depois de amanhã
+                    </button>
+                  </div>
+
+                  <div className="max-w-md">
+                    <label className="block">
+                      <span className="text-xs font-semibold text-zinc-700 mb-1 block">
+                        Data e horário desejados *
+                      </span>
+                      <input
+                        required
+                        type="datetime-local"
+                        value={form.startsAt}
+                        onChange={e => setForm(prev => ({ ...prev, startsAt: e.target.value }))}
+                        className="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-sm font-medium text-zinc-900 focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20 outline-none"
+                      />
+                    </label>
+                  </div>
+                </div>
+
+                {/* Passo 4: Táxi Dog (Transporte do Animal) */}
+                <div className="rounded-2xl border border-amber-200/80 bg-amber-50/40 p-4 sm:p-5 shadow-xs">
+                  <label className="flex items-start gap-3 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={form.transport}
+                      onChange={e => setForm(prev => ({ ...prev, transport: e.target.checked }))}
+                      className="mt-1 h-4 w-4 rounded border-zinc-300 text-teal-800 focus:ring-teal-700"
+                    />
+                    <div>
+                      <span className="text-sm font-bold text-amber-950 flex items-center gap-1.5">
+                        <Car size={16} /> Precisa que a gente busque ou entregue o pet? (Táxi Dog)
+                      </span>
+                      <p className="text-xs text-amber-900/80 mt-0.5">
+                        Temos transporte seguro e climatizado para maior comodidade.
+                      </p>
+                    </div>
+                  </label>
+
+                  {form.transport && (
+                    <div className="mt-4 pt-4 border-t border-amber-200/70 space-y-3 animate-in fade-in duration-150">
+                      <div>
+                        <span className="text-xs font-semibold text-amber-950 mb-1.5 block">
+                          Modalidade do Transporte:
+                        </span>
+                        <div className="flex flex-wrap gap-2">
+                          {[
+                            { key: 'round_trip', label: 'Buscar e Levar (Ida e Volta)' },
+                            { key: 'pickup_only', label: 'Apenas Buscar' },
+                            { key: 'dropoff_only', label: 'Apenas Levar' },
+                          ].map(t => (
+                            <button
+                              key={t.key}
+                              type="button"
+                              onClick={() => setForm(prev => ({ ...prev, transportType: t.key }))}
+                              className={`rounded-xl px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
+                                form.transportType === t.key
+                                  ? 'bg-amber-800 text-white shadow-2xs'
+                                  : 'bg-white border border-amber-200 text-amber-900 hover:bg-amber-100/50'
+                              }`}
+                            >
+                              {t.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {data.customer.address && (
+                        <div className="rounded-xl border border-amber-200 bg-white p-3 text-xs text-amber-950 flex items-start gap-2">
+                          <MapPin size={15} className="text-amber-800 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-semibold block">Endereço de Coleta:</span>
+                            <span>{data.customer.address}</span>
+                            {data.customer.reference && (
+                              <span className="block text-[11px] text-zinc-500 mt-0.5">
+                                Ref: {data.customer.reference}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Passo 5: Observações do Pet */}
+                <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 sm:p-5 shadow-xs">
+                  <label className="block">
+                    <span className="text-sm font-bold text-zinc-900 mb-1 block">
+                      Observações ou cuidados especiais (Opcional)
+                    </span>
+                    <textarea
+                      rows={2}
+                      placeholder="Ex: Alergia a algum produto, assustado com secador, tosa baixa nas patinhas..."
+                      value={form.notes}
+                      onChange={e => setForm(prev => ({ ...prev, notes: e.target.value }))}
+                      className="w-full rounded-xl border border-zinc-300 bg-white p-3 text-xs text-zinc-900 focus:border-teal-700 focus:ring-2 focus:ring-teal-700/20 outline-none"
+                    />
+                  </label>
+                </div>
+
+                {/* Barra de Resumo e Confirmação */}
+                <div className="rounded-2xl border-2 border-teal-700 bg-gradient-to-r from-teal-900 to-teal-800 p-4 sm:p-5 text-white shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-teal-200">
+                        Resumo do Agendamento
+                      </span>
+                      {summaryEstimate.durationMinutes > 0 && (
+                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold text-teal-100">
+                          ⏱️ ~{summaryEstimate.durationMinutes} min de atendimento
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-base sm:text-lg font-bold text-white mt-1">
+                      {form.serviceIds.length === 0
+                        ? 'Selecione os serviços acima'
+                        : `${form.serviceIds.length} serviço(s) selecionado(s) para ${selectedPet?.name}`}
+                    </p>
+                    {summaryEstimate.coveredCount > 0 && (
+                      <p className="text-xs text-emerald-300 font-semibold mt-0.5">
+                        ✨ {summaryEstimate.coveredCount} serviço(s) coberto(s) pelo seu pacote!
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex items-center w-full sm:w-auto">
+                    <button
+                      type="submit"
+                      disabled={sending || form.serviceIds.length === 0 || !form.startsAt}
+                      className="w-full sm:w-auto justify-center rounded-xl bg-emerald-500 hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-3.5 text-sm font-extrabold text-white shadow-lg transition cursor-pointer flex items-center gap-2"
+                    >
+                      {sending ? (
+                        <>
+                          <RefreshCw size={16} className="animate-spin" />
+                          Enviando...
+                        </>
+                      ) : (
+                        <>
+                          <CalendarCheck2 size={18} />
+                          Solicitar Agendamento
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {error && (
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-800 flex items-center gap-2">
+                    <AlertCircle size={16} />
+                    {error}
+                  </div>
+                )}
+              </form>
+            )}
+          </section>
+        )}
+
+        {/* 6. ABA 2: MEUS HORÁRIOS & HISTÓRICO */}
+        {activeTab === 'appointments' && (
+          <section className="space-y-6" aria-labelledby="appointments-heading">
+            {/* Próximos Horários */}
+            <div className="rounded-2xl border border-zinc-200/90 bg-white overflow-hidden shadow-xs">
+              <div className="flex items-center justify-between border-b border-zinc-100 px-4 py-3.5 sm:px-5">
+                <div className="flex items-center gap-2">
+                  <CalendarDays size={18} className="text-teal-800" />
+                  <h2 className="text-sm font-bold text-zinc-900">Próximos horários agendados</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('schedule')}
+                  className="text-xs font-bold text-teal-800 hover:underline"
+                >
+                  + Novo agendamento
+                </button>
+              </div>
+
               {upcomingAppointments.length ? (
-                <div className="divide-y divide-[var(--pc-border)]">
+                <div className="divide-y divide-zinc-100">
                   {upcomingAppointments.map((appointment: any) => (
                     <article
                       key={appointment.id}
-                      className="grid gap-2 px-4 py-4 sm:grid-cols-[155px_minmax(0,1fr)_auto] sm:items-center sm:px-5"
+                      className="grid gap-2 px-4 py-4 sm:grid-cols-[160px_minmax(0,1fr)_auto] sm:items-center sm:px-5 hover:bg-zinc-50/50 transition"
                     >
-                      <p className="flex items-center gap-2 text-xs font-medium tabular-nums">
-                        <Clock3 aria-hidden="true" size={14} className="text-[var(--pc-text-muted)]" />
+                      <p className="flex items-center gap-2 text-xs font-bold text-zinc-800 tabular-nums">
+                        <Clock3 size={15} className="text-teal-700" />
                         {new Date(appointment.startsAt).toLocaleString('pt-BR', {
                           dateStyle: 'short',
                           timeStyle: 'short',
                         })}
                       </p>
+
                       <div className="min-w-0">
-                        <h3 className="text-sm font-semibold">{appointment.pet.name}</h3>
-                        <p className="mt-0.5 truncate text-xs text-[var(--pc-text-muted)]">
-                          {appointment.services.map((service: any) => service.nameSnapshot).join(' + ')}
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-bold text-zinc-900">{appointment.pet.name}</h3>
+                          {appointment.transport?.enabled && (
+                            <span className="rounded-md bg-amber-50 border border-amber-200 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
+                              🚐 Táxi Dog
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 truncate text-xs text-zinc-500">
+                          {appointment.services
+                            .map((service: any) => service.nameSnapshot)
+                            .join(' + ')}
                         </p>
                       </div>
-                      <span
-                        className={`pc-status ${
-                          appointment.status === 'requested'
-                            ? 'pc-status--warning'
-                            : appointment.status === 'ready'
-                              ? 'pc-status--success'
-                              : 'pc-status--neutral'
-                        }`}
-                      >
-                        {appointmentStatus[appointment.status] || 'Confirmado'}
-                      </span>
+
+                      <div className="flex flex-wrap items-center gap-2 justify-end">
+                        <span
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${
+                            appointment.status === 'requested'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {appointmentStatus[appointment.status] || 'Confirmado'}
+                        </span>
+
+                        {(appointment.status === 'requested' || appointment.status === 'scheduled') && (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setClientRescheduleModal(appointment);
+                                setClientRescheduleStartsAt(new Date(appointment.startsAt).toISOString().slice(0, 16));
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-teal-200 bg-teal-50 text-[11px] font-bold text-teal-900 hover:bg-teal-100 transition cursor-pointer"
+                              title="Reagendar horário"
+                            >
+                              <CalendarDays size={12} />
+                              Reagendar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setClientCancelModal(appointment);
+                                setClientCancelReason('');
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-rose-200 bg-rose-50 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer"
+                              title="Cancelar este agendamento"
+                            >
+                              <XCircle size={12} />
+                              Cancelar
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </article>
                   ))}
                 </div>
               ) : (
-                <div className="px-5 py-7 text-center text-sm text-[var(--pc-text-muted)]">
-                  Nenhum agendamento futuro pendente.
+                <div className="px-5 py-8 text-center text-xs text-zinc-500">
+                  <p>Você não possui nenhum horário futuro marcado.</p>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('schedule')}
+                    className="mt-2 text-xs font-bold text-teal-800 hover:underline"
+                  >
+                    Clique aqui para solicitar um horário agora
+                  </button>
                 </div>
               )}
-            </section>
+            </div>
 
-            {/* Histórico recente com fotos */}
+            {/* Histórico dos Últimos Cuidados */}
             {Array.isArray(data.recentHistory) && data.recentHistory.length > 0 && (
-              <section className="pc-panel overflow-hidden" aria-labelledby="history-title">
-                <div className="flex items-center gap-2 border-b border-[var(--pc-border)] px-4 py-4 sm:px-5">
-                  <Scissors aria-hidden="true" size={17} className="text-[var(--pc-action)]" />
-                  <h2 id="history-title" className="text-sm font-semibold">
-                    Últimos cuidados realizados
-                  </h2>
+              <div className="rounded-2xl border border-zinc-200/90 bg-white overflow-hidden shadow-xs">
+                <div className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3.5 sm:px-5">
+                  <Scissors size={18} className="text-teal-800" />
+                  <h2 className="text-sm font-bold text-zinc-900">Últimos atendimentos realizados</h2>
                 </div>
-                <div className="divide-y divide-[var(--pc-border)]">
+
+                <div className="divide-y divide-zinc-100">
                   {data.recentHistory.map((item: any) => (
-                    <article key={item.id} className="flex items-center justify-between gap-4 px-4 py-3.5 sm:px-5">
+                    <article
+                      key={item.id}
+                      className="flex items-center justify-between gap-4 px-4 py-3.5 sm:px-5 hover:bg-zinc-50/50 transition"
+                    >
                       <div className="flex min-w-0 items-center gap-3">
                         {item.stagePhotoUrl ? (
                           <button
@@ -657,178 +1261,325 @@ export default function PetClientPortalPage() {
                                 petName: item.pet.name,
                               })
                             }
-                            className="h-11 w-11 shrink-0 overflow-hidden rounded-lg border border-[var(--pc-border)]"
+                            className="h-12 w-12 shrink-0 overflow-hidden rounded-xl border border-zinc-200 shadow-2xs hover:scale-105 transition"
                           >
-                            <img src={getFullUrl(item.stagePhotoUrl)} alt="" className="h-full w-full object-cover" />
+                            <img
+                              src={getFullUrl(item.stagePhotoUrl)}
+                              alt=""
+                              className="h-full w-full object-cover"
+                            />
                           </button>
                         ) : (
                           <PetAvatar pet={item.pet} size="sm" />
                         )}
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">{item.pet.name}</p>
-                          <p className="truncate text-xs text-[var(--pc-text-muted)]">
+                          <p className="truncate text-sm font-bold text-zinc-900">{item.pet.name}</p>
+                          <p className="truncate text-xs text-zinc-500">
                             {item.services.map((s: any) => s.nameSnapshot).join(' + ')} ·{' '}
                             {new Date(item.startsAt).toLocaleDateString('pt-BR')}
                           </p>
                         </div>
                       </div>
-                      <span className="pc-status pc-status--neutral">Concluído</span>
+
+                      <div className="flex items-center shrink-0">
+                        <span className="rounded-full bg-zinc-100 text-zinc-600 px-2.5 py-1 text-[11px] font-bold">
+                          Concluído
+                        </span>
+                      </div>
                     </article>
                   ))}
                 </div>
-              </section>
-            )}
-          </div>
-
-          {/* Formulário Lateral de Novo Agendamento */}
-          <aside className="pc-panel p-4 sm:p-5 lg:sticky lg:top-24" aria-labelledby="booking-title">
-            <h2 id="booking-title" className="text-lg font-semibold">
-              Solicitar agendamento
-            </h2>
-            <p className="mt-1 text-sm leading-6 text-[var(--pc-text-secondary)]">
-              Escolha o pet, os serviços e o horário desejado. O estabelecimento confirmará a disponibilidade.
-            </p>
-            {sent ? (
-              <div className="mt-5 rounded-lg bg-[var(--pc-success-soft)] p-5 text-center text-[var(--pc-success)]">
-                <CheckCircle2 aria-hidden="true" className="mx-auto mb-3" />
-                <p className="text-sm font-semibold">Solicitação enviada</p>
-                <p className="mt-1 text-xs leading-5">Você poderá acompanhar a confirmação nesta página.</p>
-                <button
-                  onClick={() => setSent(false)}
-                  className="mt-4 min-h-10 rounded-lg px-3 text-sm font-semibold underline underline-offset-4"
-                >
-                  Solicitar outro horário
-                </button>
               </div>
-            ) : (
-              <form onSubmit={submit} className="mt-5 grid gap-4">
-                <label>
-                  <span className={labelClass}>Pet *</span>
-                  <select
-                    required
-                    className={inputClass}
-                    value={form.petId}
-                    onChange={event => setForm({ ...form, petId: event.target.value })}
-                  >
-                    {data.customer.pets.map((pet: any) => (
-                      <option key={pet.id} value={pet.id}>
-                        {pet.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span className={labelClass}>Data e hora desejadas *</span>
-                  <input
-                    required
-                    type="datetime-local"
-                    className={inputClass}
-                    value={form.startsAt}
-                    onChange={event => setForm({ ...form, startsAt: event.target.value })}
-                  />
-                </label>
-                <fieldset>
-                  <legend className={labelClass}>Serviços *</legend>
-                  <div className="space-y-2">
-                    {data.services.map((service: any) => (
-                      <label
-                        key={service.id}
-                        className={`flex min-h-14 cursor-pointer items-center gap-3 rounded-lg border p-3 transition ${
-                          form.serviceIds.includes(service.id)
-                            ? 'border-[var(--pc-action)] bg-[var(--pc-action-soft)]'
-                            : 'border-[var(--pc-border)] hover:bg-[var(--pc-surface-subtle)]'
-                        }`}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={form.serviceIds.includes(service.id)}
-                          onChange={event =>
-                            setForm({
-                              ...form,
-                              serviceIds: event.target.checked
-                                ? [...form.serviceIds, service.id]
-                                : form.serviceIds.filter(id => id !== service.id),
-                            })
-                          }
-                        />
-                        <span className="min-w-0 flex-1 text-sm font-medium">
-                          {service.name}
-                          <small className="mt-0.5 block font-normal text-[var(--pc-text-muted)]">
-                            {service.durationMinutes} min · {money(service.price)}
-                          </small>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                <label>
-                  <span className={labelClass}>Observações</span>
-                  <textarea
-                    className={inputClass}
-                    rows={3}
-                    value={form.notes}
-                    onChange={event => setForm({ ...form, notes: event.target.value })}
-                  />
-                </label>
-                {error && (
-                  <p role="alert" className="rounded-lg bg-[var(--pc-danger-soft)] px-3 py-2 text-sm text-[var(--pc-danger)]">
-                    {error}
-                  </p>
-                )}
-                <button disabled={sending || form.serviceIds.length === 0} className={primaryButton}>
-                  {sending ? 'Enviando…' : 'Solicitar horário'}
-                </button>
-              </form>
             )}
-          </aside>
-        </div>
+          </section>
+        )}
 
-        <footer className="flex items-center justify-center gap-2 py-8 text-xs text-[var(--pc-text-muted)]">
-          <ShieldCheck aria-hidden="true" size={15} />
-          Acesso protegido e exclusivo do tutor
+        {/* 7. ABA 3: MEUS PETS & VACINAS */}
+        {activeTab === 'pets' && (
+          <section className="space-y-4" aria-labelledby="pets-heading">
+            <div className="grid gap-4 sm:grid-cols-2">
+              {data.customer.pets.map((pet: any) => (
+                <article key={pet.id} className="rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-xs">
+                  <div className="flex items-center gap-3.5">
+                    <PetAvatar pet={pet} size="lg" />
+                    <div>
+                      <h3 className="text-base font-bold text-zinc-900">{pet.name}</h3>
+                      <p className="text-xs text-zinc-500 font-medium">
+                        {pet.breed || (pet.species === 'cat' ? 'Gato' : 'Cão')}
+                        {pet.weight ? ` · ${Number(pet.weight)} kg` : ''}
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setForm(prev => ({ ...prev, petId: pet.id }));
+                          setActiveTab('schedule');
+                        }}
+                        className="mt-1 text-xs font-bold text-teal-800 hover:underline inline-flex items-center gap-1"
+                      >
+                        <Calendar size={12} /> Agendar para {pet.name}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Carteira de Vacinação */}
+                  {data?.shop?.modulos?.petshopVacinas !== false && (
+                    <div className="mt-4 border-t border-zinc-100 pt-3">
+                      <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-zinc-800">
+                        <Syringe size={14} className="text-teal-700" />
+                        Carteira de vacinação
+                      </p>
+                      {pet.vaccinations?.length ? (
+                        <div className="space-y-1.5">
+                          {pet.vaccinations.slice(0, 4).map((vaccine: any) => (
+                            <div
+                              key={vaccine.id}
+                              className="flex items-center justify-between text-xs py-1 border-b border-zinc-50 last:border-0"
+                            >
+                              <span className="font-semibold text-zinc-700">{vaccine.vaccineName}</span>
+                              <span className="text-[11px] text-zinc-400 font-medium">
+                                {vaccine.nextDueAt
+                                  ? `Próxima: ${new Date(vaccine.nextDueAt).toLocaleDateString('pt-BR')}`
+                                  : vaccine.appliedAt
+                                  ? new Date(vaccine.appliedAt).toLocaleDateString('pt-BR')
+                                  : 'Registrada'}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-zinc-400">Nenhuma vacina registrada na clínica.</p>
+                      )}
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* 8. ABA 4: MEUS PACOTES */}
+        {activeTab === 'packages' && data.packages?.length > 0 && (
+          <section className="space-y-4" aria-labelledby="packages-heading">
+            <div className="grid gap-4 sm:grid-cols-2">
+              {data.packages.map((pkg: any) => (
+                <article key={pkg.id} className="rounded-2xl border border-teal-200 bg-white p-5 shadow-xs">
+                  <div className="flex items-center justify-between mb-3">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-teal-100 text-teal-800 px-2.5 py-0.5 text-xs font-bold">
+                      <Package size={13} /> {pkg.name || 'Pacote de Sessões'}
+                    </span>
+                    <span className="text-[11px] text-zinc-400 font-medium">
+                      Validade: {pkg.expiresAt ? new Date(pkg.expiresAt).toLocaleDateString('pt-BR') : 'Sem prazo'}
+                    </span>
+                  </div>
+
+                  <p className="text-xs text-zinc-600 mb-3 font-medium">
+                    Beneficiário: <strong>{pkg.pet?.name || 'Seu Pet'}</strong>
+                  </p>
+
+                  <div className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-3 space-y-2 text-xs">
+                    <span className="font-bold text-zinc-800 block text-[11px] uppercase tracking-wider">
+                      Sessões Disponíveis
+                    </span>
+                    {pkg.items?.map((item: any) => {
+                      const remain = (item.totalQty || 0) - (item.usedQty || 0);
+                      return (
+                        <div key={item.id} className="flex items-center justify-between">
+                          <span className="text-zinc-700 font-medium">{item.serviceName || 'Sessão de Banho'}</span>
+                          <span className="font-extrabold text-teal-800">
+                            {remain} de {item.totalQty} restantes
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (pkg.petId) setForm(prev => ({ ...prev, petId: pkg.petId }));
+                      setActiveTab('schedule');
+                    }}
+                    className="mt-4 w-full rounded-xl bg-teal-800 hover:bg-teal-900 px-4 py-2 text-xs font-bold text-white shadow-xs transition cursor-pointer"
+                  >
+                    Agendar Sessão Deste Pacote
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <footer className="mt-12 flex items-center justify-center gap-2 text-xs text-zinc-400">
+          <ShieldCheck size={14} />
+          Área do Tutor · {data.shop.name}
         </footer>
       </main>
 
-      {/* Lightbox de Foto em Tela Cheia para o Tutor */}
+      {/* 9. Lightbox de Foto em Tela Cheia para o Tutor */}
       {lightboxPhoto && (
         <div
-          className="fixed inset-0 z-50 grid place-items-center bg-slate-950/80 p-4 backdrop-blur-xs"
+          className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-4 backdrop-blur-xs animate-in fade-in duration-150"
           onClick={() => setLightboxPhoto(null)}
         >
           <div
-            className="max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl"
+            className="max-w-md w-full overflow-hidden rounded-2xl bg-white shadow-2xl"
             onClick={e => e.stopPropagation()}
           >
-            <img
-              src={lightboxPhoto.url}
-              alt={`Foto de ${lightboxPhoto.petName}`}
-              className="max-h-[70vh] w-full object-contain bg-black"
-            />
-            <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative bg-black flex items-center justify-center max-h-[70vh]">
+              <img
+                src={lightboxPhoto.url}
+                alt={`Foto de ${lightboxPhoto.petName}`}
+                className="max-h-[70vh] w-full object-contain"
+              />
+              <button
+                type="button"
+                onClick={() => setLightboxPhoto(null)}
+                className="absolute top-3 right-3 grid h-8 w-8 place-items-center rounded-full bg-black/60 text-white hover:bg-black transition"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-[var(--pc-text)]">{lightboxPhoto.petName}</p>
+                <p className="text-sm font-bold text-zinc-900">{lightboxPhoto.petName}</p>
                 {lightboxPhoto.caption && (
-                  <p className="mt-0.5 text-xs text-[var(--pc-text-secondary)]">“{lightboxPhoto.caption}”</p>
+                  <p className="text-xs text-zinc-600 mt-0.5">“{lightboxPhoto.caption}”</p>
                 )}
               </div>
-              <div className="flex items-center gap-2">
-                <a
-                  href={lightboxPhoto.url}
-                  download={`foto-${lightboxPhoto.petName.toLowerCase()}.webp`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-[var(--pc-action)] px-3.5 text-xs font-semibold text-white"
-                >
-                  <Download size={14} /> Baixar
-                </a>
-                <button
-                  type="button"
-                  onClick={() => setLightboxPhoto(null)}
-                  className="min-h-9 rounded-lg border border-[var(--pc-border-strong)] px-3 text-xs font-semibold text-[var(--pc-text)]"
-                >
-                  Fechar
-                </button>
+              <a
+                href={lightboxPhoto.url}
+                download={`foto-${lightboxPhoto.petName.toLowerCase()}.webp`}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-xl bg-teal-800 px-3.5 py-2 text-xs font-bold text-white shadow-xs hover:bg-teal-900 transition"
+              >
+                <Download size={13} /> Baixar
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Cancelamento pelo Tutor */}
+      {clientCancelModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
+              <h3 className="text-sm font-bold text-zinc-900">Cancelar Agendamento</h3>
+              <button
+                type="button"
+                onClick={() => setClientCancelModal(null)}
+                className="text-zinc-400 hover:text-zinc-600"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-3">
+              <p className="text-xs text-zinc-600">
+                Tem certeza que deseja cancelar o agendamento de <strong>{clientCancelModal.pet?.name}</strong> em{' '}
+                <strong>
+                  {new Date(clientCancelModal.startsAt).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' })}
+                </strong>?
+              </p>
+
+              {clientCancelModal.services?.some((s: any) => s.customerPackageId || s.coverageStatus === 'reserved') && (
+                <div className="rounded-xl border border-teal-200 bg-teal-50 p-3 text-xs text-teal-900">
+                  <p className="font-bold">📦 Pacote de Sessões</p>
+                  <p className="mt-0.5 text-[11px] text-teal-800">
+                    A sessão de pacote reservada voltará automaticamente para o seu saldo disponível.
+                  </p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-semibold text-zinc-700 mb-1">
+                  Motivo do cancelamento (opcional):
+                </label>
+                <input
+                  type="text"
+                  value={clientCancelReason}
+                  onChange={e => setClientCancelReason(e.target.value)}
+                  placeholder="Ex: Imprevisto no trabalho, viagem..."
+                  className="w-full rounded-xl border border-zinc-200 bg-white p-2.5 text-xs text-zinc-800 outline-none focus:border-rose-400 focus:ring-2 focus:ring-rose-200"
+                />
               </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={clientCancelSaving}
+                onClick={() => setClientCancelModal(null)}
+                className="px-4 py-2 rounded-xl border border-zinc-200 bg-zinc-100 text-xs font-semibold text-zinc-700 hover:bg-zinc-200"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                disabled={clientCancelSaving}
+                onClick={handleClientCancelConfirm}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 text-xs font-bold text-white hover:bg-rose-700 shadow-xs disabled:opacity-50"
+              >
+                {clientCancelSaving ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={13} />}
+                Confirmar Cancelamento
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Reagendamento pelo Tutor */}
+      {clientRescheduleModal && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
+              <h3 className="text-sm font-bold text-zinc-900">Reagendar Horário</h3>
+              <button
+                type="button"
+                onClick={() => setClientRescheduleModal(null)}
+                className="text-zinc-400 hover:text-zinc-600"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="py-4 space-y-3">
+              <p className="text-xs text-zinc-600">
+                Selecione uma nova data e horário para <strong>{clientRescheduleModal.pet?.name}</strong>:
+              </p>
+
+              <div>
+                <label className="block text-xs font-bold text-zinc-800 mb-1">
+                  Nova data e horário:
+                </label>
+                <input
+                  type="datetime-local"
+                  value={clientRescheduleStartsAt}
+                  onChange={e => setClientRescheduleStartsAt(e.target.value)}
+                  className="w-full rounded-xl border border-teal-300 bg-white p-2.5 text-xs font-semibold text-zinc-800 outline-none focus:ring-2 focus:ring-teal-500 shadow-2xs"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={clientRescheduleSaving}
+                onClick={() => setClientRescheduleModal(null)}
+                className="px-4 py-2 rounded-xl border border-zinc-200 bg-zinc-100 text-xs font-semibold text-zinc-700 hover:bg-zinc-200"
+              >
+                Voltar
+              </button>
+              <button
+                type="button"
+                disabled={clientRescheduleSaving || !clientRescheduleStartsAt}
+                onClick={handleClientRescheduleConfirm}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-teal-700 text-xs font-bold text-white hover:bg-teal-800 shadow-xs disabled:opacity-50"
+              >
+                {clientRescheduleSaving ? <Loader2 size={13} className="animate-spin" /> : <CalendarDays size={13} />}
+                Confirmar Novo Horário
+              </button>
             </div>
           </div>
         </div>

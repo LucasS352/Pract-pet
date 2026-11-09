@@ -64,6 +64,7 @@ export class PetshopController {
   @Post('appointments/:id/checkout') prepareCheckout(@Param('id') id: string) { return this.petshop.prepareCheckout(id); }
   @Patch('appointments/:id') updateAppointment(@Param('id') id: string, @Body() body: any) { return this.petshop.updateAppointment(id, body); }
   @Patch('appointments/:id/status') updateAppointmentStatus(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointmentStatus(id, body, req); }
+  @Post('appointments/:id/taxi-departure') taxiDeparture(@Param('id') id: string, @Body() body: any) { return this.whatsapp.sendTaxiDogDeparture(id, body?.direction); }
 
   @Get('commissions/rules') commissionRules(@Req() req: any) { return this.commissions.listRules(req); }
   @Post('commissions/rules') saveCommissionRule(@Req() req: any, @Body() body: any) { return this.commissions.saveRule(req, body); }

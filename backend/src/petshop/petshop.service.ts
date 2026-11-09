@@ -10,6 +10,7 @@ import { PetshopPackagesService } from './petshop-packages.service';
 import { PetshopWhatsappService } from './petshop-whatsapp.service';
 import { PetshopPricingService, DEFAULT_STAGE_DEFINITIONS, PetshopStageItem } from './petshop-pricing.service';
 import { PetshopCommissionsService } from './petshop-commissions.service';
+import { normalizeTransport, parseAppointmentTransport, serializeAppointmentTransport } from './petshop-transport';
 
 const APPOINTMENT_STATUSES = new Set([
   'requested', 'scheduled', 'checked_in', 'bathing', 'grooming',
@@ -99,24 +100,73 @@ export class PetshopService {
     const now = new Date();
     let start: Date;
     let end: Date = new Date();
+    let prevStart: Date;
+    let prevEnd: Date;
 
     if (customFrom && customTo) {
-      start = new Date(customFrom);
-      end = new Date(customTo);
+      start = new Date(`${customFrom}T00:00:00`);
+      end = new Date(`${customTo}T23:59:59.999`);
+      const durationMs = end.getTime() - start.getTime();
+      prevEnd = new Date(start.getTime() - 1);
+      prevStart = new Date(prevEnd.getTime() - durationMs);
+    } else if (period === 'yesterday') {
+      const y = new Date(now.getTime() - 86_400_000);
+      start = new Date(y);
+      start.setHours(0, 0, 0, 0);
+      end = new Date(y);
+      end.setHours(23, 59, 59, 999);
+
+      const beforeY = new Date(now.getTime() - 2 * 86_400_000);
+      prevStart = new Date(beforeY);
+      prevStart.setHours(0, 0, 0, 0);
+      prevEnd = new Date(beforeY);
+      prevEnd.setHours(23, 59, 59, 999);
+    } else if (period === 'last_month') {
+      start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+      end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
+      prevStart = new Date(now.getFullYear(), now.getMonth() - 2, 1, 0, 0, 0, 0);
+      prevEnd = new Date(now.getFullYear(), now.getMonth() - 1, 0, 23, 59, 59, 999);
     } else if (period === 'month') {
       start = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
-      end = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+
+      prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
+      prevEnd = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate(), 23, 59, 59, 999);
+    } else if (period === 'year') {
+      start = new Date(now.getFullYear(), 0, 1, 0, 0, 0, 0);
+      end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+
+      prevStart = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
+      prevEnd = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 23, 59, 59, 999);
     } else if (period === 'week') {
       start = new Date(now.getTime() - 7 * 86_400_000);
       start.setHours(0, 0, 0, 0);
+      end = new Date(now);
+      end.setHours(23, 59, 59, 999);
+
+      prevStart = new Date(now.getTime() - 14 * 86_400_000);
+      prevStart.setHours(0, 0, 0, 0);
+      prevEnd = new Date(now.getTime() - 7 * 86_400_000);
+      prevEnd.setHours(23, 59, 59, 999);
     } else {
       // today
       start = new Date(now);
       start.setHours(0, 0, 0, 0);
+      end = new Date(now);
       end.setHours(23, 59, 59, 999);
+
+      const y = new Date(now.getTime() - 86_400_000);
+      prevStart = new Date(y);
+      prevStart.setHours(0, 0, 0, 0);
+      prevEnd = new Date(y);
+      prevEnd.setHours(23, 59, 59, 999);
     }
 
-    const [sales, appointments] = await Promise.all([
+    // 1. Busca transações do período selecionado
+    const [sales, appointments, soldPackages] = await Promise.all([
       prisma.sale.findMany({
         where: { createdAt: { gte: start, lte: end }, status: { not: 'cancelled' } },
         include: { items: { include: { product: { select: { id: true, name: true } } } } },
@@ -125,13 +175,49 @@ export class PetshopService {
         where: { startsAt: { gte: start, lte: end }, status: { notIn: ['cancelled', 'no_show'] } },
         include: { services: true, professional: { select: { id: true, name: true } } },
       }),
+      prisma.customerPetPackage.findMany({
+        where: {
+          createdAt: { gte: start, lte: end },
+          status: { not: 'cancelled' },
+          paymentStatus: 'paid',
+          saleId: null,
+        },
+        select: { finalPrice: true },
+      }).catch(() => []),
     ]);
 
-    // Métricas de produtos / PDV
+    // 2. Busca totais do período anterior para o comparativo
+    const [prevSales, prevPackages] = await Promise.all([
+      prisma.sale.findMany({
+        where: { createdAt: { gte: prevStart, lte: prevEnd }, status: { not: 'cancelled' } },
+        select: { total: true },
+      }),
+      prisma.customerPetPackage.findMany({
+        where: {
+          createdAt: { gte: prevStart, lte: prevEnd },
+          status: { not: 'cancelled' },
+          paymentStatus: 'paid',
+          saleId: null,
+        },
+        select: { finalPrice: true },
+      }).catch(() => []),
+    ]);
+
+    let prevRevenue = 0;
+    for (const s of prevSales) prevRevenue += Number(s.total || 0);
+    for (const p of prevPackages) prevRevenue += Number(p.finalPrice || 0);
+    // Appointments describe work, not cash received. Their receipts are already Sales.
+
+    // Sale is the cash source of truth. Split its origin only for display.
     let productRevenue = 0;
+    let serviceRevenue = 0;
     const productMap = new Map<string, { name: string; quantity: number; revenue: number }>();
 
     for (const sale of sales) {
+      if (sale.source === 'petshop') {
+        serviceRevenue += Number(sale.total || 0);
+        continue;
+      }
       productRevenue += Number(sale.total || 0);
       for (const item of sale.items) {
         const pName = item.product?.name || item.productName || 'Produto';
@@ -143,7 +229,6 @@ export class PetshopService {
     }
 
     // Métricas de serviços / Atendimentos (desconta valor já coberto por pacote para evitar duplicidade de faturamento)
-    let serviceRevenue = 0;
     let packageCoveredSessionsCount = 0;
     const serviceMap = new Map<string, { name: string; count: number; revenue: number }>();
     const proMap = new Map<string, { name: string; count: number; revenue: number }>();
@@ -156,10 +241,7 @@ export class PetshopService {
           packageCoveredSessionsCount += 1;
         }
         const rawVal = Number(svc.priceSnapshot || 0);
-        const coveredVal = isCoveredByPkg ? Number(svc.coveredAmount || rawVal) : 0;
-        const netVal = Math.max(0, rawVal - coveredVal);
-
-        serviceRevenue += netVal;
+        // Keep service volume for operational rankings; do not add scheduled work to cash revenue.
         appServiceTotal += rawVal;
 
         const current = serviceMap.get(svc.nameSnapshot) || { name: svc.nameSnapshot, count: 0, revenue: 0 };
@@ -177,24 +259,61 @@ export class PetshopService {
 
     // Receita de pacotes contratados e pagos no período
     let packageRevenue = 0;
-    try {
-      const soldPackages = await prisma.customerPetPackage.findMany({
-        where: {
-          createdAt: { gte: start, lte: end },
-          status: { not: 'cancelled' },
-          paymentStatus: 'paid',
-          saleId: null, // Evita somar duas vezes caso já tenha entrado como Sale no PDV
-        },
-        select: { finalPrice: true },
-      });
-      packageRevenue = soldPackages.reduce((sum, p) => sum + Number(p.finalPrice || 0), 0);
-    } catch {
-      // Caso tabela ainda não migrada
+    for (const p of soldPackages) {
+      packageRevenue += Number(p.finalPrice || 0);
     }
 
     const totalRevenue = productRevenue + serviceRevenue + packageRevenue;
-    const totalTransactions = sales.length + appointments.length;
+    const totalTransactions = sales.length + soldPackages.length;
     const averageTicket = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
+
+    const vsPreviousPeriod = prevRevenue > 0
+      ? Number((((totalRevenue - prevRevenue) / prevRevenue) * 100).toFixed(1))
+      : null;
+
+    // Horários e Dias Mais Movimentados
+    const byHour: Record<number, number> = {};
+    for (let h = 0; h < 24; h++) byHour[h] = 0;
+
+    const byDayOfWeek: Record<number, { day: string; count: number; revenue: number }> = {
+      0: { day: 'Dom', count: 0, revenue: 0 },
+      1: { day: 'Seg', count: 0, revenue: 0 },
+      2: { day: 'Ter', count: 0, revenue: 0 },
+      3: { day: 'Qua', count: 0, revenue: 0 },
+      4: { day: 'Qui', count: 0, revenue: 0 },
+      5: { day: 'Sex', count: 0, revenue: 0 },
+      6: { day: 'Sáb', count: 0, revenue: 0 },
+    };
+
+    for (const sale of sales) {
+      const saleDate = new Date(sale.createdAt);
+      const brDate = new Date(saleDate.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+      const val = Number(sale.total || 0);
+
+      const hour = brDate.getHours();
+      byHour[hour] = (byHour[hour] || 0) + val;
+
+      const dow = brDate.getDay();
+      byDayOfWeek[dow].count += 1;
+      byDayOfWeek[dow].revenue += val;
+    }
+
+    for (const app of appointments) {
+      const appDate = new Date(app.startsAt);
+      const brDate = new Date(appDate.toLocaleString('en-US', { timeZone: 'America/Sao_Paulo' }));
+      let appVal = 0;
+      for (const svc of app.services) {
+        const rawVal = Number(svc.priceSnapshot || 0);
+        appVal += rawVal;
+      }
+
+      const hour = brDate.getHours();
+      byHour[hour] = (byHour[hour] || 0) + appVal;
+
+      const dow = brDate.getDay();
+      byDayOfWeek[dow].count += 1;
+      byDayOfWeek[dow].revenue += appVal;
+    }
 
     const topServices = Array.from(serviceMap.values())
       .sort((a, b) => b.revenue - a.revenue)
@@ -211,11 +330,16 @@ export class PetshopService {
       period,
       start: start.toISOString(),
       end: end.toISOString(),
+      previousPeriod: {
+        start: prevStart.toISOString(),
+        end: prevEnd.toISOString(),
+        revenue: prevRevenue,
+        vsPreviousPeriod,
+      },
       totals: {
         totalRevenue,
         productRevenue,
-        serviceRevenue: serviceRevenue + packageRevenue,
-        standaloneServiceRevenue: serviceRevenue,
+        serviceRevenue,
         packageSalesRevenue: packageRevenue,
         packageCoveredSessionsCount,
         salesCount: sales.length,
@@ -223,6 +347,8 @@ export class PetshopService {
         totalTransactions,
         averageTicket,
       },
+      byHour,
+      byDayOfWeek: Object.values(byDayOfWeek),
       topServices,
       topProducts,
       professionals,
@@ -1109,6 +1235,7 @@ export class PetshopService {
 
     return appointments.map((apt: any) => ({
       ...apt,
+      transport: parseAppointmentTransport(apt.checkInNotes),
       resolvedStages: this.pricing.resolveAppointmentStages(apt),
     }));
   }
@@ -1205,6 +1332,7 @@ export class PetshopService {
     }
 
     const endsAt = new Date(startsAt.getTime() + totalMinutes * 60_000);
+    const transport = normalizeTransport(data.transport);
     const professionalId = optionalText(data.professionalId) ?? null;
 
     if (professionalId) {
@@ -1262,6 +1390,7 @@ export class PetshopService {
           status: initialStatus,
           source: data.source || 'internal',
           notes: optionalText(data.notes),
+          checkInNotes: serializeAppointmentTransport(transport),
           customStages: resolvedStages,
           stageHistory: initialHistory,
         },
@@ -1328,17 +1457,59 @@ export class PetshopService {
 
     return {
       ...created,
+      transport,
       resolvedStages,
     };
   }
 
   async updateAppointment(id: string, data: any) {
     const prisma = await this.prisma();
+    const { userId } = this.tenantContext.get();
     const current = await prisma.petAppointment.findUnique({
       where: { id },
-      include: { services: true },
+      include: {
+        pet: true,
+        customer: true,
+        services: {
+          include: {
+            service: true,
+            customerPackage: true,
+            customerPackageItem: true,
+          },
+        },
+      },
     });
     if (!current) throw new NotFoundException('Agendamento não encontrado.');
+
+    let startsAt = current.startsAt;
+    let endsAt = current.endsAt;
+    let rescheduled = false;
+
+    if (data.startsAt !== undefined && data.startsAt !== null) {
+      const nextStartsAt = new Date(data.startsAt);
+      if (isNaN(nextStartsAt.getTime())) throw new BadRequestException('Data e horário de início inválidos.');
+
+      let nextEndsAt: Date;
+      if (data.endsAt !== undefined && data.endsAt !== null) {
+        nextEndsAt = new Date(data.endsAt);
+        if (isNaN(nextEndsAt.getTime())) throw new BadRequestException('Data e horário de término inválidos.');
+      } else {
+        const totalDurationMinutes = current.services.reduce((acc, s) => acc + (s.durationMinutes || 0), 0);
+        const originalDurationMs = current.endsAt.getTime() - current.startsAt.getTime();
+        const durationMs = totalDurationMinutes > 0 ? totalDurationMinutes * 60_000 : (originalDurationMs > 0 ? originalDurationMs : 60 * 60_000);
+        nextEndsAt = new Date(nextStartsAt.getTime() + durationMs);
+      }
+
+      if (nextEndsAt <= nextStartsAt) {
+        throw new BadRequestException('O horário de término deve ser posterior ao horário de início.');
+      }
+
+      if (nextStartsAt.getTime() !== current.startsAt.getTime() || nextEndsAt.getTime() !== current.endsAt.getTime()) {
+        rescheduled = true;
+        startsAt = nextStartsAt;
+        endsAt = nextEndsAt;
+      }
+    }
 
     let professionalId = current.professionalId;
     if (data.professionalId !== undefined) {
@@ -1356,20 +1527,116 @@ export class PetshopService {
             id: { not: id },
             professionalId: professional.id,
             status: { notIn: ['cancelled', 'no_show'] },
-            startsAt: { lt: current.endsAt },
-            endsAt: { gt: current.startsAt },
+            startsAt: { lt: endsAt },
+            endsAt: { gt: startsAt },
           },
         });
         if (conflict) throw new ConflictException(`O profissional ${professional.name} já possui outro atendimento nesse horário.`);
         professionalId = professional.id;
       }
+    } else if (rescheduled && professionalId) {
+      const conflict = await prisma.petAppointment.findFirst({
+        where: {
+          id: { not: id },
+          professionalId,
+          status: { notIn: ['cancelled', 'no_show'] },
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+        },
+      });
+      if (conflict) throw new ConflictException(`O profissional responsável já possui outro atendimento nesse novo horário.`);
+    }
+
+    // Remoção de serviço extra
+    if (data.removeAppointmentServiceId) {
+      await prisma.petAppointmentService.deleteMany({
+        where: {
+          id: String(data.removeAppointmentServiceId),
+          appointmentId: id,
+        },
+      });
+    }
+
+    // Adição de serviços extras
+    if (Array.isArray(data.addServices) && data.addServices.length > 0) {
+      for (const item of data.addServices) {
+        const svcId = String(item.serviceId);
+        const svc = await prisma.petService.findUnique({ where: { id: svcId } });
+        if (svc) {
+          const petChar = {
+            species: current.pet?.species,
+            size: current.pet?.size,
+            coatType: current.pet?.coatType,
+          };
+          const resolved = this.pricing.resolvePriceAndDuration(svc, petChar);
+          const price = item.priceSnapshot !== undefined ? Number(item.priceSnapshot) : resolved.price;
+          await prisma.petAppointmentService.create({
+            data: {
+              appointmentId: id,
+              serviceId: svc.id,
+              nameSnapshot: svc.name,
+              priceSnapshot: price,
+              durationMinutes: resolved.durationMinutes,
+              coverageStatus: 'none',
+            },
+          });
+        }
+      }
+    }
+
+    // Atualiza status se foi reagendado a partir de cancelado ou se enviado explicitamente
+    let newStatus = current.status;
+    if (data.status && APPOINTMENT_STATUSES.has(data.status)) {
+      newStatus = data.status;
+    } else if (rescheduled && (current.status === 'cancelled' || current.status === 'no_show')) {
+      newStatus = 'scheduled';
+    }
+
+    // Histórico de alterações
+    let updatedHistory = Array.isArray(current.stageHistory) ? [...(current.stageHistory as any[])] : [];
+    if (rescheduled) {
+      let operatorName: string | null = null;
+      if (userId) {
+        try {
+          const op = await prisma.operator.findUnique({ where: { id: userId }, select: { name: true } });
+          if (op) operatorName = op.name;
+        } catch {}
+      }
+
+      const prevStr = current.startsAt.toLocaleDateString('pt-BR') + ' às ' + current.startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const nextStr = startsAt.toLocaleDateString('pt-BR') + ' às ' + startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+      const reasonNotes = data.rescheduleReason || data.notes || `Reagendado de ${prevStr} para ${nextStr}`;
+
+      updatedHistory.push({
+        status: newStatus,
+        label: `Reagendado para ${nextStr}`,
+        at: new Date().toISOString(),
+        notes: reasonNotes,
+        userId: userId || null,
+        userName: operatorName || null,
+        rescheduledFrom: current.startsAt.toISOString(),
+        rescheduledTo: startsAt.toISOString(),
+      });
+    }
+
+    // Tratar atualização de transporte se fornecido
+    let checkInNotes = current.checkInNotes;
+    if (data.transport !== undefined) {
+      const existingTransport = parseAppointmentTransport(current.checkInNotes);
+      const mergedTransport = data.transport ? { ...(existingTransport || {}), ...data.transport } : null;
+      checkInNotes = serializeAppointmentTransport(mergedTransport);
     }
 
     const updated = await prisma.petAppointment.update({
       where: { id },
       data: {
+        startsAt,
+        endsAt,
+        status: newStatus,
         professionalId,
         notes: data.notes !== undefined ? optionalText(data.notes) : undefined,
+        checkInNotes,
+        stageHistory: updatedHistory,
       },
       include: {
         pet: true,
@@ -1485,7 +1752,11 @@ export class PetshopService {
 
     const now = new Date();
     const nextPhotoUrl = data.stagePhotoUrl !== undefined ? optionalText(data.stagePhotoUrl) : undefined;
-    const nextStageNotes = data.stageNotes !== undefined ? optionalText(data.stageNotes) : undefined;
+    const nextStageNotes = data.cancelReason !== undefined
+      ? optionalText(data.cancelReason)
+      : data.stageNotes !== undefined
+        ? optionalText(data.stageNotes)
+        : undefined;
 
     const existingHistory = Array.isArray(current.stageHistory) ? (current.stageHistory as any[]) : [];
     const statusChanged = status !== current.status;
@@ -1552,17 +1823,35 @@ export class PetshopService {
 
       // Se o agendamento for cancelado ou falta (no_show) antes do consumo, libera as sessões reservadas
       if (status === 'cancelled' || status === 'no_show') {
+        const cancelReasonNotes = data.cancelReason || data.stageNotes || `Atendimento marcado como ${status}`;
         await this.packages.releaseReservedSessionsForAppointmentInTx(
           tx,
           id,
-          data.stageNotes || `Atendimento marcado como ${status}`,
+          cancelReasonNotes,
           {
             userId,
             operatorId: data.operatorId,
             name: data.operatorName,
           },
         );
-        await this.commissions.reverseAppointmentInTx(tx, id, req?.user?.id || userId || 'system', `Atendimento marcado como ${status}`);
+        await this.commissions.reverseAppointmentInTx(tx, id, req?.user?.id || userId || 'system', cancelReasonNotes);
+
+        // Cancela comandas abertas ou aguardando pagamento geradas para este agendamento
+        const openComandas = await tx.comanda.findMany({
+          where: {
+            status: { in: ['open', 'waiting_payment'] },
+            notes: { contains: id },
+          },
+        });
+        for (const cmd of openComandas) {
+          await tx.comanda.update({
+            where: { id: cmd.id },
+            data: {
+              status: 'cancelled',
+              notes: `${cmd.notes || ''} [Comanda cancelada junto ao agendamento ${id}]`.trim(),
+            },
+          });
+        }
       }
 
       if (actor && statusChanged && trackedStage) {
@@ -1581,7 +1870,9 @@ export class PetshopService {
                 ? null
                 : String(data.professionalId)
               : undefined,
-          checkInNotes: data.checkInNotes === undefined ? undefined : optionalText(data.checkInNotes),
+          checkInNotes: data.checkInNotes === undefined ? undefined : parseAppointmentTransport(current.checkInNotes)
+            ? JSON.stringify({ transport: parseAppointmentTransport(current.checkInNotes), notes: optionalText(data.checkInNotes) })
+            : optionalText(data.checkInNotes),
           stagePhotoUrl: nextPhotoUrl,
           stageNotes: nextStageNotes,
           stageHistory: updatedHistory,
@@ -1622,6 +1913,14 @@ export class PetshopService {
       if (statusChanged) {
         this.whatsapp.enqueueAppointmentEvent('PET_READY', id).catch(() => {});
       }
+    }
+
+    if (status === 'scheduled' && statusChanged) {
+      this.whatsapp.enqueueAppointmentEvent('APPOINTMENT_CONFIRMED', id).catch(() => {});
+    }
+
+    if (data.notifyTutor === true && nextPhotoUrl && status !== 'ready') {
+      this.whatsapp.enqueueStagePhoto(id).catch(() => {});
     }
 
     // Se algum pacote consumido atingiu a última sessão ou zerou, dispara alerta de renovação

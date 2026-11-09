@@ -33,7 +33,7 @@ export class PetshopAccessGuard implements CanActivate {
       const allowed = method === 'GET'
         ? path === '/petshop/reception/tutors' || /^\/petshop\/(overview|appointments|pending-reservations|pets|services|stages)$/.test(path) || /^\/petshop\/packages\/available\/[^/]+$/.test(path)
         : method === 'POST'
-          ? path === '/petshop/reception/registrations' || path === '/petshop/appointments' || /^\/petshop\/appointments\/[^/]+\/(receive|checkout)$/.test(path) || path === '/petshop/uploads/photo' || /^\/petshop\/tutors\/[^/]+\/portal-link$/.test(path)
+          ? path === '/petshop/reception/registrations' || path === '/petshop/appointments' || /^\/petshop\/appointments\/[^/]+\/(receive|checkout|taxi-departure)$/.test(path) || path === '/petshop/uploads/photo' || /^\/petshop\/tutors\/[^/]+\/portal-link$/.test(path)
           : method === 'PATCH' && /^\/petshop\/appointments\/[^/]+(?:\/status)?$/.test(path);
       if (!allowed) throw new ForbiddenException('Acesso restrito ao perfil operacional. Identifique um administrador.');
     }

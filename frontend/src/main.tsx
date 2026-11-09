@@ -58,6 +58,7 @@ import PetshopSuppliersPage from './pages/petshop/PetshopSuppliersPage';
 import PetshopPurchaseOrdersPage from './pages/petshop/PetshopPurchaseOrdersPage';
 import PetshopMetricsPage from './pages/petshop/PetshopMetricsPage';
 import PetshopPackagesPage from './pages/petshop/PetshopPackagesPage';
+import PetshopTaxiDogPage from './pages/petshop/PetshopTaxiDogPage';
 import PetshopWhatsappPage from './pages/petshop/PetshopWhatsappPage';
 import ExpiryAlertsPage from './app/dashboard/inventory/expiry-alerts/page';
 
@@ -187,6 +188,7 @@ function App() {
         >
           <Route index element={<PetshopDashboardPage />} />
           <Route path="agenda" element={<PetshopAgendaPage />} />
+          <Route path="taxidog" element={<PetshopTaxiDogPage />} />
           <Route path="pacotes" element={<PetshopPackagesPage />} />
           <Route path="pets" element={<PetshopPetsPage />} />
           <Route path="tutores" element={<PetshopTutorsPage />} />

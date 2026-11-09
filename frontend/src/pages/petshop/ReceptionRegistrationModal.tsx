@@ -2,19 +2,30 @@ import { useRef, useState, type FormEvent } from 'react';
 import { PawPrint, Search, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
-import type { Pet } from './types';
+import { composeDetailedAddress, parseDetailedAddress, type Pet } from './types';
 import { Modal, inputClass, labelClass, primaryButton, secondaryButton } from './ui';
 import { PhotoUploadField } from './PhotoUploadField';
 
-type ReceptionTutor = { id: string; name: string; phone: string };
-export type ReceptionResult = { tutor: ReceptionTutor; pet: Pet | null };
+type ReceptionTutor = { id: string; name: string; phone: string; address?: string | null; reference?: string | null; notes?: string | null; photoUrl?: string | null; whatsappOptIn?: boolean };
+export type ReceptionResult = { tutor: { id: string; name: string; phone: string }; pet: Pet | null };
 
 export function ReceptionRegistrationModal({ includePet = false, onClose, onSaved }: {
   includePet?: boolean;
   onClose: () => void;
   onSaved: (result: ReceptionResult) => void;
 }) {
-  const [tutor, setTutor] = useState({ name: '', phone: '', email: '', cpfCnpj: '', address: '', notes: '', photoUrl: '', whatsappOptIn: true });
+  const [tutor, setTutor] = useState({
+    name: '',
+    phone: '',
+    cpfCnpj: '',
+    street: '',
+    number: '',
+    neighborhood: '',
+    reference: '',
+    notes: '',
+    photoUrl: '',
+    whatsappOptIn: true,
+  });
   const [pet, setPet] = useState({ name: '', species: 'dog', breed: '', sex: '', size: '', coatType: '', weight: '', birthDate: '', allergies: '', behavior: '', photoUrl: '' });
   const [withPet, setWithPet] = useState(includePet);
   const [existing, setExisting] = useState<ReceptionTutor | null>(null);
@@ -22,6 +33,7 @@ export function ReceptionRegistrationModal({ includePet = false, onClose, onSave
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const lookupSequence = useRef(0);
+
   const lookup = async () => {
     const phone = tutor.phone.replace(/\D/g, '');
     if (phone.length < 10 || phone.length > 15) { toast.error('Informe o telefone completo com DDD.'); return; }
@@ -30,53 +42,227 @@ export function ReceptionRegistrationModal({ includePet = false, onClose, onSave
     try {
       const { data } = await api.get<ReceptionTutor | null>('/petshop/reception/tutors', { params: { phone } });
       if (sequence !== lookupSequence.current) return;
-      if (data) { setExisting(data); setWithPet(true); setTutor(current => ({ ...current, name: data.name })); }
-      else { setExisting(null); toast.info('Telefone ainda não cadastrado. Preencha o nome do tutor.'); }
-    } catch (error: any) { if (sequence === lookupSequence.current) toast.error(error.response?.data?.message || 'Não foi possível consultar o telefone.'); }
-    finally { if (sequence === lookupSequence.current) setSearching(false); }
+      if (data) {
+        setExisting(data);
+        setWithPet(true);
+        const parsed = parseDetailedAddress(data.address);
+        setTutor(current => ({
+          ...current,
+          name: data.name,
+          street: parsed.street,
+          number: parsed.number,
+          neighborhood: parsed.neighborhood,
+          reference: data.reference || '',
+          notes: data.notes || '',
+          photoUrl: data.photoUrl || '',
+          whatsappOptIn: data.whatsappOptIn ?? true,
+        }));
+      } else {
+        setExisting(null);
+        toast.info('Telefone ainda não cadastrado. Preencha os dados do tutor.');
+      }
+    } catch (error: any) {
+      if (sequence === lookupSequence.current) toast.error(error.response?.data?.message || 'Não foi possível consultar o telefone.');
+    } finally {
+      if (sequence === lookupSequence.current) setSearching(false);
+    }
   };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     if (savingRef.current || searching) return;
     if (tutor.phone.replace(/\D/g, '').length < 10) { toast.error('Informe um telefone válido com DDD.'); return; }
-    savingRef.current = true; setSaving(true);
+    savingRef.current = true;
+    setSaving(true);
     try {
+      const fullAddress = composeDetailedAddress(tutor.street, tutor.number, tutor.neighborhood);
+      const tutorPayload = {
+        name: tutor.name.trim(),
+        phone: tutor.phone.trim(),
+        cpfCnpj: tutor.cpfCnpj.trim() || undefined,
+        address: fullAddress || undefined,
+        reference: tutor.reference.trim() || undefined,
+        notes: tutor.notes.trim() || undefined,
+        photoUrl: tutor.photoUrl || undefined,
+        whatsappOptIn: tutor.whatsappOptIn,
+      };
+
       const { data } = await api.post<ReceptionResult>('/petshop/reception/registrations', {
-        ...(existing ? { customerId: existing.id } : { tutor }),
+        ...(existing ? { customerId: existing.id } : { tutor: tutorPayload }),
         ...(withPet ? { pet } : {}),
       });
       toast.success(data.pet ? 'Tutor e pet prontos para atendimento!' : 'Tutor cadastrado com sucesso!');
       onSaved(data);
-    } catch (error: any) { toast.error(error.response?.data?.message || 'Não foi possível salvar o cadastro.'); }
-    finally { savingRef.current = false; setSaving(false); }
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível salvar o cadastro.');
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
+    }
   };
+
   return <Modal title={includePet ? 'Cadastrar tutor e pet' : 'Novo tutor'} onClose={() => { if (!saving) onClose(); }} maxWidth="sm:max-w-3xl">
     <form onSubmit={submit} className="space-y-5">
       <p className="text-sm leading-6 text-slate-500">Cadastre o responsável e, se desejar, o pet no mesmo atendimento. Para um tutor existente, busque pelo telefone.</p>
+
       <fieldset disabled={saving} className="grid gap-4 sm:grid-cols-2">
-        <legend className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-900"><UserRound size={16} /> Dados do tutor</legend>
+        <legend className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-900">
+          <UserRound size={16} /> Dados do tutor
+        </legend>
+
+        {/* 1. Imagem / Foto do tutor no topo */}
+        <div className="sm:col-span-2">
+          <PhotoUploadField
+            label="Foto do tutor (opcional)"
+            subjectName={tutor.name}
+            value={tutor.photoUrl}
+            onChange={photoUrl => setTutor(current => ({ ...current, photoUrl }))}
+          />
+        </div>
+
+        {/* 2. Nome completo do tutor */}
+        <label className="sm:col-span-2">
+          <span className={labelClass}>Nome completo do tutor *</span>
+          <input
+            required
+            autoComplete="name"
+            className={inputClass}
+            placeholder="Ex: Juliana Mantovani"
+            disabled={Boolean(existing)}
+            value={tutor.name}
+            onChange={e => setTutor({ ...tutor, name: e.target.value })}
+          />
+        </label>
+
+        {/* 3. Telefone / WhatsApp com DDD + Busca inline */}
         <div className="sm:col-span-2">
           <label htmlFor="reception-phone" className={labelClass}>WhatsApp / telefone com DDD *</label>
           <div className="flex flex-wrap gap-2">
-            <input id="reception-phone" type="tel" autoComplete="tel" required className={`${inputClass} min-w-0 flex-1 basis-48`} value={tutor.phone}
-              onChange={e => { lookupSequence.current++; setSearching(false); setExisting(null); setTutor({ ...tutor, phone: e.target.value, ...(existing ? { name: '' } : {}) }); }} />
-            <button type="button" disabled={searching} onClick={() => void lookup()} className={`${secondaryButton} inline-flex shrink-0 items-center gap-2`}><Search size={15} />{searching ? 'Buscando…' : 'Buscar por telefone'}</button>
+            <input
+              id="reception-phone"
+              type="tel"
+              autoComplete="tel"
+              required
+              placeholder="Ex: (14) 99114-6769"
+              className={`${inputClass} min-w-0 flex-1 basis-48`}
+              value={tutor.phone}
+              onChange={e => {
+                lookupSequence.current++;
+                setSearching(false);
+                setExisting(null);
+                setTutor({
+                  ...tutor,
+                  phone: e.target.value,
+                  ...(existing ? { name: '', street: '', number: '', neighborhood: '', reference: '', notes: '', photoUrl: '' } : {}),
+                });
+              }}
+            />
+            <button
+              type="button"
+              disabled={searching}
+              onClick={() => void lookup()}
+              className={`${secondaryButton} inline-flex shrink-0 items-center gap-2`}
+            >
+              <Search size={15} />
+              {searching ? 'Buscando…' : 'Buscar por telefone'}
+            </button>
           </div>
         </div>
-        {existing && <div className="sm:col-span-2 rounded-xl border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900" role="status"><strong>{existing.name}</strong> já está cadastrado. O novo pet será vinculado a esse tutor. Os dados atuais do tutor serão preservados.</div>}
-        <label className="sm:col-span-2"><span className={labelClass}>Nome completo do tutor *</span><input required autoComplete="name" className={inputClass} disabled={Boolean(existing)} value={tutor.name} onChange={e => setTutor({ ...tutor, name: e.target.value })} /></label>
-        {!existing && <>
-          <label><span className={labelClass}>E-mail</span><input type="email" autoComplete="email" className={inputClass} value={tutor.email} onChange={e => setTutor({ ...tutor, email: e.target.value })} /></label>
-          <label><span className={labelClass}>CPF</span><input className={inputClass} value={tutor.cpfCnpj} onChange={e => setTutor({ ...tutor, cpfCnpj: e.target.value })} /></label>
-          <details className="sm:col-span-2 rounded-xl border border-slate-200 p-3"><summary className="cursor-pointer text-sm font-medium text-slate-700">Endereço, foto e observações do tutor</summary><div className="mt-3 grid gap-3">
-            <PhotoUploadField label="Foto do tutor" value={tutor.photoUrl} onChange={photoUrl => setTutor(current => ({ ...current, photoUrl }))} />
-            <label><span className={labelClass}>Endereço</span><input autoComplete="street-address" className={inputClass} value={tutor.address} onChange={e => setTutor({ ...tutor, address: e.target.value })} /></label>
-            <label><span className={labelClass}>Observações do tutor</span><textarea className={inputClass} value={tutor.notes} onChange={e => setTutor({ ...tutor, notes: e.target.value })} /></label>
-          </div></details>
-          <label className="sm:col-span-2 flex items-start gap-2 rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-700"><input type="checkbox" className="mt-1" checked={tutor.whatsappOptIn} onChange={e => setTutor({ ...tutor, whatsappOptIn: e.target.checked })} />Autoriza confirmações e lembretes automáticos via WhatsApp</label>
-        </>}
+
+        {existing && (
+          <div className="sm:col-span-2 rounded-xl border border-teal-200 bg-teal-50 p-3 text-sm text-teal-900" role="status">
+            <strong>{existing.name}</strong> já está cadastrado. O novo pet será vinculado a esse tutor. Os dados atuais do tutor serão preservados.
+          </div>
+        )}
+
+        {!existing && (
+          <>
+            {/* CPF opcional (sem e-mail) */}
+            <label className="sm:col-span-2">
+              <span className={labelClass}>CPF (opcional)</span>
+              <input
+                className={inputClass}
+                placeholder="000.000.000-00"
+                value={tutor.cpfCnpj}
+                onChange={e => setTutor({ ...tutor, cpfCnpj: e.target.value })}
+              />
+            </label>
+
+            {/* 4. Endereço estruturado: Rua / Avenida e Número */}
+            <div className="sm:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-12">
+              <label className="sm:col-span-8">
+                <span className={labelClass}>Endereço (Rua / Avenida)</span>
+                <input
+                  autoComplete="street-address"
+                  className={inputClass}
+                  placeholder="Ex: R. Hipólito Lopes"
+                  value={tutor.street}
+                  onChange={e => setTutor({ ...tutor, street: e.target.value })}
+                />
+              </label>
+              <label className="sm:col-span-4">
+                <span className={labelClass}>Número</span>
+                <input
+                  className={inputClass}
+                  placeholder="Ex: 103"
+                  value={tutor.number}
+                  onChange={e => setTutor({ ...tutor, number: e.target.value })}
+                />
+              </label>
+            </div>
+
+            {/* Bairro e Referência */}
+            <label>
+              <span className={labelClass}>Bairro</span>
+              <input
+                className={inputClass}
+                placeholder="Ex: Vila Leozina"
+                value={tutor.neighborhood}
+                onChange={e => setTutor({ ...tutor, neighborhood: e.target.value })}
+              />
+            </label>
+            <label>
+              <span className={labelClass}>Ponto de referência / Complemento</span>
+              <input
+                className={inputClass}
+                placeholder="Ex: Próximo ao Campo Orlandão"
+                value={tutor.reference}
+                onChange={e => setTutor({ ...tutor, reference: e.target.value })}
+              />
+            </label>
+
+            {/* Observações */}
+            <label className="sm:col-span-2">
+              <span className={labelClass}>Observações do tutor</span>
+              <textarea
+                rows={2}
+                className={inputClass}
+                placeholder="Preferências de contato, restrições ou notas gerais..."
+                value={tutor.notes}
+                onChange={e => setTutor({ ...tutor, notes: e.target.value })}
+              />
+            </label>
+
+            {/* Autorização WhatsApp */}
+            <label className="sm:col-span-2 flex items-start gap-2.5 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-5 text-slate-700">
+              <input
+                type="checkbox"
+                className="mt-0.5 rounded border-slate-300 text-teal-600 focus:ring-teal-500"
+                checked={tutor.whatsappOptIn}
+                onChange={e => setTutor({ ...tutor, whatsappOptIn: e.target.checked })}
+              />
+              <span>Autoriza confirmações e lembretes automáticos via WhatsApp</span>
+            </label>
+          </>
+        )}
       </fieldset>
-      <label className="flex min-h-14 cursor-pointer items-center gap-3 rounded-xl border border-teal-200 bg-teal-50/50 p-4 text-sm font-semibold text-teal-900"><input type="checkbox" checked={withPet} disabled={saving || Boolean(existing)} onChange={e => setWithPet(e.target.checked)} /><PawPrint size={18} />Cadastrar o pet junto com o tutor</label>
+
+      <label className="flex min-h-14 cursor-pointer items-center gap-3 rounded-xl border border-teal-200 bg-teal-50/50 p-4 text-sm font-semibold text-teal-900">
+        <input type="checkbox" checked={withPet} disabled={saving || Boolean(existing)} onChange={e => setWithPet(e.target.checked)} />
+        <PawPrint size={18} />
+        Cadastrar o pet junto com o tutor
+      </label>
+
       {withPet && <fieldset disabled={saving} className="grid gap-4 rounded-xl border border-slate-200 p-4 sm:grid-cols-2">
         <legend className="px-1 text-sm font-semibold text-slate-900">Dados do pet</legend>
         <label><span className={labelClass}>Nome do pet *</span><input required className={inputClass} value={pet.name} onChange={e => setPet({ ...pet, name: e.target.value })} /></label>

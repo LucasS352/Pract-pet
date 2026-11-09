@@ -2,26 +2,30 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { NavLink, Outlet, useLocation, useNavigate, useOutletContext } from 'react-router-dom';
 import {
   CalendarDays,
+  Car,
   Coins,
   KeyRound,
   LayoutDashboard,
   Lock,
   LogOut,
   MessageSquare,
-  Package,
+  Menu,
+  X,
+
   PackageCheck,
   PawPrint,
   Scissors,
   ShieldAlert,
   ShoppingCart,
   TrendingUp,
-  Truck,
+
   UserCheck,
   UserPlus,
   UserRoundCog,
   Users,
 } from 'lucide-react';
 import { api } from '@/lib/api';
+import { getFullUrl } from '@/lib/getFullUrl';
 import { useAuthStore } from '@/store/auth';
 import { useShift } from '@/contexts/ShiftContext';
 import { PetshopOperatorLoginModal } from '@/pages/petshop/PetshopOperatorLoginModal';
@@ -32,14 +36,15 @@ import '@/pages/petshop/petshop.css';
 const allDesktopNav = [
   { to: '/petshop', label: 'Hoje', icon: LayoutDashboard, end: true },
   { to: '/petshop/agenda', label: 'Agenda', icon: CalendarDays },
+  { to: '/petshop/taxidog', label: 'Táxi Dog', icon: Car },
   { to: '/petshop/pacotes', label: 'Pacotes', icon: PackageCheck },
   { to: '/petshop/pets', label: 'Pets', icon: PawPrint },
   { to: '/petshop/tutores', label: 'Tutores', icon: Users },
   { to: '/petshop/servicos', label: 'Serviços', icon: Scissors },
-  { to: '/petshop/produtos', label: 'Produtos', icon: Package },
+
   { to: '/petshop/whatsapp', label: 'WhatsApp', icon: MessageSquare },
-  { to: '/petshop/fornecedores', label: 'Fornecedores', icon: Truck },
-  { to: '/petshop/pedidos-compra', label: 'Pedidos Compra', icon: ShoppingCart },
+
+
   { to: '/petshop/equipe', label: 'Equipe', icon: UserRoundCog, end: true },
   { to: '/petshop/equipe/comissoes', label: 'Comissões', icon: Coins },
   { to: '/petshop/metricas', label: 'Métricas & Vendas', icon: TrendingUp },
@@ -101,6 +106,7 @@ export function PetshopLayout() {
   const [tenantError, setTenantError] = useState(false);
   const [showOpModal, setShowOpModal] = useState(false);
   const [showCreateAccessModal, setShowCreateAccessModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const modules = useMemo(() => {
     const raw = tenant?.modulos;
@@ -143,6 +149,7 @@ export function PetshopLayout() {
       return [
         { to: '/petshop', label: 'Hoje', icon: LayoutDashboard, end: true },
         { to: '/petshop/agenda', label: 'Agenda', icon: CalendarDays },
+        { to: '/petshop/taxidog', label: 'Táxi Dog', icon: Car },
       ];
     }
     return allDesktopNav;
@@ -225,9 +232,20 @@ export function PetshopLayout() {
         {/* Cabeçalho Loja */}
         <div className="border-b border-[var(--pc-border)] px-5 py-4">
           <div className="flex items-center gap-3">
-            <div className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[var(--pc-text)] text-white">
-              <PawPrint size={19} strokeWidth={2} />
-            </div>
+            {tenant?.logoUrl ? (
+              <div className="relative h-10 w-10 shrink-0 overflow-hidden rounded-xl border border-zinc-200/90 bg-white p-0.5 shadow-2xs flex items-center justify-center">
+                <img
+                  src={getFullUrl(tenant.logoUrl)}
+                  alt={tenantName}
+                  className="h-full w-full object-contain"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              </div>
+            ) : (
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-teal-800 text-white shadow-2xs">
+                <PawPrint size={20} strokeWidth={2} />
+              </div>
+            )}
             <div className="min-w-0">
               <p className="text-xs font-semibold uppercase tracking-[.14em] text-[var(--pc-action)]">pract. pet</p>
               <p className="truncate text-sm font-semibold text-[var(--pc-text)]" title={tenantName}>
@@ -317,11 +335,23 @@ export function PetshopLayout() {
       </aside>
 
       {/* Top Header */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-4 backdrop-blur lg:ml-64 lg:px-6">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-3 sm:px-4 backdrop-blur lg:ml-64 lg:px-6">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[var(--pc-text)] text-white lg:hidden">
-            <PawPrint aria-hidden="true" size={17} />
-          </div>
+          <button type="button" onClick={() => setMobileMenuOpen(true)} aria-label="Abrir menu" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-[var(--pc-border)] bg-white text-[var(--pc-text)] shadow-2xs active:bg-slate-100 lg:hidden"><Menu size={18} /></button>
+          {tenant?.logoUrl ? (
+            <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-0.5 shadow-2xs flex items-center justify-center lg:hidden">
+              <img
+                src={getFullUrl(tenant.logoUrl)}
+                alt={tenantName}
+                className="h-full w-full object-contain"
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+            </div>
+          ) : (
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-800 text-white lg:hidden">
+              <PawPrint aria-hidden="true" size={17} />
+            </div>
+          )}
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold lg:hidden">{tenantName}</p>
             <p className="hidden text-sm text-[var(--pc-text-secondary)] lg:block">Área de atendimento e gestão</p>
@@ -435,7 +465,7 @@ export function PetshopLayout() {
       {/* Navegação Mobile */}
       <nav
         aria-label="Navegação mobile"
-        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-2' : 'grid-cols-4'} border-t border-[var(--pc-border)] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden`}
+        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-2' : 'grid-cols-5'} border-t border-[var(--pc-border)] bg-white/95 px-1 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.04)]`}
       >
         <NavLink
           to="/petshop"
@@ -473,9 +503,11 @@ export function PetshopLayout() {
               <PawPrint size={18} strokeWidth={2} />
               <span>Pets</span>
             </NavLink>
+            <NavLink to="/petshop/pacotes" className={({ isActive }) => `flex min-h-14 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition ${isActive ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-500'}`}><PackageCheck size={18} strokeWidth={2} /><span>Pacotes</span></NavLink>
+            <button type="button" onClick={() => setMobileMenuOpen(true)} className={`flex min-h-14 flex-col items-center justify-center gap-0.5 text-[10px] font-medium transition ${mobileMenuOpen ? 'text-[var(--pc-action-hover)] font-bold' : 'text-slate-500'}`}><Menu size={18} strokeWidth={2} /><span>Menu</span></button>
             <NavLink
               to={hasPdv ? '/' : '/petshop/agenda'}
-              className="flex min-h-16 flex-col items-center justify-center gap-1 text-[11px] font-medium text-slate-400"
+              className="hidden"
             >
               <ShoppingCart size={18} strokeWidth={2} />
               <span>{hasPdv ? 'PDV' : 'Agenda'}</span>
@@ -483,6 +515,109 @@ export function PetshopLayout() {
           </>
         )}
       </nav>
+
+      {/* Drawer Mobile Completo */}
+      {mobileMenuOpen && (
+        <div className="fixed inset-0 z-[70] lg:hidden">
+          <div className="fixed inset-0 bg-slate-950/50 backdrop-blur-[2px]" onClick={() => setMobileMenuOpen(false)} />
+          <div className="fixed inset-y-0 left-0 z-10 flex w-[285px] max-w-[85vw] flex-col bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-[var(--pc-border)] px-4 py-3.5">
+              <div className="flex items-center gap-2.5 min-w-0">
+                {tenant?.logoUrl ? (
+                  <div className="relative h-8 w-8 shrink-0 overflow-hidden rounded-lg border border-zinc-200 bg-white p-0.5 shadow-2xs flex items-center justify-center">
+                    <img
+                      src={getFullUrl(tenant.logoUrl)}
+                      alt={tenantName}
+                      className="h-full w-full object-contain"
+                      onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                    />
+                  </div>
+                ) : (
+                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-800 text-white">
+                    <PawPrint size={17} />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-[var(--pc-action)]">pract. pet</p>
+                  <p className="truncate text-xs font-bold text-slate-900">{tenantName}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Fechar menu"
+                className="grid h-9 w-9 place-items-center rounded-xl bg-slate-100 text-slate-600"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="border-b border-[var(--pc-border)] p-3">
+              {operator ? (
+                <div className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-bold text-emerald-950">{operator.name}</p>
+                    <p className="truncate text-[11px] text-emerald-700">{(operator as any)?.jobTitle || (operator.isManager ? 'Gerente' : 'Colaborador')}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setMobileMenuOpen(false); setShowOpModal(true); }}
+                    className="rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-[11px] font-bold text-emerald-800"
+                  >
+                    Trocar
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => { setMobileMenuOpen(false); setShowOpModal(true); }}
+                  className="flex w-full items-center justify-between rounded-xl border border-dashed border-[var(--pc-border-strong)] bg-white p-2.5 text-xs font-semibold text-slate-700"
+                >
+                  <span>Entrar com PIN</span>
+                  <span className="text-[var(--pc-action)] font-bold">Entrar</span>
+                </button>
+              )}
+            </div>
+            <nav className="flex-1 space-y-1 overflow-y-auto p-3">
+              {currentNav.map(item => (
+                <NavLink key={item.to} to={item.to} end={item.end} onClick={() => setMobileMenuOpen(false)} className={linkClass}>
+                  <item.icon aria-hidden="true" size={18} />
+                  <span>{item.label}</span>
+                </NavLink>
+              ))}
+            </nav>
+            <div className="border-t border-[var(--pc-border)] p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] space-y-2">
+              {(user?.role === 'admin' || user?.role === 'superadmin') && (
+                <button
+                  type="button"
+                  onClick={() => { setMobileMenuOpen(false); setShowCreateAccessModal(true); }}
+                  className="flex min-h-10 w-full items-center gap-2.5 rounded-xl border border-emerald-300 bg-emerald-50/80 px-3 text-xs font-bold text-emerald-800"
+                >
+                  <KeyRound size={15} />
+                  <span>Acesso da Equipe (Login)</span>
+                </button>
+              )}
+              {hasPdv && (
+                <button
+                  type="button"
+                  onClick={() => { setMobileMenuOpen(false); navigate('/'); }}
+                  className="flex min-h-10 w-full items-center gap-2.5 rounded-xl border border-[var(--pc-border)] bg-white px-3 text-xs font-semibold text-slate-800"
+                >
+                  <ShoppingCart size={15} />
+                  <span>Ir para o PDV Caixa</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={exit}
+                className="flex min-h-10 w-full items-center gap-2.5 rounded-xl border border-rose-200 bg-rose-50/60 px-3 text-xs font-semibold text-rose-700"
+              >
+                <LogOut size={15} />
+                <span>Sair da conta ({user?.name})</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal de Login de Colaborador */}
       <PetshopOperatorLoginModal

@@ -72,10 +72,28 @@ const TRIGGER_META: Record<
     icon: Bell,
   },
   PET_READY: {
-    label: 'Pet Pronto para Retirada',
-    triggerBadge: 'Disparo: etapa Pronto / Buscar',
-    description: 'Informa que o pet já está pronto para ser retirado.',
+    label: 'Pet Pronto',
+    triggerBadge: 'Disparo: etapa Pronto',
+    description: 'Informa que o pet está pronto e orienta retirada ou entrega conforme o Táxi Dog.',
     icon: PawPrint,
+  },
+  STAGE_PHOTO: {
+    label: 'Foto da Etapa',
+    triggerBadge: 'Disparo: colaborador envia foto',
+    description: 'Envia ao tutor a foto e o recado da etapa pelo WhatsApp conectado.',
+    icon: ImageIcon,
+  },
+  TAXI_DOG_PICKUP_DEPARTURE: {
+    label: 'Táxi Dog Saiu para Buscar',
+    triggerBadge: 'Disparo: saída da coleta',
+    description: 'Avisa que o motorista saiu para buscar o pet.',
+    icon: Send,
+  },
+  TAXI_DOG_DROPOFF_DEPARTURE: {
+    label: 'Táxi Dog Saiu para Entregar',
+    triggerBadge: 'Disparo: saída da entrega',
+    description: 'Avisa que o motorista saiu para entregar o pet.',
+    icon: Send,
   },
   PACKAGE_LAST_SESSION: {
     label: 'Última Sessão do Pacote',
@@ -88,6 +106,12 @@ const TRIGGER_META: Record<
     triggerBadge: 'Disparo: 3 dias antes de expirar',
     description: 'Lembra o tutor da validade do pacote e saldo restante.',
     icon: Clock,
+  },
+  INACTIVE_CUSTOMER: {
+    label: 'Lembrete de Retorno (Cliente Ausente)',
+    triggerBadge: 'Disparo: dias sem agendar',
+    description: 'Envia lembrete automático para clientes que estão há X dias sem agendar.',
+    icon: Sparkles,
   },
 };
 
@@ -102,9 +126,14 @@ const TEMPLATE_VARIABLES = [
   { tag: '{link_portal}', label: 'Link do Portal', sample: 'https://practpet.app/p/abc123' },
   { tag: '{saldo_pacote}', label: 'Saldo do Pacote', sample: '1' },
   { tag: '{validade_pacote}', label: 'Validade do Pacote', sample: '30/11' },
+  { tag: '{dias_sem_vir}', label: 'Dias sem Agendar', sample: '15' },
 ];
 
 function getRuleTriggerBadge(rule: PetshopNotificationRule): string {
+  if (rule.triggerType === 'INACTIVE_CUSTOMER') {
+    const days = rule.triggerMinutesBefore || 15;
+    return `Disparo: ${days} dias sem agendar`;
+  }
   if (rule.triggerType === 'BEFORE_APPOINTMENT') {
     const mins = rule.triggerMinutesBefore || 120;
     if (mins >= 1440 && mins % 1440 === 0) {
@@ -120,6 +149,10 @@ function getRuleTriggerBadge(rule: PetshopNotificationRule): string {
 }
 
 function getRuleDescription(rule: PetshopNotificationRule): string {
+  if (rule.triggerType === 'INACTIVE_CUSTOMER') {
+    const days = rule.triggerMinutesBefore || 15;
+    return `Envia mensagem automática quando o cliente completa ${days} dias sem movimentação ou novo agendamento.`;
+  }
   if (rule.triggerType === 'BEFORE_APPOINTMENT') {
     const mins = rule.triggerMinutesBefore || 120;
     if (mins >= 1440) return 'Lembra o tutor do agendamento no dia anterior.';
@@ -245,16 +278,21 @@ export default function PetshopWhatsappPage() {
     setEditorMessage(selectedRule.messageTemplate || '');
     setEditorIncludePhoto(Boolean(selectedRule.includePhoto));
 
-    const mins = selectedRule.triggerMinutesBefore || 120;
-    if (mins >= 1440 && mins % 1440 === 0) {
-      setEditorAntecedenceValue(mins / 1440);
+    if (selectedRule.triggerType === 'INACTIVE_CUSTOMER') {
+      setEditorAntecedenceValue(selectedRule.triggerMinutesBefore || 15);
       setEditorAntecedenceUnit('days');
-    } else if (mins >= 60 && mins % 60 === 0) {
-      setEditorAntecedenceValue(mins / 60);
-      setEditorAntecedenceUnit('hours');
     } else {
-      setEditorAntecedenceValue(mins);
-      setEditorAntecedenceUnit('minutes');
+      const mins = selectedRule.triggerMinutesBefore || 120;
+      if (mins >= 1440 && mins % 1440 === 0) {
+        setEditorAntecedenceValue(mins / 1440);
+        setEditorAntecedenceUnit('days');
+      } else if (mins >= 60 && mins % 60 === 0) {
+        setEditorAntecedenceValue(mins / 60);
+        setEditorAntecedenceUnit('hours');
+      } else {
+        setEditorAntecedenceValue(mins);
+        setEditorAntecedenceUnit('minutes');
+      }
     }
   }, [selectedRule]);
 
@@ -301,6 +339,8 @@ export default function PetshopWhatsappPage() {
         if (editorAntecedenceUnit === 'days') finalMinutes = val * 1440;
         else if (editorAntecedenceUnit === 'hours') finalMinutes = val * 60;
         else finalMinutes = val;
+      } else if (selectedRule.triggerType === 'INACTIVE_CUSTOMER') {
+        finalMinutes = Math.max(1, Math.min(365, Number(editorAntecedenceValue) || 15));
       }
 
       const payload = {
@@ -579,6 +619,7 @@ export default function PetshopWhatsappPage() {
                   <option value="BEFORE_APPOINTMENT">Lembretes</option>
                   <option value="PET_READY">Pet Pronto</option>
                   <option value="PACKAGE_LAST_SESSION">Pacotes</option>
+                  <option value="INACTIVE_CUSTOMER">Retorno / Inativos</option>
                 </select>
 
                 <select
@@ -809,6 +850,45 @@ export default function PetshopWhatsappPage() {
                               do horário do atendimento.
                             </span>
                           </div>
+                        </div>
+                      ) : selectedRule.triggerType === 'INACTIVE_CUSTOMER' ? (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 p-3.5 space-y-2.5">
+                          <label className="text-[11px] font-bold text-emerald-900 block">
+                            Dias sem agendar / sem movimentação
+                          </label>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <input
+                              type="number"
+                              min={1}
+                              max={365}
+                              value={editorAntecedenceValue}
+                              onChange={e => setEditorAntecedenceValue(Number(e.target.value))}
+                              className="w-20 rounded-xl border border-emerald-300 bg-white px-3 py-2 text-center text-xs font-bold text-slate-900 outline-none focus:border-teal-600"
+                            />
+                            <span className="text-xs font-semibold text-emerald-900">
+                              dias sem marcar nenhum atendimento.
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                            <span className="text-[10px] font-semibold text-slate-500 mr-1">Sugestões rápidas:</span>
+                            {[15, 20, 30, 45].map(d => (
+                              <button
+                                key={d}
+                                type="button"
+                                onClick={() => setEditorAntecedenceValue(d)}
+                                className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold transition cursor-pointer ${
+                                  editorAntecedenceValue === d
+                                    ? 'bg-teal-700 text-white'
+                                    : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                {d} dias
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-[11px] text-slate-500">
+                            Você pode criar mais de uma régua em "+ Nova automação" (ex: uma de 15 dias e outra de 30 dias).
+                          </p>
                         </div>
                       ) : (
                         <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600">
@@ -1283,14 +1363,21 @@ export default function PetshopWhatsappPage() {
                 <label className={labelClass}>Evento Gatilho *</label>
                 <select
                   value={newRuleForm.triggerType}
-                  onChange={e =>
+                  onChange={e => {
+                    const nextType = e.target.value as PetshopNotificationRule['triggerType'];
                     setNewRuleForm({
                       ...newRuleForm,
-                      triggerType: e.target.value as any,
-                    })
-                  }
+                      triggerType: nextType,
+                      triggerMinutesBefore: nextType === 'INACTIVE_CUSTOMER' ? 15 : 120,
+                      messageTemplate:
+                        nextType === 'INACTIVE_CUSTOMER'
+                          ? 'Olá, {nome_tutor}! Já faz *{dias_sem_vir} dias* que não vemos *{nome_pet}* por aqui na *{nome_loja}*! Que tal agendar um horário para deixar {nome_pet} limpinho(a) essa semana?'
+                          : newRuleForm.messageTemplate,
+                    });
+                  }}
                   className={inputClass}
                 >
+                  <option value="INACTIVE_CUSTOMER">Lembrete de Retorno (X dias sem agendar)</option>
                   <option value="BEFORE_APPOINTMENT">Lembrete Antes do Atendimento</option>
                   <option value="APPOINTMENT_CONFIRMED">Confirmação de Agendamento</option>
                   <option value="PET_READY">Pet Pronto p/ Retirada</option>
@@ -1314,6 +1401,26 @@ export default function PetshopWhatsappPage() {
                     }
                     className={inputClass}
                     placeholder="Ex: 120 (2 horas)"
+                  />
+                </div>
+              )}
+
+              {newRuleForm.triggerType === 'INACTIVE_CUSTOMER' && (
+                <div>
+                  <label className={labelClass}>Dias sem Agendar *</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={newRuleForm.triggerMinutesBefore}
+                    onChange={e =>
+                      setNewRuleForm({
+                        ...newRuleForm,
+                        triggerMinutesBefore: Number(e.target.value),
+                      })
+                    }
+                    className={inputClass}
+                    placeholder="Ex: 15, 20 ou 30 dias"
                   />
                 </div>
               )}

@@ -6,4 +6,4 @@ google-credentials.json
 !scripts/petshop-demo-sos.sql
 list-drive.js
 test-upload.js
-backups/
+/backups/

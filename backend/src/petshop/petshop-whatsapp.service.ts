@@ -14,6 +14,7 @@ import { createHash, randomBytes } from 'crypto';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
+import { hasTaxiDropoff, hasTaxiPickup, parseAppointmentTransport, taxiNotificationText } from './petshop-transport';
 
 interface TenantWhatsappRuntime {
   tenantId: string;
@@ -76,6 +77,15 @@ const DEFAULT_NOTIFICATION_RULES = [
     active: true,
     messageTemplate:
       'Olá, {nome_tutor}! Hoje realizamos mais um atendimento do pacote de *{nome_pet}*. Restam *{saldo_pacote}* sessões disponíveis (validade até {validade_pacote}). Fale conosco na recepção caso deseje garantir a renovação com condições especiais!',
+  },
+  {
+    name: 'Lembrete de Retorno (15 dias sem agendar)',
+    triggerType: 'INACTIVE_CUSTOMER',
+    triggerMinutesBefore: 15,
+    includePhoto: false,
+    active: true,
+    messageTemplate:
+      'Olá, {nome_tutor}! Já faz *{dias_sem_vir} dias* que não vemos *{nome_pet}* por aqui na *{nome_loja}*! Que tal agendar um horário para deixar {nome_pet} limpinho(a) e cheiroso(a) essa semana?',
   },
 ];
 
@@ -656,6 +666,7 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       'PET_READY',
       'PACKAGE_LAST_SESSION',
       'PACKAGE_EXPIRING',
+      'INACTIVE_CUSTOMER',
     ]);
     if (!validTriggers.has(triggerType)) {
       throw new BadRequestException('Tipo de gatilho inválido.');
@@ -671,6 +682,17 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       ) {
         throw new BadRequestException(
           'A antecedência do lembrete deve ficar entre 5 minutos e 7 dias (10080 minutos).',
+        );
+      }
+    } else if (triggerType === 'INACTIVE_CUSTOMER') {
+      triggerMinutesBefore = Number(data?.triggerMinutesBefore ?? 15);
+      if (
+        !Number.isInteger(triggerMinutesBefore) ||
+        triggerMinutesBefore < 1 ||
+        triggerMinutesBefore > 365
+      ) {
+        throw new BadRequestException(
+          'O prazo de inatividade deve ficar entre 1 e 365 dias.',
         );
       }
     }
@@ -713,6 +735,19 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
         }
       } else if (!triggerMinutesBefore) {
         triggerMinutesBefore = 120;
+      }
+    } else if (triggerType === 'INACTIVE_CUSTOMER') {
+      if (data?.triggerMinutesBefore !== undefined) {
+        triggerMinutesBefore = Number(data.triggerMinutesBefore);
+        if (
+          !Number.isInteger(triggerMinutesBefore) ||
+          triggerMinutesBefore < 1 ||
+          triggerMinutesBefore > 365
+        ) {
+          throw new BadRequestException('O prazo de inatividade deve ficar entre 1 e 365 dias.');
+        }
+      } else if (!triggerMinutesBefore) {
+        triggerMinutesBefore = 15;
       }
     } else {
       triggerMinutesBefore = null;
@@ -816,6 +851,7 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       link_portal?: string;
       saldo_pacote?: string | number;
       validade_pacote?: string;
+      dias_sem_vir?: string | number;
     },
   ): string {
     const replacements: Record<string, string> = {
@@ -829,6 +865,7 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       '{link_portal}': vars.link_portal || '',
       '{saldo_pacote}': String(vars.saldo_pacote ?? ''),
       '{validade_pacote}': vars.validade_pacote || '',
+      '{dias_sem_vir}': String(vars.dias_sem_vir ?? ''),
     };
 
     let result = template;
@@ -959,7 +996,7 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
         });
         if (existing) continue;
 
-        const messageContent = this.renderTemplate(rule.messageTemplate, {
+        const templateContent = this.renderTemplate(rule.messageTemplate, {
           nome_tutor: appointment.customer.name.split(' ')[0] || appointment.customer.name,
           nome_pet: appointment.pet?.name || 'Pet',
           servico: serviceNames,
@@ -969,6 +1006,11 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
           endereco: shopMeta.address,
           link_portal: portalLink,
         });
+        const messageContent = taxiNotificationText(triggerType, parseAppointmentTransport(appointment.checkInNotes), {
+          tutor: appointment.customer.name.split(' ')[0] || appointment.customer.name,
+          pet: appointment.pet?.name || 'Pet', service: serviceNames, date: data, time: hora,
+          shop: shopMeta.shopName, portalLink,
+        }) || templateContent;
 
         const expiresAt =
           triggerType === 'APPOINTMENT_CONFIRMED'
@@ -1001,6 +1043,75 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
     } catch (err: any) {
       this.logger.warn(`Erro ao enfileirar evento ${triggerType}: ${err?.message}`);
     }
+  }
+
+  async sendTaxiDogDeparture(appointmentId: string, direction: 'pickup' | 'dropoff') {
+    if (direction !== 'pickup' && direction !== 'dropoff') throw new BadRequestException('Direção do Táxi Dog inválida.');
+    const { tenantId, databaseUrl } = this.tenantContext.get();
+    const prisma = await this.prisma();
+    const appointment = await prisma.petAppointment.findUnique({ where: { id: appointmentId }, include: { customer: true, pet: true } });
+    if (!appointment) throw new NotFoundException('Agendamento não encontrado.');
+    const transport = parseAppointmentTransport(appointment.checkInNotes);
+    if (!transport || (direction === 'pickup' ? !hasTaxiPickup(transport.mode) : !hasTaxiDropoff(transport.mode))) {
+      throw new BadRequestException('Esta corrida não inclui a direção solicitada.');
+    }
+    if (direction === 'pickup' && appointment.status !== 'scheduled') throw new BadRequestException('A coleta exige um agendamento confirmado ainda não iniciado.');
+    if (direction === 'dropoff' && appointment.status !== 'ready') throw new BadRequestException('A entrega exige um pet pronto.');
+    if (appointment.customer.whatsappOptIn === false) throw new BadRequestException('Tutor não autorizou mensagens WhatsApp.');
+    // Garante que o aviso de pet pronto entre na fila antes do aviso de saída,
+    // inclusive quando o operador clica em seguida à mudança de status.
+    if (direction === 'dropoff') await this.enqueueAppointmentEvent('PET_READY', appointmentId);
+    const phone = this.normalizeBrazilPhone(appointment.customer.phone);
+    if (phone.length < 12) throw new BadRequestException('Telefone do tutor inválido.');
+    const shop = await this.resolveShopMetadata(tenantId);
+    const pet = appointment.pet?.name || 'seu pet';
+    const tutor = appointment.customer.name.split(' ')[0] || appointment.customer.name;
+    const messageContent = direction === 'pickup'
+      ? `Olá, ${tutor}! O Táxi Dog da *${shop.shopName}* está a caminho para buscar *${pet}* em ${transport.address}. Por favor, deixe o pet pronto para embarque.`
+      : `Olá, ${tutor}! O Táxi Dog da *${shop.shopName}* saiu para levar *${pet}* de volta para ${transport.address}. Estamos a caminho!`;
+    const triggerType = direction === 'pickup' ? 'TAXI_DOG_PICKUP_DEPARTURE' : 'TAXI_DOG_DROPOFF_DEPARTURE';
+    const idempotencyKey = `taxi-departure:${direction}:${appointmentId}`;
+    const job = await prisma.petshopNotificationJob.upsert({
+      where: { idempotencyKey }, update: {},
+      create: {
+        idempotencyKey, triggerType, customerId: appointment.customerId, petId: appointment.petId,
+        appointmentId, recipientPhone: phone, recipientName: appointment.customer.name,
+        petName: pet, messageContent, status: 'PENDING', scheduledFor: new Date(),
+        expiresAt: new Date(Date.now() + 2 * 3600_000), nextAttemptAt: new Date(),
+      },
+    });
+    this.processTenantQueue(tenantId, databaseUrl).catch(() => {});
+    return { id: job.id, status: job.status, alreadySent: job.status === 'SENT' };
+  }
+
+  async enqueueStagePhoto(appointmentId: string) {
+    const { tenantId, databaseUrl } = this.tenantContext.get();
+    const prisma = await this.prisma();
+    const appointment = await prisma.petAppointment.findUnique({ where: { id: appointmentId }, include: { customer: true, pet: true } });
+    if (!appointment?.stagePhotoUrl || !appointment.customer || appointment.customer.whatsappOptIn === false) return;
+    const phone = this.normalizeBrazilPhone(appointment.customer.phone);
+    if (phone.length < 12) return;
+    const history = Array.isArray(appointment.stageHistory) ? appointment.stageHistory as any[] : [];
+    const last = history.at(-1);
+    if (!last?.photoUrl || last.photoUrl !== appointment.stagePhotoUrl) return;
+    const shop = await this.resolveShopMetadata(tenantId);
+    const tutor = appointment.customer.name.split(' ')[0] || appointment.customer.name;
+    const pet = appointment.pet?.name || 'seu pet';
+    const label = String(last.label || appointment.status).trim();
+    const notes = String(last.notes || '').trim();
+    const messageContent = `Olá, ${tutor}! Veja a foto de *${pet}* na etapa *${label}* na *${shop.shopName}*.${notes ? `\n\nRecado: ${notes}` : ''}`;
+    const idempotencyKey = `stage-photo:${appointmentId}:${history.length}`;
+    await prisma.petshopNotificationJob.upsert({
+      where: { idempotencyKey }, update: {},
+      create: {
+        idempotencyKey, triggerType: 'STAGE_PHOTO', customerId: appointment.customerId,
+        petId: appointment.petId, appointmentId, recipientPhone: phone,
+        recipientName: appointment.customer.name, petName: pet, messageContent,
+        mediaUrl: appointment.stagePhotoUrl, status: 'PENDING', scheduledFor: new Date(),
+        expiresAt: new Date(Date.now() + 12 * 3600_000), nextAttemptAt: new Date(),
+      },
+    });
+    this.processTenantQueue(tenantId, databaseUrl).catch(() => {});
   }
 
   /**
@@ -1130,7 +1241,7 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
     const rules = await prisma.petshopNotificationRule.findMany({
       where: {
         active: true,
-        triggerType: { in: ['BEFORE_APPOINTMENT', 'PACKAGE_EXPIRING'] },
+        triggerType: { in: ['BEFORE_APPOINTMENT', 'PACKAGE_EXPIRING', 'INACTIVE_CUSTOMER'] },
       },
     });
     if (!rules.length) return;
@@ -1179,7 +1290,7 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
           const serviceNames =
             app.services.map((s: any) => s.nameSnapshot).join(', ') || 'Atendimento Pet';
 
-          const messageContent = this.renderTemplate(rule.messageTemplate, {
+          const templateContent = this.renderTemplate(rule.messageTemplate, {
             nome_tutor: app.customer.name.split(' ')[0] || app.customer.name,
             nome_pet: app.pet?.name || 'Pet',
             servico: serviceNames,
@@ -1188,6 +1299,11 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
             nome_loja: shopName,
             endereco: address,
           });
+          const messageContent = taxiNotificationText('BEFORE_APPOINTMENT', parseAppointmentTransport(app.checkInNotes), {
+            tutor: app.customer.name.split(' ')[0] || app.customer.name,
+            pet: app.pet?.name || 'Pet', service: serviceNames, date: data, time: hora,
+            shop: shopName, minutesBefore: rule.triggerMinutesBefore,
+          }) || templateContent;
 
           await prisma.petshopNotificationJob.create({
             data: {
@@ -1268,6 +1384,91 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
               status: 'PENDING',
               scheduledFor: now,
               expiresAt: new Date(pkg.expiresAt),
+              nextAttemptAt: now,
+            },
+          });
+        }
+      }
+
+      if (rule.triggerType === 'INACTIVE_CUSTOMER' && rule.triggerMinutesBefore) {
+        const inactiveDays = Math.max(1, Number(rule.triggerMinutesBefore));
+        const cutoffMax = new Date(now.getTime() - inactiveDays * 86_400_000);
+        const cutoffMin = new Date(now.getTime() - (inactiveDays + 5) * 86_400_000);
+
+        const activePets = await prisma.pet.findMany({
+          where: {
+            active: true,
+            appointments: {
+              some: {
+                status: { notIn: ['cancelled', 'no_show'] },
+                startsAt: { lte: cutoffMax },
+              },
+              none: {
+                status: { notIn: ['cancelled', 'no_show'] },
+                startsAt: { gt: cutoffMax },
+              },
+            },
+          },
+          include: {
+            customer: true,
+            appointments: {
+              where: { status: { notIn: ['cancelled', 'no_show'] } },
+              orderBy: { startsAt: 'desc' },
+              take: 1,
+              include: { services: true },
+            },
+          },
+          take: 100,
+        });
+
+        for (const pet of activePets) {
+          if (!pet.customer || pet.customer.whatsappOptIn === false) continue;
+          const lastAppt = pet.appointments?.[0];
+          if (!lastAppt || new Date(lastAppt.startsAt) < cutoffMin) continue;
+
+          const phone = this.normalizeBrazilPhone(pet.customer.phone);
+          if (phone.length < 12) continue;
+
+          const lastDateKey = new Date(lastAppt.startsAt).toISOString().slice(0, 10);
+          const idempotencyKey = `inactive:${rule.id}:${pet.id}:${lastDateKey}:${inactiveDays}d`.slice(0, 190);
+          const exists = await prisma.petshopNotificationJob.findUnique({
+            where: { idempotencyKey },
+          });
+          if (exists) continue;
+
+          const daysSince = Math.max(
+            inactiveDays,
+            Math.floor((now.getTime() - new Date(lastAppt.startsAt).getTime()) / 86_400_000),
+          );
+          const { data: lastDataStr } = this.formatBrDateAndTime(lastAppt.startsAt);
+          const lastServiceNames =
+            lastAppt.services?.map((s: any) => s.nameSnapshot).join(', ') || 'Banho e Tosa';
+
+          const messageContent = this.renderTemplate(rule.messageTemplate, {
+            nome_tutor: pet.customer.name.split(' ')[0] || pet.customer.name,
+            nome_pet: pet.name,
+            servico: lastServiceNames,
+            data: lastDataStr,
+            nome_loja: shopName,
+            endereco: address,
+            dias_sem_vir: daysSince,
+          });
+
+          await prisma.petshopNotificationJob.create({
+            data: {
+              idempotencyKey,
+              ruleId: rule.id,
+              triggerType: 'INACTIVE_CUSTOMER',
+              customerId: pet.customerId,
+              petId: pet.id,
+              appointmentId: lastAppt.id,
+              recipientPhone: phone,
+              recipientName: pet.customer.name,
+              petName: pet.name,
+              messageContent,
+              status: 'PENDING',
+              scheduledFor: now,
+              expiresAt: new Date(now.getTime() + 5 * 86_400_000),
               nextAttemptAt: now,
             },
           });

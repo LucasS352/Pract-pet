@@ -428,6 +428,49 @@ export class PetshopPackagesService {
   // 2. CONTRATAÇÃO, VINCULAÇÃO E CONSULTA DE PACOTES DE CLIENTES
   // ===========================================================================
 
+  private serializeContractNotes(userNotes?: string | null, transport?: any): string | null {
+    const cleanNotes = userNotes ? String(userNotes).trim() : '';
+    if (transport && transport.enabled) {
+      const street = transport.street ? String(transport.street).trim() : '';
+      const neighborhood = transport.neighborhood ? String(transport.neighborhood).trim() : '';
+      const composed = [street, neighborhood].filter(Boolean).join(' - ');
+      const effectiveAddress = composed || (transport.address ? String(transport.address).trim() : null);
+
+      return JSON.stringify({
+        transport: {
+          enabled: true,
+          mode: ['round_trip', 'pickup_only', 'dropoff_only'].includes(transport.mode) ? transport.mode : 'round_trip',
+          fee: Math.max(0, Number(transport.fee ?? 40)),
+          street: street || null,
+          neighborhood: neighborhood || null,
+          reference: transport.reference ? String(transport.reference).trim() : null,
+          notes: transport.notes ? String(transport.notes).trim() : null,
+          address: effectiveAddress,
+        },
+        userNotes: cleanNotes || null,
+      });
+    }
+    return cleanNotes || null;
+  }
+
+  private enrichContractTransport<T extends { notes?: string | null }>(contract: T): T & { transport?: any } {
+    if (!contract) return contract;
+    const raw = contract.notes;
+    if (raw && raw.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === 'object' && 'transport' in parsed) {
+          return {
+            ...contract,
+            notes: parsed.userNotes || null,
+            transport: parsed.transport || null,
+          };
+        }
+      } catch {}
+    }
+    return { ...contract, transport: null };
+  }
+
   private async expireOverdueContracts(prisma: any) {
     const now = new Date();
     await prisma.customerPetPackage.updateMany({
@@ -472,10 +515,10 @@ export class PetshopPackagesService {
       ];
     }
 
-    return prisma.customerPetPackage.findMany({
+    const rows = await prisma.customerPetPackage.findMany({
       where,
       include: {
-        customer: { select: { id: true, name: true, phone: true } },
+        customer: { select: { id: true, name: true, phone: true, address: true, reference: true } },
         pet: {
           select: {
             id: true,
@@ -503,6 +546,7 @@ export class PetshopPackagesService {
       orderBy: { createdAt: 'desc' },
       take: 250,
     });
+    return rows.map((r: any) => this.enrichContractTransport(r));
   }
 
   async getContractById(id: string) {
@@ -524,7 +568,7 @@ export class PetshopPackagesService {
       },
     });
     if (!contract) throw new NotFoundException('Contrato de pacote não encontrado.');
-    return contract;
+    return this.enrichContractTransport(contract);
   }
 
   /**
@@ -562,7 +606,7 @@ export class PetshopPackagesService {
       orderBy: { expiresAt: 'asc' },
     });
 
-    return contracts;
+    return contracts.map((c: any) => this.enrichContractTransport(c));
   }
 
   async createContract(data: any, actor?: PackageActor) {
@@ -618,12 +662,34 @@ export class PetshopPackagesService {
       throw new BadRequestException('Valor base do contrato inválido.');
     }
 
+    const transportEnabled = Boolean(data?.transport?.enabled);
+    const transportFee = transportEnabled ? Math.max(0, Number(data?.transport?.fee ?? 40)) : 0;
+    if (!Number.isFinite(transportFee) || transportFee < 0) {
+      throw new BadRequestException('Taxa de transporte inválida.');
+    }
+
+    const customerAddressInput = data?.customerAddress !== undefined
+      ? String(data.customerAddress || '').trim()
+      : data?.transport?.address !== undefined
+        ? String(data.transport.address || '').trim()
+        : undefined;
+    const customerReferenceInput = data?.customerReference !== undefined
+      ? String(data.customerReference || '').trim()
+      : data?.transport?.reference !== undefined
+        ? String(data.transport.reference || '').trim()
+        : undefined;
+
+    const effectiveAddress = customerAddressInput || customer.address || '';
+    if (transportEnabled && !effectiveAddress) {
+      throw new BadRequestException('Informe o endereço do cliente para contratar pacote com Táxi Dog / Transporte.');
+    }
+
     const discountAmount = Number(data?.discountAmount ?? 0);
-    if (!Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount > basePriceSnapshot) {
+    if (!Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount > basePriceSnapshot + transportFee) {
       throw new BadRequestException('Valor de desconto inválido.');
     }
 
-    const finalPrice = Math.max(0, Number((basePriceSnapshot - discountAmount).toFixed(2)));
+    const finalPrice = Math.max(0, Number((basePriceSnapshot + transportFee - discountAmount).toFixed(2)));
     const validityDays =
       data?.validityDays !== undefined ? Number(data.validityDays) : plan.validityDays;
     if (!Number.isInteger(validityDays) || validityDays < 1 || validityDays > 3650) {
@@ -642,7 +708,48 @@ export class PetshopPackagesService {
 
     const totalSessionsInPlan = plan.items.reduce((sum, item) => sum + item.quantity, 0);
 
-    return prisma.$transaction(async tx => {
+    const streetInput = data?.transport?.street !== undefined
+      ? String(data.transport.street || '').trim()
+      : undefined;
+    const neighborhoodInput = data?.transport?.neighborhood !== undefined
+      ? String(data.transport.neighborhood || '').trim()
+      : undefined;
+    const notesInput = data?.transport?.notes !== undefined
+      ? String(data.transport.notes || '').trim()
+      : undefined;
+
+    const transportMeta = transportEnabled
+      ? {
+          enabled: true,
+          mode: ['round_trip', 'pickup_only', 'dropoff_only'].includes(data?.transport?.mode)
+            ? data.transport.mode
+            : 'round_trip',
+          fee: transportFee,
+          street: streetInput || (effectiveAddress.includes(' - ') ? effectiveAddress.split(' - ')[0] : effectiveAddress),
+          neighborhood: neighborhoodInput || (effectiveAddress.includes(' - ') ? effectiveAddress.split(' - ').slice(1).join(' - ') : null),
+          reference: customerReferenceInput || customer.reference || null,
+          notes: notesInput || null,
+          address: effectiveAddress,
+        }
+      : null;
+
+    const scheduledSessions: Array<{ startsAt: string; serviceIds?: string[]; professionalId?: string }> =
+      Array.isArray(data?.scheduledSessions) ? data.scheduledSessions : [];
+
+    const resultContract = await prisma.$transaction(async tx => {
+      const customerHadNoAddress = !customer.address || customer.address.trim().length === 0;
+      const shouldSaveToCustomer = data?.saveAddressToCustomer === true || (customerHadNoAddress && data?.saveAddressToCustomer !== false && Boolean(effectiveAddress));
+
+      if (shouldSaveToCustomer && (customerAddressInput !== undefined || customerReferenceInput !== undefined)) {
+        await tx.customer.update({
+          where: { id: customerId },
+          data: {
+            ...(customerAddressInput !== undefined ? { address: customerAddressInput || null } : {}),
+            ...(customerReferenceInput !== undefined ? { reference: customerReferenceInput || null } : {}),
+          },
+        });
+      }
+
       const createdContract = await tx.customerPetPackage.create({
         data: {
           customerId,
@@ -653,7 +760,7 @@ export class PetshopPackagesService {
           speciesSnapshot: species,
           sizeSnapshot: size,
           coatTypeSnapshot: coatType,
-          basePriceSnapshot: new Prisma.Decimal(basePriceSnapshot),
+          basePriceSnapshot: new Prisma.Decimal(basePriceSnapshot + transportFee),
           discountAmount: new Prisma.Decimal(discountAmount),
           finalPrice: new Prisma.Decimal(finalPrice),
           validityDays,
@@ -664,7 +771,7 @@ export class PetshopPackagesService {
           paymentMethod,
           createdByOperatorId: actor?.operatorId || actor?.userId || null,
           createdByOperatorName: actor?.name || null,
-          notes: data?.notes ? String(data.notes).trim() : null,
+          notes: this.serializeContractNotes(data?.notes, transportMeta),
         },
       });
 
@@ -704,6 +811,98 @@ export class PetshopPackagesService {
         });
       }
 
+      // Se o usuário enviou o cronograma de sessões recorrentes (ex: toda sexta às 15h ou exceções por semana), cria os agendamentos automaticamente e reserva o saldo
+      if (scheduledSessions.length > 0 && pet) {
+        const remainingCountByService = new Map<string, number>();
+        for (const pi of plan.items) {
+          remainingCountByService.set(pi.serviceId, Number(pi.quantity));
+        }
+
+        for (let idx = 0; idx < scheduledSessions.length; idx++) {
+          const sess = scheduledSessions[idx];
+          if (!sess?.startsAt) continue;
+          const sessStart = new Date(String(sess.startsAt));
+          if (Number.isNaN(sessStart.getTime())) continue;
+
+          // Determina quais serviços agendar nesta sessão
+          let sessionServiceIds: string[] = [];
+          if (Array.isArray(sess.serviceIds) && sess.serviceIds.length > 0) {
+            sessionServiceIds = sess.serviceIds.filter(sid => (remainingCountByService.get(sid) || 0) > 0);
+          } else {
+            // Seleciona o primeiro serviço do plano que ainda possui saldo para agendar
+            for (const pi of plan.items) {
+              if ((remainingCountByService.get(pi.serviceId) || 0) > 0) {
+                sessionServiceIds = [pi.serviceId];
+                break;
+              }
+            }
+          }
+
+          if (!sessionServiceIds.length) continue;
+
+          const chosenServices = plan.items
+            .filter(pi => sessionServiceIds.includes(pi.serviceId))
+            .map(pi => pi.service);
+          if (!chosenServices.length) continue;
+
+          const totalDuration = chosenServices.reduce((sum, s) => sum + Math.max(15, Number(s.durationMinutes || 60)), 0);
+          const sessEnd = new Date(sessStart.getTime() + totalDuration * 60_000);
+
+          const appointmentCheckInNotes = transportMeta
+            ? JSON.stringify({
+                transport: {
+                  enabled: true,
+                  mode: transportMeta.mode,
+                  fee: 0,
+                  coveredByPackage: true,
+                  street: transportMeta.street,
+                  neighborhood: transportMeta.neighborhood,
+                  reference: transportMeta.reference,
+                  notes: transportMeta.notes,
+                  address: transportMeta.address,
+                },
+              })
+            : null;
+
+          const createdAppt = await tx.petAppointment.create({
+            data: {
+              petId: pet.id,
+              customerId,
+              professionalId: sess.professionalId && sess.professionalId !== 'none' ? String(sess.professionalId) : null,
+              startsAt: sessStart,
+              endsAt: sessEnd,
+              status: 'scheduled',
+              notes: `Sessão ${idx + 1} do pacote ${plan.name}`,
+              checkInNotes: appointmentCheckInNotes,
+              services: {
+                create: chosenServices.map(svc => ({
+                  serviceId: svc.id,
+                  nameSnapshot: svc.name,
+                  priceSnapshot: svc.price,
+                  durationMinutes: svc.durationMinutes || 60,
+                  isCombo: svc.serviceType === 'COMBO',
+                })),
+              },
+            },
+          });
+
+          const packageSelections: Record<string, string> = {};
+          for (const sid of sessionServiceIds) {
+            packageSelections[sid] = createdContract.id;
+            remainingCountByService.set(sid, Math.max(0, (remainingCountByService.get(sid) || 0) - 1));
+          }
+
+          await this.reserveSessionsForAppointmentInTx(tx, {
+            appointmentId: createdAppt.id,
+            petId: pet.id,
+            customerId,
+            startsAt: sessStart,
+            packageSelections,
+            actor,
+          });
+        }
+      }
+
       if (billingMode === 'comanda' && finalPrice > 0) {
         const comanda = await this.createComandaForPackageContract(tx, {
           contractId: createdContract.id,
@@ -729,6 +928,8 @@ export class PetshopPackagesService {
         },
       });
     });
+
+    return this.enrichContractTransport(resultContract as any);
   }
 
   private async createComandaForPackageContract(
@@ -1409,6 +1610,8 @@ export class PetshopPackagesService {
       if (isExpiringSoon || isLastSession) {
         renewalOpportunities.push({
           contractId: c.id,
+          packagePlanId: c.packagePlanId,
+          isShared: c.isShared,
           planName: c.planNameSnapshot,
           customer: c.customer,
           pet: c.pet,

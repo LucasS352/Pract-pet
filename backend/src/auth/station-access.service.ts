@@ -8,6 +8,7 @@ import { pinVersion } from './operator-session';
 
 @Injectable()
 export class StationAccessService {
+  private readonly petshopOnlyOperatorTenants = new Map<string, number>();
   constructor(private readonly heart: HeartPrismaService, private readonly jwt: JwtService,
     private readonly manager: TenantConnectionManager) {}
 
@@ -106,6 +107,25 @@ export class StationAccessService {
       if (path === '/v1/kds/status' && req.body?.status !== 'DELIVERED') throw new ForbiddenException('Garçom pode apenas confirmar entregas.');
       return;
     }
+    // A standalone Pet Shop operator account must not inherit general financial
+    // access from a valid shop JWT. PDV-enabled tenants retain their cashier flow.
+    if (user.role === 'operator') {
+      let petshopOnly = (this.petshopOnlyOperatorTenants.get(user.tenantId) || 0) > Date.now();
+      if (!petshopOnly) {
+        const tenant = await this.heart.tenant.findUnique({ where: { id: user.tenantId }, select: { modulos: true } });
+        const modules = parseModules(tenant?.modulos);
+        petshopOnly = modules.petshop === true && modules.pdv === false;
+        if (petshopOnly) this.petshopOnlyOperatorTenants.set(user.tenantId, Date.now() + 60_000);
+      }
+      if (petshopOnly) {
+        const allowed = path === '/petshop' || path.startsWith('/petshop/')
+          || (path === '/tenants/me' && req.method === 'GET')
+          || (path === '/auth/tenant-status' && req.method === 'GET')
+          || (path === '/operators' && req.method === 'GET')
+          || (path === '/auth/operator-login' && req.method === 'POST');
+        if (!allowed) throw new ForbiddenException('Conta operacional do Pet Shop não permite acesso financeiro ou administrativo.');
+      }
+    }
     // Apply the new cashier policy only to establishments using operational modules.
     if (req.method === 'POST' && ['/cash-registers/open', '/sales/checkout'].includes(path)) {
       if ((await this.config(user.tenantId)).isolated) {
@@ -118,9 +138,29 @@ export class StationAccessService {
         req.body.operatorId = cashier.opId;
       }
     }
+    // Reidentification must remain available when the previous PIN token expired.
+    if (path === '/auth/operator-login' && req.method === 'POST') return;
     if (req.headers['x-operator-token']) {
       let op: any;
-      try { op = this.jwt.verify(req.headers['x-operator-token']); } catch { return; }
+      try { op = this.jwt.verify(req.headers['x-operator-token']); }
+      catch { throw new UnauthorizedException({ message: 'Identifique o colaborador novamente.', errorSource: 'operator_token' }); }
+      if (op.type === 'op' && op.context === 'petshop') {
+        if (op.tenantId !== user.tenantId) throw new ForbiddenException('Colaborador de outra loja.');
+        const operator = await this.assertOperator(user.tenantId, op.opId, 'petshop');
+        if (!op.pinVersion || op.pinVersion !== pinVersion(operator.pin || '', process.env.JWT_SECRET!)) {
+          throw new UnauthorizedException({ message: 'PIN alterado. Identifique o colaborador novamente.', errorSource: 'operator_token' });
+        }
+        if (!operator.isManager) {
+          if (path === '/cash-registers/current' && req.method === 'GET' && req.query?.operatorId !== op.opId) {
+            throw new ForbiddenException('Só é possível consultar o próprio caixa.');
+          }
+          const allowed = path.startsWith('/petshop/') || path === '/petshop'
+            || path === '/tenants/me'
+            || (path === '/operators' && req.method === 'GET')
+            || (path === '/cash-registers/current' && req.method === 'GET');
+          if (!allowed) throw new ForbiddenException('Sessão operacional do Pet Shop não permite acesso financeiro ou administrativo.');
+        }
+      }
       if (op.context === 'waiter' && path !== '/auth/operator-login') {
         await this.validateWaiterSession(op, user.tenantId);
         if (!stationRouteAllowed('WAITER', req.method, path)) throw new ForbiddenException('Sessão de garçom não permite acesso ao caixa ou administração.');

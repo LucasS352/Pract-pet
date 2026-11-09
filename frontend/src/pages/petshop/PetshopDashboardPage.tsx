@@ -27,13 +27,17 @@ import {
   UserCheck,
   UserRound,
   Users,
+  XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
-import type { Appointment } from './types';
+import { resolveAppointmentStages, type Appointment } from './types';
 import { Modal, PetAvatar, PetHeroShowcase } from './ui';
 import { PhotoUploadField } from './PhotoUploadField';
+import { TaxiDogWidget } from './TaxiDogWidget';
+import { CancelAppointmentModal } from './CancelAppointmentModal';
+import { RescheduleAppointmentModal } from './RescheduleAppointmentModal';
 import { getFullUrl } from '@/lib/getFullUrl';
 
 type Overview = {
@@ -78,6 +82,10 @@ const STATUS_CONFIG: Record<string, { label: string; badgeClass: string }> = {
     label: '✓ Confirmado',
     badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
   },
+  confirmed: {
+    label: '✓ Confirmado',
+    badgeClass: 'bg-teal-50 text-teal-800 border-teal-200',
+  },
   delivered: {
     label: '✓ Concluído',
     badgeClass: 'bg-emerald-50 text-emerald-800 border-emerald-200',
@@ -92,7 +100,7 @@ const STATUS_CONFIG: Record<string, { label: string; badgeClass: string }> = {
   },
 };
 
-const activeStatuses = new Set(['requested', 'scheduled', 'checked_in', 'bathing', 'grooming', 'finishing', 'ready']);
+const activeStatuses = new Set(['requested', 'scheduled', 'confirmed', 'checked_in', 'bathing', 'grooming', 'finishing', 'ready']);
 const productionStatuses = new Set(['checked_in', 'bathing', 'grooming', 'finishing']);
 
 function todayRange() {
@@ -109,6 +117,10 @@ function time(value: string) {
   } catch {
     return value;
   }
+}
+
+function localAppointmentDate(value: string) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(value));
 }
 
 function getPetSpeciesSize(pet: any): string {
@@ -155,19 +167,27 @@ export default function PetshopDashboardPage() {
   const [savingStage, setSavingStage] = useState(false);
 
   const [pendingReservations, setPendingReservations] = useState<Appointment[]>([]);
+  const [operators, setOperators] = useState<any[]>([]);
+
+  // Modais de Cancelamento e Reagendamento Fácil
+  const [appointmentToCancel, setAppointmentToCancel] = useState<Appointment | null>(null);
+  const [appointmentToReschedule, setAppointmentToReschedule] = useState<Appointment | null>(null);
+
   const load = useCallback(async (signal?: AbortSignal) => {
     setError('');
     setLoading(true);
     try {
       const range = todayRange();
-      const [overviewResponse, pendingResponse, appointmentsResponse] = await Promise.all([
+      const [overviewResponse, pendingResponse, appointmentsResponse, operatorsResponse] = await Promise.all([
         api.get<Overview>('/petshop/overview', { signal }),
         api.get<Appointment[]>('/petshop/pending-reservations', { signal }),
         api.get<Appointment[]>('/petshop/appointments', { params: range, signal }),
+        api.get('/operators', { signal }).catch(() => ({ data: [] })),
       ]);
       setOverview(overviewResponse.data);
       setPendingReservations(pendingResponse.data || []);
       setAppointments(appointmentsResponse.data || []);
+      setOperators(Array.isArray(operatorsResponse.data) ? operatorsResponse.data : []);
     } catch (requestError: any) {
       if (requestError?.code !== 'ERR_CANCELED') {
         setError(requestError?.response?.data?.message || 'Não foi possível carregar a operação de hoje.');
@@ -185,6 +205,13 @@ export default function PetshopDashboardPage() {
 
   const [, refreshClock] = useState(0);
   useEffect(() => { const timer = setInterval(() => refreshClock(n => n + 1), 30000); return () => clearInterval(timer); }, []);
+
+  useEffect(() => {
+    const refresh = () => { if (document.visibilityState === 'visible') void load(); };
+    const timer = setInterval(refresh, 15000);
+    document.addEventListener('visibilitychange', refresh);
+    return () => { clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, [load]);
 
   const activeAppointments = useMemo(
     () => appointments.filter(item => activeStatuses.has(item.status)),
@@ -209,7 +236,7 @@ export default function PetshopDashboardPage() {
 
   const upcomingAppointments = useMemo(() => {
     return appointments
-      .filter(item => ['scheduled', 'requested', 'checked_in'].includes(item.status))
+      .filter(item => ['scheduled', 'confirmed', 'requested', 'checked_in'].includes(item.status))
       .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
   }, [appointments]);
 
@@ -234,10 +261,15 @@ export default function PetshopDashboardPage() {
     }
   };
 
+  const nextCareStage = (item: Appointment) => {
+    const stages = resolveAppointmentStages(item);
+    return stages[stages.indexOf(item.status) + 1] || null;
+  };
+
   const openStageModal = (item: Appointment) => {
     setStageModalItem(item);
     setStageForm({
-      status: item.status === 'scheduled' || item.status === 'requested' ? 'bathing' : item.status,
+      status: item.status === 'scheduled' || item.status === 'confirmed' || item.status === 'requested' ? 'bathing' : item.status,
       stagePhotoUrl: item.stagePhotoUrl || '',
       stageNotes: item.stageNotes || '',
       notifyTutor: false, // Desmarcado por padrão
@@ -269,22 +301,12 @@ export default function PetshopDashboardPage() {
         status: stageForm.status,
         stagePhotoUrl: stageForm.stagePhotoUrl || null,
         stageNotes: stageForm.stageNotes || null,
+        notifyTutor: stageForm.notifyTutor && Boolean(stageForm.stagePhotoUrl),
       });
       setAppointments(curr => curr.map(row => (row.id === stageModalItem.id ? updated : row)));
       toast.success(`Foto e etapa salvas para ${stageModalItem.pet.name}!`);
 
-      if (stageForm.notifyTutor && stageModalItem.customer?.phone) {
-        try {
-          const { data } = await api.post(`/petshop/tutors/${stageModalItem.customer.id}/portal-link`, {
-            rotate: false,
-          });
-          const portalUrl = `${window.location.origin}${data.path}`;
-          const cleanPhone = stageModalItem.customer.phone.replace(/\D/g, '');
-          const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-          const msg = buildWhatsAppMessage(updated, portalUrl, stageForm.stageNotes);
-          window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
-        } catch {}
-      }
+      if (stageForm.notifyTutor && stageForm.stagePhotoUrl) toast.success('Foto colocada na fila do WhatsApp do tutor.');
       setStageModalItem(null);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao salvar foto.');
@@ -380,7 +402,7 @@ export default function PetshopDashboardPage() {
       )}
 
       {/* 2. Top 4 Cards de Resumo Operacional */}
-      <section aria-label="Resumo da operação" className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+      <section aria-label="Resumo da operação" className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
         {/* Card 1: Agenda de hoje */}
         <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
           <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
@@ -472,7 +494,97 @@ export default function PetshopDashboardPage() {
               </Link>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              {/* Lista de Cards Nativa para Mobile (< md) */}
+              <div className="divide-y divide-zinc-100 md:hidden">
+                {activeAppointments.map(item => {
+                  const statusInfo = STATUS_CONFIG[item.status] || {
+                    label: item.status,
+                    badgeClass: 'bg-zinc-50 text-zinc-700 border-zinc-200',
+                  };
+                  const primaryService = item.services[0]?.nameSnapshot || 'Serviço';
+                  const hasMore = item.services.length > 1;
+                  return (
+                    <div key={`mob-${item.id}`} className="p-3.5 space-y-2.5 bg-white active:bg-zinc-50/70">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <PetAvatar pet={item.pet} size="sm" />
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <strong className="text-xs font-extrabold text-zinc-900 tabular-nums">{time(item.startsAt)}</strong>
+                              <span className="text-zinc-300">•</span>
+                              <span className="text-xs font-bold text-zinc-900 truncate">{item.pet?.name}</span>
+                            </div>
+                            <p className="text-[11px] text-zinc-500 truncate">
+                              Tutor: {item.customer?.name} • {getPetSpeciesSize(item.pet)}
+                            </p>
+                          </div>
+                        </div>
+                        <span className={`inline-flex shrink-0 items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${statusInfo.badgeClass}`}>
+                          {statusInfo.label}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-zinc-50 px-3 py-2 text-xs">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-zinc-800 truncate">
+                            {primaryService} {hasMore && <span className="text-[10px] text-zinc-400">+{item.services.length - 1}</span>}
+                          </p>
+                          <p className="text-[11px] text-zinc-500 flex items-center gap-1 mt-0.5">
+                            <UserRound size={11} className="text-zinc-400" />
+                            <span>{item.professional?.name || 'Profissional a definir'}</span>
+                          </p>
+                        </div>
+                        {item.transport?.enabled && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 border border-amber-300 text-[10px] font-bold text-amber-900 px-2 py-0.5">
+                            🚐 Táxi Dog
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center justify-end gap-1.5 pt-0.5">
+                        {item.status === 'ready' && (
+                          <>
+                            <button type="button" onClick={() => openStageModal(item)} className="h-8 px-2.5 rounded-lg border border-zinc-200 bg-white text-xs font-semibold text-zinc-700">Ver foto</button>
+                            <button type="button" onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white">Ver atendimento →</button>
+                          </>
+                        )}
+                        {['bathing', 'grooming', 'finishing'].includes(item.status) && (
+                          <>
+                            {nextCareStage(item) && <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, nextCareStage(item)!)} className="h-8 px-2.5 rounded-lg bg-teal-800 text-xs font-bold text-white disabled:opacity-50">Avançar</button>}
+                            <button type="button" onClick={() => openStageModal(item)} className="h-8 px-2.5 rounded-lg border border-zinc-200 bg-white text-xs font-semibold text-zinc-700 flex items-center gap-1"><Camera size={12} /> Foto</button>
+                            <button type="button" onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white">Atendimento →</button>
+                          </>
+                        )}
+                        {item.status === 'requested' && (
+                          <>
+                            <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, 'scheduled')} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white flex items-center gap-1 disabled:opacity-50"><Check size={13} /> Confirmar</button>
+                            <button type="button" onClick={() => setAppointmentToReschedule(item)} className="h-8 px-2.5 rounded-lg border border-teal-200 bg-teal-50 text-xs font-bold text-teal-900 flex items-center gap-1"><CalendarDays size={12} /> Reagendar</button>
+                            <button type="button" onClick={() => setAppointmentToCancel(item)} className="h-8 px-2 rounded-lg border border-rose-200 bg-rose-50 text-xs font-semibold text-rose-700 flex items-center gap-1"><XCircle size={12} /> Cancelar</button>
+                          </>
+                        )}
+                        {(item.status === 'scheduled' || item.status === 'confirmed') && (
+                          <>
+                            <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, 'checked_in')} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white flex items-center gap-1.5 disabled:opacity-50"><PawPrint size={13} /> Check-in</button>
+                            <button type="button" onClick={() => setAppointmentToReschedule(item)} className="h-8 px-2.5 rounded-lg border border-teal-200 bg-teal-50 text-xs font-bold text-teal-900 flex items-center gap-1"><CalendarDays size={12} /> Reagendar</button>
+                            <button type="button" onClick={() => setAppointmentToCancel(item)} className="h-8 px-2 rounded-lg border border-rose-200 bg-rose-50 text-xs font-semibold text-rose-700 flex items-center gap-1"><XCircle size={12} /> Cancelar</button>
+                          </>
+                        )}
+                        {item.status === 'checked_in' && (
+                          <>
+                            <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, 'bathing')} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white flex items-center gap-1.5 disabled:opacity-50"><Play size={11} fill="currentColor" /> Iniciar Banho</button>
+                            <button type="button" onClick={() => setAppointmentToReschedule(item)} className="h-8 w-8 grid place-items-center rounded-lg border border-teal-200 bg-teal-50 text-teal-900" title="Reagendar"><CalendarDays size={12} /></button>
+                            <button type="button" onClick={() => setAppointmentToCancel(item)} className="h-8 w-8 grid place-items-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700" title="Cancelar"><XCircle size={12} /></button>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Tabela Desktop (>= md) */}
+              <div className="hidden md:block overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-zinc-100 bg-zinc-50/70 text-[11px] font-semibold text-zinc-400">
@@ -523,8 +635,16 @@ export default function PetshopDashboardPage() {
                         </td>
 
                         {/* Serviço */}
-                        <td className="py-3 px-3 text-zinc-700 max-w-[200px] truncate" title={item.services.map(s => s.nameSnapshot).join(', ')}>
-                          {primaryService} {hasMore && <span className="text-[10px] text-zinc-400 font-semibold">+{item.services.length - 1}</span>}
+                        <td className="py-3 px-3 text-zinc-700 max-w-[200px]" title={item.services.map(s => s.nameSnapshot).join(', ')}>
+                          <div className="truncate font-medium">{primaryService} {hasMore && <span className="text-[10px] text-zinc-400 font-semibold">+{item.services.length - 1}</span>}</div>
+                          {item.transport?.enabled && (
+                            <span
+                              title={`Táxi Dog (${item.transport.mode === 'pickup_only' || item.transport.mode === 'pickup' ? 'Apenas Buscar' : item.transport.mode === 'dropoff_only' || item.transport.mode === 'dropoff' ? 'Apenas Levar' : 'Buscar e Levar'})${item.transport.address || item.customer?.address ? ` · ${item.transport.address || item.customer?.address}` : ''}`}
+                              className="inline-flex items-center gap-1 rounded bg-amber-50 border border-amber-300 text-[10px] font-bold text-amber-900 px-1.5 py-0.2 mt-0.5"
+                            >
+                              🚐 Táxi Dog
+                            </span>
+                          )}
                         </td>
 
                         {/* Profissional */}
@@ -562,7 +682,7 @@ export default function PetshopDashboardPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${item.startsAt.slice(0, 10)}`)}
+                                  onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)}
                                   className="h-7 px-2.5 rounded-lg border border-zinc-200 bg-white text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
                                 >
                                   Ver atendimento →
@@ -572,13 +692,17 @@ export default function PetshopDashboardPage() {
 
                             {/* Se Em atendimento */}
                             {['bathing', 'grooming', 'finishing'].includes(item.status) && (
+                              <>
+                              {nextCareStage(item) && <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, nextCareStage(item)!)} className="h-7 px-2.5 rounded-lg bg-teal-800 text-[11px] font-bold text-white disabled:opacity-50">Avançar</button>}
+                              <button type="button" onClick={() => openStageModal(item)} className="h-7 px-2.5 rounded-lg border border-zinc-200 text-[11px]">Foto</button>
                               <button
                                 type="button"
-                                onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${item.startsAt.slice(0, 10)}`)}
+                                onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)}
                                 className="h-7 px-2.5 rounded-lg border border-zinc-200 bg-white text-[11px] font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
                               >
                                 Ver atendimento →
                               </button>
+                              </>
                             )}
 
                             {/* Se Aguardando confirmação (requested) */}
@@ -595,26 +719,56 @@ export default function PetshopDashboardPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${item.startsAt.slice(0, 10)}`)}
-                                  className="h-7 w-7 grid place-items-center rounded-lg border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50 transition cursor-pointer"
-                                  title="Mais detalhes"
+                                  onClick={() => setAppointmentToReschedule(item)}
+                                  className="h-7 px-2 rounded-lg border border-teal-200 bg-teal-50 text-[11px] font-bold text-teal-900 hover:bg-teal-100 transition cursor-pointer flex items-center gap-1"
+                                  title="Reagendar horário"
                                 >
-                                  <MoreHorizontal size={13} />
+                                  <CalendarDays size={12} />
+                                  Reagendar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAppointmentToCancel(item)}
+                                  className="h-7 px-2 rounded-lg border border-rose-200 bg-rose-50 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer flex items-center gap-1"
+                                  title="Cancelar agendamento"
+                                >
+                                  <XCircle size={12} />
+                                  Cancelar
                                 </button>
                               </>
                             )}
 
                             {/* Se Confirmado / Agendado */}
-                            {item.status === 'scheduled' && (
-                              <button
-                                type="button"
-                                disabled={updatingId === item.id}
-                                onClick={() => changeStatus(item, 'checked_in')}
-                                className="h-7 px-3 rounded-lg bg-teal-800 text-[11px] font-bold text-white hover:bg-teal-900 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
-                              >
-                                {updatingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <PawPrint size={12} />}
-                                Check-in
-                              </button>
+                            {(item.status === 'scheduled' || item.status === 'confirmed') && (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={updatingId === item.id}
+                                  onClick={() => changeStatus(item, 'checked_in')}
+                                  className="h-7 px-3 rounded-lg bg-teal-800 text-[11px] font-bold text-white hover:bg-teal-900 transition flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                >
+                                  {updatingId === item.id ? <Loader2 size={12} className="animate-spin" /> : <PawPrint size={12} />}
+                                  Check-in
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAppointmentToReschedule(item)}
+                                  className="h-7 px-2 rounded-lg border border-teal-200 bg-teal-50 text-[11px] font-bold text-teal-900 hover:bg-teal-100 transition cursor-pointer flex items-center gap-1"
+                                  title="Reagendar horário"
+                                >
+                                  <CalendarDays size={12} />
+                                  Reagendar
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAppointmentToCancel(item)}
+                                  className="h-7 px-2 rounded-lg border border-rose-200 bg-rose-50 text-[11px] font-semibold text-rose-700 hover:bg-rose-100 transition cursor-pointer flex items-center gap-1"
+                                  title="Cancelar agendamento"
+                                >
+                                  <XCircle size={12} />
+                                  Cancelar
+                                </button>
+                              </>
                             )}
 
                             {/* Se Check-in feito: Iniciar */}
@@ -631,7 +785,23 @@ export default function PetshopDashboardPage() {
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${item.startsAt.slice(0, 10)}`)}
+                                  onClick={() => setAppointmentToReschedule(item)}
+                                  className="h-7 w-7 grid place-items-center rounded-lg border border-teal-200 bg-teal-50 text-teal-900 hover:bg-teal-100 transition cursor-pointer"
+                                  title="Reagendar horário"
+                                >
+                                  <CalendarDays size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setAppointmentToCancel(item)}
+                                  className="h-7 w-7 grid place-items-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 transition cursor-pointer"
+                                  title="Cancelar agendamento"
+                                >
+                                  <XCircle size={12} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)}
                                   className="h-7 w-7 grid place-items-center rounded-lg border border-zinc-200 bg-white text-zinc-500 hover:bg-zinc-50 transition cursor-pointer"
                                   title="Mais detalhes"
                                 >
@@ -647,11 +817,21 @@ export default function PetshopDashboardPage() {
                 </tbody>
               </table>
             </div>
+            </>
           )}
         </section>
 
-        {/* Coluna Direita: 3 Cartões Empilhados (Pendências, Prontos, Em atendimento) */}
+        {/* Coluna Direita: 4 Cartões Empilhados (Táxi Dog, Pendências, Prontos, Em atendimento) */}
         <aside className="space-y-4">
+          {/* Cartão Táxi Dog & Entregas de Hoje */}
+          <TaxiDogWidget
+            appointments={appointments}
+            onSelectAppointment={(item) => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)}
+            onChangeStatus={changeStatus}
+            title="Táxi Dog · Entregas de Hoje"
+            subtitle="Coletas e entregas programadas para hoje"
+            dateLabel="Hoje"
+          />
           {/* Cartão 1: Reservas pendentes */}
           <section className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs">
             <div className="flex items-center justify-between mb-1">
@@ -1006,10 +1186,11 @@ export default function PetshopDashboardPage() {
                 type="checkbox"
                 checked={stageForm.notifyTutor}
                 onChange={e => setStageForm({ ...stageForm, notifyTutor: e.target.checked })}
+                disabled={!stageForm.stagePhotoUrl}
                 className="rounded text-teal-700 focus:ring-teal-500"
               />
               <span>
-                Abrir WhatsApp após salvar para avisar <strong>{stageModalItem.customer?.name}</strong> com o link direto
+                Enviar a foto desta etapa pelo WhatsApp conectado para <strong>{stageModalItem.customer?.name}</strong>
               </span>
             </label>
 
@@ -1032,6 +1213,31 @@ export default function PetshopDashboardPage() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {/* Modal de Cancelamento Fácil */}
+      {appointmentToCancel && (
+        <CancelAppointmentModal
+          appointment={appointmentToCancel}
+          onClose={() => setAppointmentToCancel(null)}
+          onSuccess={updated => {
+            setAppointments(curr => curr.map(row => (row.id === updated.id ? updated : row)));
+            load();
+          }}
+        />
+      )}
+
+      {/* Modal de Reagendamento Fácil */}
+      {appointmentToReschedule && (
+        <RescheduleAppointmentModal
+          appointment={appointmentToReschedule}
+          operators={operators}
+          onClose={() => setAppointmentToReschedule(null)}
+          onSuccess={updated => {
+            setAppointments(curr => curr.map(row => (row.id === updated.id ? updated : row)));
+            load();
+          }}
+        />
       )}
     </div>
   );

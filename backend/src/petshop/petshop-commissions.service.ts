@@ -10,6 +10,8 @@ const D = (value: Prisma.Decimal.Value) => new Prisma.Decimal(value);
 const ZERO = D(0);
 const money = (value: Prisma.Decimal) => value.toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
 const ADMIN_ROLES = new Set(['admin', 'superadmin']);
+const VALID_PET_SIZES = new Set(['all', 'mini', 'small', 'medium', 'large', 'giant']);
+
 const currentPeriod = () => {
   const parts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Sao_Paulo', year: 'numeric', month: '2-digit' }).formatToParts(new Date());
   return `${parts.find(p => p.type === 'year')!.value}-${parts.find(p => p.type === 'month')!.value}`;
@@ -17,7 +19,12 @@ const currentPeriod = () => {
 
 @Injectable()
 export class PetshopCommissionsService {
-  constructor(private readonly tenants: TenantConnectionManager, private readonly context: TenantContextService, private readonly jwt: JwtService, private readonly pricing: PetshopPricingService) {}
+  constructor(
+    private readonly tenants: TenantConnectionManager,
+    private readonly context: TenantContextService,
+    private readonly jwt: JwtService,
+    private readonly pricing: PetshopPricingService,
+  ) {}
 
   private async db() {
     const { tenantId, databaseUrl } = this.context.get();
@@ -42,10 +49,24 @@ export class PetshopCommissionsService {
     return { id: operator.id, name: operator.name, isManager: operator.isManager };
   }
 
+  private extractRuleSize(scopeKey?: string | null): string {
+    if (!scopeKey) return 'all';
+    const parts = String(scopeKey).split(':');
+    const size = parts[3] ? parts[3].trim().toLowerCase() : 'all';
+    return VALID_PET_SIZES.has(size) ? size : 'all';
+  }
+
+  private buildScopeKey(stageKey: string, serviceId: string | null, operatorId: string | null, size: string): string {
+    const base = `${stageKey}:${serviceId || '*'}:${operatorId || '*'}`;
+    return size && size !== 'all' ? `${base}:${size}` : base;
+  }
+
   private validateRule(body: any) {
     const stageKey = String(body?.stageKey || '').trim();
     const serviceId = body?.serviceId ? String(body.serviceId) : null;
     const operatorId = body?.operatorId ? String(body.operatorId) : null;
+    const rawSize = String(body?.size || 'all').trim().toLowerCase();
+    const size = VALID_PET_SIZES.has(rawSize) ? rawSize : 'all';
     const kind = String(body?.kind || 'NONE').toUpperCase();
     if (!/^[a-z0-9_-]{2,60}$/.test(stageKey)) throw new BadRequestException('Etapa inválida.');
     if (!['NONE', 'PERCENT', 'FIXED'].includes(kind)) throw new BadRequestException('Tipo de comissão inválido.');
@@ -55,7 +76,7 @@ export class PetshopCommissionsService {
     if (kind === 'PERCENT' && value.gt(100)) throw new BadRequestException('Percentual deve ser no máximo 100.');
     if (kind === 'FIXED' && value.decimalPlaces() > 2) throw new BadRequestException('Valor fixo deve ter até duas casas decimais.');
     if (kind === 'NONE' && !value.isZero()) throw new BadRequestException('Regra sem comissão deve ter valor zero.');
-    return { stageKey, serviceId, operatorId, kind, value };
+    return { stageKey, serviceId, operatorId, size, kind, value };
   }
 
   async saveRule(req: any, body: any) {
@@ -67,23 +88,52 @@ export class PetshopCommissionsService {
     if (!stages.some((stage: any) => stage.key === input.stageKey && stage.trackProfessional)) throw new BadRequestException('Ative o rastreamento desta etapa antes de configurar comissão.');
     if (input.serviceId && !await db.petService.findUnique({ where: { id: input.serviceId }, select: { id: true } })) throw new BadRequestException('Serviço inválido.');
     if (input.operatorId && !await db.operator.findUnique({ where: { id: input.operatorId }, select: { id: true } })) throw new BadRequestException('Colaborador inválido.');
+    const scopeKey = this.buildScopeKey(input.stageKey, input.serviceId, input.operatorId, input.size);
     return db.$transaction(async tx => {
-      const latest = await tx.petCommissionRule.findFirst({ where: { stageKey: input.stageKey, serviceId: input.serviceId, operatorId: input.operatorId }, orderBy: { version: 'desc' } });
+      const latest = await tx.petCommissionRule.findFirst({ where: { scopeKey }, orderBy: { version: 'desc' } });
       if (latest?.active) await tx.petCommissionRule.update({ where: { id: latest.id }, data: { active: false } });
-      return tx.petCommissionRule.create({ data: { ...input, scopeKey: `${input.stageKey}:${input.serviceId || '*'}:${input.operatorId || '*'}`, version: (latest?.version || 0) + 1, createdById: (req.user.sub || req.user.id) } });
+      const created = await tx.petCommissionRule.create({
+        data: {
+          stageKey: input.stageKey,
+          serviceId: input.serviceId,
+          operatorId: input.operatorId,
+          kind: input.kind,
+          value: input.value,
+          scopeKey,
+          version: (latest?.version || 0) + 1,
+          createdById: (req.user.sub || req.user.id),
+        },
+      });
+      return { ...created, size: input.size };
     });
   }
 
   async listRules(req: any) {
     this.assertAdmin(req);
     const db = await this.db();
-    return db.petCommissionRule.findMany({ where: { active: true }, orderBy: [{ stageKey: 'asc' }, { serviceId: 'asc' }, { operatorId: 'asc' }] });
+    const rows = await db.petCommissionRule.findMany({ where: { active: true }, orderBy: [{ stageKey: 'asc' }, { serviceId: 'asc' }, { operatorId: 'asc' }] });
+    return rows.map(r => ({ ...r, size: this.extractRuleSize(r.scopeKey) }));
   }
 
-  // Precedência: serviço+profissional > profissional > serviço > etapa geral.
-  private resolveRule(rules: any[], serviceId: string, operatorId: string) {
-    return rules.filter(r => (!r.serviceId || r.serviceId === serviceId) && (!r.operatorId || r.operatorId === operatorId))
-      .sort((a, b) => (Number(Boolean(b.serviceId)) + Number(Boolean(b.operatorId)) * 2) - (Number(Boolean(a.serviceId)) + Number(Boolean(a.operatorId)) * 2))[0];
+  // Precedência: serviço+profissional+porte > profissional > serviço > porte > etapa geral.
+  private resolveRule(rules: any[], serviceId: string, operatorId: string, petSize?: string | null) {
+    const normPetSize = petSize ? String(petSize).trim().toLowerCase() : 'all';
+    return rules
+      .filter(r => {
+        const ruleSize = this.extractRuleSize(r.scopeKey);
+        return (
+          (!r.serviceId || r.serviceId === serviceId) &&
+          (!r.operatorId || r.operatorId === operatorId) &&
+          (ruleSize === 'all' || ruleSize === normPetSize)
+        );
+      })
+      .sort((a, b) => {
+        const aSize = this.extractRuleSize(a.scopeKey);
+        const bSize = this.extractRuleSize(b.scopeKey);
+        const scoreA = Number(Boolean(a.operatorId)) * 4 + Number(Boolean(a.serviceId)) * 2 + Number(aSize !== 'all') * 1;
+        const scoreB = Number(Boolean(b.operatorId)) * 4 + Number(Boolean(b.serviceId)) * 2 + Number(bSize !== 'all') * 1;
+        return scoreB - scoreA;
+      })[0];
   }
 
   // A receita do combo reside exclusivamente no item pai. Distribuição proporcional
@@ -116,13 +166,14 @@ export class PetshopCommissionsService {
   async recordExecution(tx: Prisma.TransactionClient, appointment: any, stageKey: string, operatorId: string, at: Date) {
     const rules = await tx.petCommissionRule.findMany({ where: { stageKey, active: true } });
     const bases = this.bases(appointment.services);
+    const petSize = appointment?.pet?.size || null;
     for (const item of appointment.services) {
       const base = bases.get(item.id);
       if (!base) continue;
       const configured = Array.isArray(item.service?.customStages) && item.service.customStages.length
         ? item.service.customStages : this.pricing.suggestStages(item.service?.name || item.nameSnapshot, item.service?.category);
       if (!configured.some((stage: any) => (typeof stage === 'string' ? stage : stage.key) === stageKey)) continue;
-      const rule = this.resolveRule(rules, item.serviceId, operatorId);
+      const rule = this.resolveRule(rules, item.serviceId, operatorId, petSize);
       if (!rule) continue;
       const amount = rule.kind === 'PERCENT' ? money(base.mul(rule.value).div(100)) : rule.kind === 'FIXED' ? money(D(rule.value)) : ZERO;
       await tx.petCommission.createMany({ data: [{ tenantId: this.context.get().tenantId, appointmentId: appointment.id, appointmentServiceId: item.id, operatorId, stageKey, executedAt: at, baseAmount: base, ruleId: rule.id, ruleVersion: rule.version, ruleKind: rule.kind, ruleValue: rule.value, amount }], skipDuplicates: true });
@@ -159,8 +210,8 @@ export class PetshopCommissionsService {
     if (query.operatorId) where.operatorId = String(query.operatorId);
     if (query.state) where.state = String(query.state);
     if (query.serviceId) where.appointmentService = { serviceId: String(query.serviceId) };
-    const rows = await db.petCommission.findMany({ where, include: { operator: { select: { id: true, name: true } }, appointment: { select: { id: true, startsAt: true, pet: { select: { name: true } }, customer: { select: { name: true } } } }, appointmentService: { select: { serviceId: true, nameSnapshot: true } }, adjustments: true }, orderBy: [{ executedAt: 'desc' }, { id: 'desc' }] });
-    const adjustments = await db.petCommissionAdjustment.findMany({ where: { createdAt: this.periodRange(period), ...(query.state ? { state: String(query.state) } : {}), commission: { ...(query.operatorId ? { operatorId: String(query.operatorId) } : {}), ...(query.serviceId ? { appointmentService: { serviceId: String(query.serviceId) } } : {}) } }, include: { commission: { include: { operator: { select: { id: true, name: true } }, appointment: { select: { id: true, startsAt: true, pet: { select: { name: true } }, customer: { select: { name: true } } } }, appointmentService: { select: { serviceId: true, nameSnapshot: true } } } } }, orderBy: { createdAt: 'desc' } });
+    const rows = await db.petCommission.findMany({ where, include: { operator: { select: { id: true, name: true } }, appointment: { select: { id: true, startsAt: true, pet: { select: { name: true, size: true } }, customer: { select: { name: true } } } }, appointmentService: { select: { serviceId: true, nameSnapshot: true } }, adjustments: true }, orderBy: [{ executedAt: 'desc' }, { id: 'desc' }] });
+    const adjustments = await db.petCommissionAdjustment.findMany({ where: { createdAt: this.periodRange(period), ...(query.state ? { state: String(query.state) } : {}), commission: { ...(query.operatorId ? { operatorId: String(query.operatorId) } : {}), ...(query.serviceId ? { appointmentService: { serviceId: String(query.serviceId) } } : {}) } }, include: { commission: { include: { operator: { select: { id: true, name: true } }, appointment: { select: { id: true, startsAt: true, pet: { select: { name: true, size: true } }, customer: { select: { name: true } } } }, appointmentService: { select: { serviceId: true, nameSnapshot: true } } } } }, orderBy: { createdAt: 'desc' } });
     const totals = { generated: ZERO, pending: ZERO, approved: ZERO, paid: ZERO, reversed: ZERO };
     const byOperator = new Map<string, { id: string; name: string; procedures: number; amount: Prisma.Decimal }>();
     const byService = new Map<string, { serviceId: string; name: string; procedures: number; amount: Prisma.Decimal }>();

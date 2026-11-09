@@ -60,8 +60,8 @@ mysql/artcoco_backup.sql
 mysql/7bar_tenant_backup.sql
 mysql/master_products_backup.sql
 
-# Pasta de backups — gerada em runtime pelo sistema
-backups/
+# Pasta de backups de runtime na raiz; código em backend/src/backups é versionado
+/backups/
 
 # Pacotes de manutenção contêm fotos de clientes e mapeamentos privados.
 image-packages/
