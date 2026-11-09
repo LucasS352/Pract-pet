@@ -111,7 +111,8 @@ export type PetService = {
   active: boolean;
   trackAddedBy?: boolean;
   commissionOnAdd?: boolean;
-  commissionPercent?: number;
+  commissionAmount?: number;
+  legacyCommissionPercent?: number;
   comboPricingType?: 'FIXED_PRICE' | 'PERCENT_DISCOUNT' | 'FIXED_DISCOUNT' | null;
   comboDiscountValue?: string | number | null;
   customStages?: (string | PetshopStageItem)[] | null;

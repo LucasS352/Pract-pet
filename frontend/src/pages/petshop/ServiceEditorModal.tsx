@@ -160,7 +160,8 @@ export function ServiceEditorModal({
   const [active, setActive] = useState(true);
   const [trackAddedBy, setTrackAddedBy] = useState(false);
   const [commissionOnAdd, setCommissionOnAdd] = useState(false);
-  const [commissionPercent, setCommissionPercent] = useState('');
+  const [commissionAmount, setCommissionAmount] = useState('');
+  const [hasLegacyCommission, setHasLegacyCommission] = useState(false);
   const [selectedIcon, setSelectedIcon] = useState<string>('bath');
   const [iconTouched, setIconTouched] = useState<boolean>(false);
 
@@ -265,7 +266,8 @@ export function ServiceEditorModal({
           setActive(s.active !== false);
           setTrackAddedBy(Boolean(s.trackAddedBy || s.commissionOnAdd));
           setCommissionOnAdd(Boolean(s.commissionOnAdd));
-          setCommissionPercent(s.commissionPercent ? String(s.commissionPercent).replace('.', ',') : '');
+          setCommissionAmount(s.commissionAmount ? String(s.commissionAmount).replace('.', ',') : '');
+          setHasLegacyCommission(Boolean(s.legacyCommissionPercent));
 
           if (s.customStages && Array.isArray(s.customStages) && s.customStages.length > 0) {
             const loadedKeys: string[] = [];
@@ -425,7 +427,8 @@ export function ServiceEditorModal({
       setActive(true);
       setTrackAddedBy(false);
       setCommissionOnAdd(false);
-      setCommissionPercent('');
+      setCommissionAmount('');
+      setHasLegacyCommission(false);
       setComboPricingType('PERCENT_DISCOUNT');
       setComboDiscountValue('15');
       setAutoCalculateDuration(true);
@@ -780,8 +783,8 @@ export function ServiceEditorModal({
       toast.error('Informe o nome do serviço.');
       return;
     }
-    if (commissionOnAdd && (parseCurrencyInput(commissionPercent) <= 0 || parseCurrencyInput(commissionPercent) > 100)) {
-      toast.error('Informe um percentual de comissão entre 0 e 100.');
+    if (commissionOnAdd && (parseCurrencyInput(commissionAmount) <= 0 || parseCurrencyInput(commissionAmount) > 999999.99)) {
+      toast.error('Informe um valor fixo de comissão maior que zero.');
       return;
     }
 
@@ -826,7 +829,7 @@ export function ServiceEditorModal({
         active,
         trackAddedBy: serviceType === 'INDIVIDUAL' && (trackAddedBy || commissionOnAdd),
         commissionOnAdd: serviceType === 'INDIVIDUAL' && commissionOnAdd,
-        commissionPercent: serviceType === 'INDIVIDUAL' && commissionOnAdd ? parseCurrencyInput(commissionPercent) : 0,
+        commissionAmount: serviceType === 'INDIVIDUAL' && commissionOnAdd ? parseCurrencyInput(commissionAmount) : 0,
         durationMinutes: finalDuration,
         price: finalPrice,
         customStages: selectedStages.map(k => {
@@ -1043,9 +1046,13 @@ export function ServiceEditorModal({
                 <span><strong>Comissionar quem adicionou</strong><span className="block text-[11px] text-slate-500">Exige PIN do colaborador e gera comissão após a venda concluída.</span></span>
               </label>
               {commissionOnAdd && <label className="block text-xs font-semibold text-slate-700">
-                Comissão sobre o valor do adicional (%)
-                <input type="number" min="0.01" max="100" step="0.01" required value={commissionPercent.replace(',', '.')}
-                  onChange={e => setCommissionPercent(e.target.value)} className="mt-1 block w-full sm:w-44 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-teal-600" />
+                Comissão fixa por adicional vendido (R$)
+                <div className="mt-1 flex w-full sm:w-44 items-center rounded-xl border border-slate-300 bg-white px-3 focus-within:ring-2 focus-within:ring-teal-600">
+                  <span className="text-sm text-slate-500">R$</span>
+                  <input type="number" min="0.01" max="999999.99" step="0.01" required value={commissionAmount.replace(',', '.')}
+                    onChange={e => setCommissionAmount(e.target.value)} className="min-w-0 w-full bg-transparent px-2 py-2 text-sm text-slate-900 focus:outline-none" />
+                </div>
+                {hasLegacyCommission && <span className="mt-1 block text-[11px] font-normal text-amber-700">Este serviço usava percentual. Informe o novo valor fixo para salvar.</span>}
               </label>}
             </fieldset>
           )}

@@ -60,11 +60,11 @@ export class PetshopService {
   private async syncAddonCommissionRule(tx: Prisma.TransactionClient, serviceId: string, settings: ReturnType<typeof parseAddonSettings>, actorId?: string | null) {
     const scopeKey = `service_added:${serviceId}:*`;
     const latest = await tx.petCommissionRule.findFirst({ where: { scopeKey }, orderBy: { version: 'desc' } });
-    if (latest?.active && settings.commissionOnAdd && latest.kind === 'PERCENT' && Number(latest.value) === settings.commissionPercent) return;
+    if (latest?.active && settings.commissionOnAdd && latest.kind === 'FIXED' && Number(latest.value) === settings.commissionAmount) return;
     if (latest?.active) await tx.petCommissionRule.update({ where: { id: latest.id }, data: { active: false } });
     if (settings.commissionOnAdd) await tx.petCommissionRule.create({ data: {
-      scopeKey, stageKey: 'service_added', serviceId, operatorId: null, kind: 'PERCENT',
-      value: new Prisma.Decimal(settings.commissionPercent), version: (latest?.version || 0) + 1,
+      scopeKey, stageKey: 'service_added', serviceId, operatorId: null, kind: 'FIXED',
+      value: new Prisma.Decimal(settings.commissionAmount), version: (latest?.version || 0) + 1,
       createdById: actorId || null,
     } });
   }
@@ -1623,6 +1623,7 @@ export class PetshopService {
         if (svc) {
           const addonRow = await prisma.tenantSettings.findUnique({ where: { id: addonSettingsId(svc.id) }, select: { paymentMethodsConfig: true } });
           const addon = parseAddonSettings(addonRow?.paymentMethodsConfig);
+          if (addon.commissionOnAdd && addon.commissionAmount <= 0) throw new BadRequestException('Atualize o serviço com o novo valor fixo de comissão antes de incluí-lo.');
           if (addon.commissionOnAdd && !addonActor) throw new BadRequestException('Identifique o colaborador com PIN para incluir este serviço comissionado.');
           const addonRule = addon.commissionOnAdd ? await prisma.petCommissionRule.findFirst({ where: { scopeKey: `service_added:${svc.id}:*`, active: true }, orderBy: { version: 'desc' } }) : null;
           if (addon.commissionOnAdd && !addonRule) throw new BadRequestException('Regra de comissão do serviço não encontrada. Salve o serviço novamente.');
@@ -1644,7 +1645,7 @@ export class PetshopService {
               userId: addonActor?.id || req?.user?.id || userId || null,
               userName: addonActor?.name || req?.user?.name || req?.user?.email || 'Administrador',
               operatorId: addonActor?.id || null,
-              commissionPercent: addon.commissionOnAdd ? addon.commissionPercent : 0,
+              commissionAmount: addon.commissionOnAdd ? addon.commissionAmount : 0,
               commissionRuleId: addonRule?.id || null,
             });
           }

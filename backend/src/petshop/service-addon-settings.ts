@@ -3,7 +3,8 @@ import { BadRequestException } from '@nestjs/common';
 export type ServiceAddonSettings = {
   trackAddedBy: boolean;
   commissionOnAdd: boolean;
-  commissionPercent: number;
+  commissionAmount: number;
+  legacyCommissionPercent?: number;
 };
 
 export const addonSettingsId = (serviceId: string) => `petshop_addon:${serviceId}`;
@@ -11,11 +12,13 @@ export const addonSettingsId = (serviceId: string) => `petshop_addon:${serviceId
 export function parseAddonSettings(value: unknown): ServiceAddonSettings {
   const config = value && typeof value === 'object' ? value as Record<string, unknown> : {};
   const commissionOnAdd = config.commissionOnAdd === true;
-  const percent = Number(config.commissionPercent ?? 0);
+  const amount = Number(config.commissionAmount ?? 0);
+  const legacyPercent = config.commissionAmount === undefined ? Number(config.commissionPercent ?? 0) : 0;
   return {
     trackAddedBy: commissionOnAdd || config.trackAddedBy === true,
     commissionOnAdd,
-    commissionPercent: Number.isFinite(percent) ? percent : 0,
+    commissionAmount: Number.isFinite(amount) ? amount : 0,
+    ...(commissionOnAdd && legacyPercent > 0 && Number.isFinite(legacyPercent) ? { legacyCommissionPercent: legacyPercent } : {}),
   };
 }
 
@@ -23,14 +26,14 @@ export function validateAddonSettings(data: any, current?: ServiceAddonSettings)
   const settings = parseAddonSettings({
     trackAddedBy: data.trackAddedBy ?? current?.trackAddedBy ?? false,
     commissionOnAdd: data.commissionOnAdd ?? current?.commissionOnAdd ?? false,
-    commissionPercent: data.commissionPercent ?? current?.commissionPercent ?? 0,
+    commissionAmount: data.commissionAmount ?? current?.commissionAmount ?? 0,
   });
-  if (settings.commissionPercent < 0 || settings.commissionPercent > 100 ||
-      !/^\d+(\.\d{1,4})?$/.test(String(settings.commissionPercent))) {
-    throw new BadRequestException('Percentual de comissão inválido (0 a 100, até quatro casas).');
+  if (settings.commissionAmount < 0 || settings.commissionAmount > 999999.99 ||
+      !/^\d+(\.\d{1,2})?$/.test(String(settings.commissionAmount))) {
+    throw new BadRequestException('Valor fixo de comissão inválido (até duas casas decimais).');
   }
-  if (settings.commissionOnAdd && settings.commissionPercent <= 0) {
-    throw new BadRequestException('Informe um percentual maior que zero para comissionar a inclusão do serviço.');
+  if (settings.commissionOnAdd && settings.commissionAmount <= 0) {
+    throw new BadRequestException('Informe um valor fixo maior que zero para comissionar a inclusão do serviço.');
   }
   return settings;
 }

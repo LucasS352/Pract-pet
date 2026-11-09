@@ -11,9 +11,10 @@ export async function recordAddedServiceCommissions(tx: any, appointment: any, t
     const service = byId.get(entry.appointmentServiceId);
     if (!service) continue; // Serviço retirado antes da cobrança.
     const rule = await tx.petCommissionRule.findUnique({ where: { id: entry.commissionRuleId } });
-    if (!rule || rule.serviceId !== service.serviceId || rule.kind !== 'PERCENT') throw new BadRequestException('Regra de comissão do adicional inválida. Revise o cadastro antes de cobrar.');
+    if (!rule || rule.serviceId !== service.serviceId || !['FIXED', 'PERCENT'].includes(rule.kind)) throw new BadRequestException('Regra de comissão do adicional inválida. Revise o cadastro antes de cobrar.');
     const base = new Prisma.Decimal(service.priceSnapshot);
-    const amount = base.mul(rule.value).div(100).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const amount = (rule.kind === 'FIXED' ? new Prisma.Decimal(rule.value) : base.mul(rule.value).div(100))
+      .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
     await tx.petCommission.createMany({ data: [{
       tenantId, appointmentId: appointment.id, appointmentServiceId: service.id,
       operatorId: entry.operatorId, stageKey: 'service_added', executedAt: at,
