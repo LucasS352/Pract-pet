@@ -241,7 +241,7 @@ export default function PetshopAgendaPage() {
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [updatingId, setUpdatingId] = useState('');
   const [notifyingId, setNotifyingId] = useState('');
-  const [paymentItem, setPaymentItem] = useState<Appointment | null>(null);
+  const [paymentItem, setPaymentItem] = useState<{ appointment: Appointment; total: number } | null>(null);
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [receiving, setReceiving] = useState(false);
   const [chargingId, setChargingId] = useState('');
@@ -820,8 +820,13 @@ export default function PetshopAgendaPage() {
         return;
       }
 
+      const { data: comanda } = await api.post(`/petshop/appointments/${item.id}/checkout`);
+      if (!comanda || Number(comanda.total) <= 0) {
+        toast.error('Não foi encontrado valor avulso para este atendimento.');
+        return;
+      }
       setSelectedAppointment(null);
-      setPaymentItem(item);
+      setPaymentItem({ appointment: item, total: Number(comanda.total) });
       setPaymentMethod('pix');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao preparar cobrança no caixa.');
@@ -2860,13 +2865,13 @@ export default function PetshopAgendaPage() {
                   >
                     {chargingId === selectedAppointment.id ? (
                       <Loader2 size={15} className="animate-spin" />
-                    ) : selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') ? (
+                    ) : selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0) ? (
                       <PackageCheck size={15} />
                     ) : (
                       <CreditCard size={15} />
                     )}
                     <span>
-                      {selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed')
+                      {selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0)
                         ? 'Concluir (Pacote)'
                         : 'Cobrar'}
                     </span>
@@ -2887,7 +2892,7 @@ export default function PetshopAgendaPage() {
       )}
 
       {paymentItem && <PaymentModal isOpen onClose={() => setPaymentItem(null)} isOnline={navigator.onLine} tenantConfig={tenant}
-        petshopReceipt={{ customer: paymentItem.customer.name, total: paymentItem.services.filter(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus || '')).reduce((sum, s) => sum + Math.max(0, Number(s.priceSnapshot) - Number(s.coveredAmount || 0)), 0) + (paymentItem.transport?.enabled && !paymentItem.transport.coveredByPackage ? Number(paymentItem.transport.fee || 0) : 0), submit: async payments => { const { data } = await api.post(`/petshop/appointments/${paymentItem.id}/receive`, { payments }); return data; } }}
+        petshopReceipt={{ customer: paymentItem.appointment.customer.name, total: paymentItem.total, submit: async payments => { const { data } = await api.post(`/petshop/appointments/${paymentItem.appointment.id}/receive`, { payments }); return data; } }}
         onSuccess={() => { setSelectedAppointment(null); loadAppointments(false); toast.success('Pagamento registrado.'); }} />}
 
       {/* 9. MODAL DE FOTO E RECADO DA ETAPA */}

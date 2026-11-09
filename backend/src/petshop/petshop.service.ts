@@ -746,19 +746,45 @@ export class PetshopService {
 
     if (!appointment) return null;
 
-    // Filtra apenas os serviços que NÃO estão cobertos por pacote E que não são componentes de combo (evitando dupla cobrança)
+    // Filtra apenas os serviços com saldo avulso, sem componentes de combo.
     const payableServices = appointment.services.filter(
       (svc: any) =>
         svc.coverageStatus !== 'reserved' &&
         svc.coverageStatus !== 'consumed' &&
         svc.comboParentId === null &&
-        Number(svc.priceSnapshot) > 0,
+        Number(svc.priceSnapshot) > Number(svc.coveredAmount || 0),
     );
 
-    // Se todos os serviços do agendamento já foram cobertos por pacote, não cria comanda de cobrança avulsa
-    if (payableServices.length === 0) {
+    const transport = parseAppointmentTransport(appointment.checkInNotes);
+    const transportFee = transport && !transport.coveredByPackage ? Number(transport.fee) : 0;
+    const taxiProductId = 'petshop-taxi-dog-fee';
+    const serviceNote = 'Serviço Pet Shop';
+    const taxiNote = 'Táxi Dog Pet Shop';
+    const payableLines = payableServices.map((svc: any) => ({
+      productId: svc.serviceId,
+      name: svc.nameSnapshot,
+      price: new Prisma.Decimal(svc.priceSnapshot).sub(new Prisma.Decimal(svc.coveredAmount || 0)).toDecimalPlaces(2),
+      notes: serviceNote,
+    }));
+    if (transportFee > 0) {
+      payableLines.push({ productId: taxiProductId, name: 'Táxi Dog', price: new Prisma.Decimal(transportFee).toDecimalPlaces(2), notes: taxiNote });
+    }
+
+    // Um atendimento coberto por pacote ainda pode ter Táxi Dog avulso.
+    if (payableLines.length === 0) {
       return null;
     }
+
+    const expectedTotal = payableLines.reduce((sum, line) => sum.add(line.price), new Prisma.Decimal(0));
+    const itemData = (line: typeof payableLines[number]) => ({
+      productId: line.productId,
+      quantity: new Prisma.Decimal(1),
+      unitPrice: line.price,
+      totalPrice: line.price,
+      notes: line.notes,
+      stockDeducted: true,
+      kdsStatus: 'READY',
+    });
 
     // Se já existe comanda aberta ou aguardando pagamento para este agendamento, promove para waiting_payment se necessário
     const existing = await prisma.comanda.findFirst({
@@ -770,34 +796,45 @@ export class PetshopService {
     });
 
     if (existing) {
-      if (existing.status === 'open') {
-        await prisma.comanda.update({
-          where: { id: existing.id },
-          data: { status: 'waiting_payment' },
-        });
+      const activeItems = existing.items.filter((item: any) => item.status === 'active');
+      const autoItems = activeItems.filter((item: any) => item.notes === serviceNote || item.notes === taxiNote);
+      const manualItems = activeItems.filter((item: any) => item.notes !== serviceNote && item.notes !== taxiNote);
+      const itemKey = (productId: string, price: any, quantity: any) => `${productId}:${new Prisma.Decimal(price).toFixed(2)}:${new Prisma.Decimal(quantity).toFixed(3)}`;
+      const currentKeys = autoItems.map((item: any) => itemKey(item.productId, item.totalPrice, item.quantity)).sort();
+      const expectedKeys = payableLines.map(line => itemKey(line.productId, line.price, 1)).sort();
+      const changed = currentKeys.length !== expectedKeys.length || currentKeys.some((key: string, index: number) => key !== expectedKeys[index]);
+
+      if (changed) {
+        for (const line of payableLines) {
+          await this.ensureServiceProductBacking(prisma, { id: line.productId, name: line.name, price: line.price, active: true });
+        }
+        if (autoItems.length) {
+          await prisma.comandaItem.updateMany({
+            where: { id: { in: autoItems.map((item: any) => item.id) } },
+            data: { status: 'removed', removedAt: new Date(), removalReason: 'Atendimento atualizado antes do pagamento' },
+          });
+        }
+        await prisma.comandaItem.createMany({ data: payableLines.map(line => ({ comandaId: existing.id, ...itemData(line) })) });
       }
-      return existing;
+      const total = manualItems.reduce((sum: Prisma.Decimal, item: any) => sum.add(new Prisma.Decimal(item.totalPrice)), expectedTotal);
+      return prisma.comanda.update({
+        where: { id: existing.id },
+        data: { status: 'waiting_payment', total },
+        include: { items: true },
+      });
     }
 
     // Garante que todos os serviços cobráveis do agendamento existam como produto no PDV
-    for (const svc of payableServices) {
+    for (const line of payableLines) {
       await this.ensureServiceProductBacking(prisma, {
-        id: svc.serviceId,
-        name: svc.nameSnapshot,
-        price: Number(svc.priceSnapshot),
+        id: line.productId,
+        name: line.name,
+        price: line.price,
         active: true,
       });
     }
 
-    const total = payableServices.reduce(
-      (sum: number, s: any) =>
-        sum + Math.max(0, Number(s.priceSnapshot || 0) - Number(s.coveredAmount || 0)),
-      0,
-    );
-
-    if (total <= 0) {
-      return null;
-    }
+    const total = expectedTotal;
 
     const petName = (appointment.pet?.name || 'Pet').trim();
     let baseNumber = `Atendimento: ${petName}`;
@@ -828,21 +865,7 @@ export class PetshopService {
     const notesStr = `PET2:${JSON.stringify(compactPayload)}`;
     const safeNotes = notesStr.length <= 180 ? notesStr : `PET2:{"v":2,"a":"${appointment.id}"}`;
 
-    const itemsData = payableServices.map((svc: any) => {
-      const netPrice = Math.max(
-        0,
-        Number(svc.priceSnapshot || 0) - Number(svc.coveredAmount || 0),
-      );
-      return {
-        productId: svc.serviceId,
-        quantity: new Prisma.Decimal(1),
-        unitPrice: new Prisma.Decimal(netPrice),
-        totalPrice: new Prisma.Decimal(netPrice),
-        notes: `Serviço Pet Shop`.slice(0, 50),
-        stockDeducted: true,
-        kdsStatus: 'READY',
-      };
-    });
+    const itemsData = payableLines.map(itemData);
 
     const customerName = `${appointment.customer?.name || 'Tutor'} · ${appointment.pet?.name || 'Pet'}`;
 
@@ -1740,7 +1763,9 @@ export class PetshopService {
     if (status === 'delivered') {
       if (current.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes da retirada.');
       const payable = current.services.some(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus) && Number(s.priceSnapshot) > Number(s.coveredAmount || 0));
-      if (payable) throw new BadRequestException('Há serviços a cobrar. Finalize o pagamento no PDV.');
+      const transport = parseAppointmentTransport(current.checkInNotes);
+      const taxiPayable = transport && !transport.coveredByPackage && transport.fee > 0;
+      if (payable || taxiPayable) throw new BadRequestException('Há serviços ou Táxi Dog a cobrar. Finalize o pagamento na Agenda.');
     }
 
     const getStageLabel = (stKey: string) => {
