@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { Coins, PawPrint, Search, Users, X, type LucideIcon } from 'lucide-react';
+import { ChevronLeft, Coins, PawPrint, Search, Users, X, type LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { getFullUrl } from '@/lib/getFullUrl';
 
@@ -111,7 +111,23 @@ export function PageHeader({ eyebrow, title, description, action }: { eyebrow: s
 
 let modalLocks = 0;
 let originalOverflow = '';
-export function Modal({ title, onClose, children, maxWidth = 'sm:max-w-2xl' }: { title: string; onClose: () => void; children: ReactNode; maxWidth?: string }) {
+export function Modal({
+  title,
+  subtitle,
+  onClose,
+  children,
+  maxWidth = 'sm:max-w-2xl',
+  showBack = false,
+  headerRight,
+}: {
+  title: string;
+  subtitle?: string;
+  onClose: () => void;
+  children: ReactNode;
+  maxWidth?: string;
+  showBack?: boolean;
+  headerRight?: ReactNode;
+}) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
@@ -152,7 +168,59 @@ export function Modal({ title, onClose, children, maxWidth = 'sm:max-w-2xl' }: {
     };
   }, []);
 
-  return <div className="fixed inset-0 z-[80] grid place-items-end bg-slate-950/50 p-0 pt-[max(0.75rem,env(safe-area-inset-top,0px))] backdrop-blur-[2px] sm:place-items-center sm:p-4" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}><div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} className={`max-h-[calc(100dvh-env(safe-area-inset-top,0px)-0.75rem)] sm:max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl bg-white pb-[calc(1rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:pb-0 ${maxWidth}`}><div className="sticky top-0 z-20 flex items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-4 py-3.5 sm:px-5 sm:py-4 backdrop-blur"><h2 id={titleId} className="text-base sm:text-lg font-bold text-slate-900 truncate pr-2">{title}</h2><button type="button" onClick={onClose} aria-label="Fechar" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100/80 text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)]"><X aria-hidden="true" size={18} /></button></div><div className="p-4 sm:p-5">{children}</div></div></div>;
+  return (
+    <div
+      className="fixed inset-0 z-[80] grid place-items-end bg-slate-950/50 p-0 pt-[max(0.75rem,env(safe-area-inset-top,0px))] backdrop-blur-[2px] sm:place-items-center sm:p-4"
+      onMouseDown={event => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={`max-h-[calc(100dvh-env(safe-area-inset-top,0px)-0.75rem)] sm:max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl bg-white pb-[calc(1rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:pb-0 ${maxWidth}`}
+      >
+        <div className="sticky top-0 z-20 flex items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-4 py-3 sm:px-5 sm:py-3.5 backdrop-blur">
+          <div className="flex items-center gap-2.5 min-w-0 pr-2">
+            {showBack && (
+              <button
+                type="button"
+                onClick={onClose}
+                aria-label="Voltar"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 transition hover:bg-slate-200 cursor-pointer"
+              >
+                <ChevronLeft aria-hidden="true" size={20} />
+              </button>
+            )}
+            <div className="min-w-0">
+              <h2 id={titleId} className="text-base sm:text-lg font-bold text-slate-900 truncate">
+                {title}
+              </h2>
+              {subtitle && (
+                <p className="text-xs text-slate-500 truncate font-normal">
+                  {subtitle}
+                </p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            {headerRight}
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Fechar"
+              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100/80 text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)] cursor-pointer"
+            >
+              <X aria-hidden="true" size={18} />
+            </button>
+          </div>
+        </div>
+        <div className="p-4 sm:p-5">{children}</div>
+      </div>
+    </div>
+  );
 }
 
 export function SearchField({ value, onChange, placeholder, label = 'Buscar' }: { value: string; onChange: (value: string) => void; placeholder: string; label?: string }) {

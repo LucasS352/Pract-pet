@@ -298,6 +298,35 @@ export default function PetshopTaxiDogPage() {
     window.open(url, '_blank');
   };
 
+  // Abrir rota completa no Google Maps (com múltiplas paradas / waypoints)
+  const handleOpenGoogleMapsRoute = () => {
+    const validAddresses = taxiAppointments
+      .map(item => item.transport?.address?.trim())
+      .filter((addr): addr is string => Boolean(addr && addr !== 'Sem endereço'));
+
+    if (validAddresses.length === 0) {
+      toast.error('Nenhum endereço válido cadastrado nas paradas.');
+      return;
+    }
+
+    if (validAddresses.length === 1) {
+      const dest = encodeURIComponent(validAddresses[0]);
+      window.open(
+        `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`,
+        '_blank',
+        'noopener,noreferrer',
+      );
+      toast.success('Abrindo destino no Google Maps!');
+      return;
+    }
+
+    const destination = encodeURIComponent(validAddresses[validAddresses.length - 1]);
+    const waypoints = encodeURIComponent(validAddresses.slice(0, -1).join('|'));
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    toast.success(`Rota com ${validAddresses.length} paradas aberta no Google Maps!`);
+  };
+
   // Imprimir manifesto de rota
   const handlePrintManifest = () => {
     window.print();
@@ -923,16 +952,16 @@ export default function PetshopTaxiDogPage() {
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handlePrintManifest}
-                className="flex items-center gap-1.5 rounded-xl border border-zinc-200 px-3 py-1.5 text-xs font-bold text-zinc-700 hover:bg-zinc-50 cursor-pointer shadow-2xs"
+                onClick={handleOpenGoogleMapsRoute}
+                className="flex items-center gap-1.5 rounded-xl bg-[#0d6e5a] text-white px-3 py-1.5 text-xs font-bold hover:bg-[#0a5747] cursor-pointer shadow-xs transition"
               >
-                <Printer size={14} />
-                <span>Imprimir Rota</span>
+                <Navigation size={14} />
+                <span>Abrir Rota no Maps</span>
               </button>
               <button
                 type="button"
                 onClick={handleShareManifestWhatsApp}
-                className="flex items-center gap-1.5 rounded-xl bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold hover:bg-emerald-800 cursor-pointer shadow-xs"
+                className="flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-1.5 text-xs font-bold hover:bg-emerald-100 cursor-pointer shadow-2xs transition"
               >
                 <Share2 size={14} />
                 <span>WhatsApp</span>

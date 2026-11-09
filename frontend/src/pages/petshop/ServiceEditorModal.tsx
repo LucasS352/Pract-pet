@@ -19,13 +19,14 @@ import {
   DollarSign,
   Wand2,
   X,
-  LogIn,
   Droplets,
   CheckCircle2,
   ListChecks,
   Pencil,
   RotateCcw,
   Workflow,
+  ChevronDown,
+  RefreshCw,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -101,20 +102,20 @@ interface SizePriceEntry {
 }
 
 const DEFAULT_SIZE_PRICES: Record<string, SizePriceEntry> = {
-  mini: { price: '45.00', duration: '40' },
-  small: { price: '55.00', duration: '45' },
-  medium: { price: '70.00', duration: '60' },
-  large: { price: '85.00', duration: '75' },
-  giant: { price: '110.00', duration: '90' },
+  mini: { price: '45,00', duration: '40' },
+  small: { price: '55,00', duration: '45' },
+  medium: { price: '70,00', duration: '60' },
+  large: { price: '85,00', duration: '75' },
+  giant: { price: '110,00', duration: '90' },
 };
 
-export const SERVICE_ICON_OPTIONS = [
-  { id: 'bath', label: 'Banho', icon: Bath, desc: 'Banho simples ou completo' },
-  { id: 'scissors', label: 'Tosa', icon: Scissors, desc: 'Tosa geral ou higiênica' },
-  { id: 'nail', label: 'Corte de Unha', icon: PawPrint, desc: 'Unhas e patas' },
-  { id: 'flea', label: 'Antipulga', icon: Droplets, desc: 'Shampoo antipulga ou medicinal' },
-  { id: 'spa', label: 'Hidratação & Spa', icon: Sparkles, desc: 'Hidratação, ozônio e spa' },
-  { id: 'health', label: 'Saúde / Vacina', icon: Stethoscope, desc: 'Consultas e vacinas' },
+export const THEMATIC_SERVICE_ICONS = [
+  { id: 'bath', label: 'Banho', icon: Bath },
+  { id: 'scissors', label: 'Tosa', icon: Scissors },
+  { id: 'nail', label: 'Corte de Unha', icon: PawPrint },
+  { id: 'flea', label: 'Antipulga', icon: Droplets },
+  { id: 'spa', label: 'Hidratação & Spa', icon: Sparkles },
+  { id: 'health', label: 'Saúde / Vacina', icon: Stethoscope },
 ];
 
 export function inferIconFromName(name: string, category?: string): string {
@@ -127,6 +128,13 @@ export function inferIconFromName(name: string, category?: string): string {
   if (n.includes('vacina') || n.includes('consulta') || n.includes('veterin') || n.includes('exame') || n.includes('saúde') || c.includes('saúde')) return 'health';
   if (n.includes('banho') || n.includes('ducha') || n.includes('higien') || c.includes('higiene')) return 'bath';
   return 'bath';
+}
+
+export function parseCurrencyInput(val: string | number): number {
+  if (val === undefined || val === null || val === '') return 0;
+  const clean = String(val).replace(/\s/g, '').replace('R$', '').replace(',', '.');
+  const num = parseFloat(clean);
+  return isNaN(num) ? 0 : num;
 }
 
 export function ServiceEditorModal({
@@ -155,9 +163,9 @@ export function ServiceEditorModal({
 
   // Precificação
   const [pricingMode, setPricingMode] = useState<'BY_SIZE' | 'SINGLE'>('BY_SIZE');
-  const [basePrice, setBasePrice] = useState('60');
+  const [basePrice, setBasePrice] = useState('60,00');
   const [baseDurationMinutes, setBaseDurationMinutes] = useState(60);
-  const [quickBaseRef, setQuickBaseRef] = useState('60');
+  const [quickBaseRef, setQuickBaseRef] = useState('60,00');
   const [sizePrices, setSizePrices] = useState<Record<string, SizePriceEntry>>(DEFAULT_SIZE_PRICES);
 
   // Regras Avançadas de Pelagem (opcional)
@@ -235,9 +243,21 @@ export function ServiceEditorModal({
           setCategory(s.category || 'Higiene e Estética');
           setTargetSpecies(s.targetSpecies || 'all');
           setColor(s.color || '#0d9488');
-          setDescription(s.description || '');
-          setBasePrice(String(s.price || '60'));
-          setQuickBaseRef(String(s.price || '60'));
+          
+          let rawDesc = s.description || '';
+          const iconMatch = rawDesc.match(/\[icon:([a-z_]+)\]/i);
+          if (iconMatch) {
+            setSelectedIcon(iconMatch[1]);
+            setIconTouched(true);
+            rawDesc = rawDesc.replace(iconMatch[0], '').trim();
+          } else {
+            setSelectedIcon(inferIconFromName(s.name, s.category));
+          }
+          setDescription(rawDesc);
+
+          const bpNum = Number(s.price || 60);
+          setBasePrice(bpNum.toFixed(2).replace('.', ','));
+          setQuickBaseRef(bpNum.toFixed(2).replace('.', ','));
           setBaseDurationMinutes(Number(s.durationMinutes || 60));
           setActive(s.active !== false);
 
@@ -327,8 +347,9 @@ export function ServiceEditorModal({
               const loadedSizes: Record<string, SizePriceEntry> = { ...DEFAULT_SIZE_PRICES };
               for (const r of sizeOnlyRules) {
                 if (loadedSizes[r.size]) {
+                  const pNum = Number(r.price || 0);
                   loadedSizes[r.size] = {
-                    price: String(r.price || '0'),
+                    price: pNum.toFixed(2).replace('.', ','),
                     duration: String(r.durationMinutes || s.durationMinutes || '60'),
                   };
                 }
@@ -344,7 +365,7 @@ export function ServiceEditorModal({
                   species: r.species || 'all',
                   size: r.size || 'all',
                   coatType: r.coatType || 'all',
-                  price: String(r.price || '0'),
+                  price: String(r.price || '0').replace('.', ','),
                   durationMinutes: r.durationMinutes ? String(r.durationMinutes) : '',
                   label: r.label || '',
                 })),
@@ -353,7 +374,6 @@ export function ServiceEditorModal({
               setCoatRules([]);
             }
           } else {
-            // Sem regras prévias: serviços de estética iniciam como BY_SIZE com sugestões inteligentes
             const isEstetica =
               (s.category || '').toLowerCase().includes('higiene') ||
               (s.category || '').toLowerCase().includes('estética') ||
@@ -365,11 +385,11 @@ export function ServiceEditorModal({
               const baseNum = Number(s.price || 60);
               const baseDur = Number(s.durationMinutes || 60);
               setSizePrices({
-                mini: { price: (baseNum * 0.75).toFixed(2), duration: String(Math.max(20, Math.round(baseDur * 0.7))) },
-                small: { price: (baseNum * 0.9).toFixed(2), duration: String(Math.max(25, Math.round(baseDur * 0.85))) },
-                medium: { price: (baseNum * 1.0).toFixed(2), duration: String(baseDur) },
-                large: { price: (baseNum * 1.3).toFixed(2), duration: String(Math.round(baseDur * 1.25)) },
-                giant: { price: (baseNum * 1.7).toFixed(2), duration: String(Math.round(baseDur * 1.5)) },
+                mini: { price: (baseNum * 0.75).toFixed(2).replace('.', ','), duration: String(Math.max(20, Math.round(baseDur * 0.65))) },
+                small: { price: (baseNum * 0.9).toFixed(2).replace('.', ','), duration: String(Math.max(25, Math.round(baseDur * 0.75))) },
+                medium: { price: (baseNum * 1.0).toFixed(2).replace('.', ','), duration: String(baseDur) },
+                large: { price: (baseNum * 1.3).toFixed(2).replace('.', ','), duration: String(Math.round(baseDur * 1.25)) },
+                giant: { price: (baseNum * 1.7).toFixed(2).replace('.', ','), duration: String(Math.round(baseDur * 1.5)) },
               });
             } else {
               setPricingMode('SINGLE');
@@ -386,12 +406,14 @@ export function ServiceEditorModal({
       setServiceType('INDIVIDUAL');
       setName('');
       setCategory('Higiene e Estética');
+      setSelectedIcon('bath');
+      setIconTouched(false);
       setTargetSpecies('all');
       setColor('#0d9488');
       setDescription('');
       setPricingMode('BY_SIZE');
-      setBasePrice('60');
-      setQuickBaseRef('60');
+      setBasePrice('60,00');
+      setQuickBaseRef('60,00');
       setBaseDurationMinutes(60);
       setSizePrices(DEFAULT_SIZE_PRICES);
       setActive(true);
@@ -408,14 +430,12 @@ export function ServiceEditorModal({
     }
   }, [isOpen, serviceId]);
 
-  // Lista de serviços elegíveis para serem componentes (apenas INDIVIDUAL e que não sejam o próprio serviço)
   const eligibleServicesForCombo = useMemo(() => {
     return existingServices.filter(
       s => s.serviceType !== 'COMBO' && s.id !== serviceId && s.active,
     );
   }, [existingServices, serviceId]);
 
-  // Cálculos em tempo real para combos
   const comboSummary = useMemo(() => {
     let rawTotal = 0;
     let totalDuration = 0;
@@ -439,7 +459,7 @@ export function ServiceEditorModal({
       discount = Math.min(rawTotal, Math.max(0, Number(comboDiscountValue) || 0));
       finalPrice = Math.max(0, rawTotal - discount);
     } else if (comboPricingType === 'FIXED_PRICE') {
-      finalPrice = Math.max(0, Number(basePrice) || 0);
+      finalPrice = Math.max(0, parseCurrencyInput(basePrice));
       discount = Math.max(0, rawTotal - finalPrice);
     }
 
@@ -461,19 +481,19 @@ export function ServiceEditorModal({
     customComboDuration,
   ]);
 
-  // Resumo de preços por porte para feedback visual
   const priceRangeSummary = useMemo(() => {
     if (pricingMode === 'SINGLE') {
+      const num = parseCurrencyInput(basePrice);
       return {
-        min: Number(basePrice) || 0,
-        max: Number(basePrice) || 0,
-        formatted: money(Number(basePrice) || 0),
+        min: num,
+        max: num,
+        formatted: money(num),
         minDuration: baseDurationMinutes,
         maxDuration: baseDurationMinutes,
       };
     }
 
-    const prices = Object.values(sizePrices).map(p => Number(p.price) || 0);
+    const prices = Object.values(sizePrices).map(p => parseCurrencyInput(p.price));
     const durations = Object.values(sizePrices).map(p => Number(p.duration) || 60);
     const min = Math.min(...prices);
     const max = Math.max(...prices);
@@ -489,7 +509,6 @@ export function ServiceEditorModal({
     };
   }, [pricingMode, basePrice, sizePrices, baseDurationMinutes]);
 
-  // Atualização de um porte específico
   const handleUpdateSizePrice = (sizeKey: string, field: 'price' | 'duration', val: string) => {
     setSizePrices(prev => ({
       ...prev,
@@ -500,23 +519,21 @@ export function ServiceEditorModal({
     }));
   };
 
-  // Auto-cálculo inteligente proporcional
   const handleAutoCalculateSizes = () => {
-    const base = Number(quickBaseRef) || 60;
+    const base = parseCurrencyInput(quickBaseRef) || 60;
     const baseDur = Number(baseDurationMinutes) || 60;
 
     setSizePrices({
-      mini: { price: (base * 0.75).toFixed(2), duration: String(Math.max(20, Math.round(baseDur * 0.65))) },
-      small: { price: (base * 0.9).toFixed(2), duration: String(Math.max(25, Math.round(baseDur * 0.8))) },
-      medium: { price: (base * 1.0).toFixed(2), duration: String(baseDur) },
-      large: { price: (base * 1.3).toFixed(2), duration: String(Math.round(baseDur * 1.25)) },
-      giant: { price: (base * 1.7).toFixed(2), duration: String(Math.round(baseDur * 1.5)) },
+      mini: { price: (base * 0.75).toFixed(2).replace('.', ','), duration: String(Math.max(20, Math.round(baseDur * 0.65))) },
+      small: { price: (base * 0.9).toFixed(2).replace('.', ','), duration: String(Math.max(25, Math.round(baseDur * 0.75))) },
+      medium: { price: (base * 1.0).toFixed(2).replace('.', ','), duration: String(baseDur) },
+      large: { price: (base * 1.3).toFixed(2).replace('.', ','), duration: String(Math.round(baseDur * 1.25)) },
+      giant: { price: (base * 1.7).toFixed(2).replace('.', ','), duration: String(Math.round(baseDur * 1.5)) },
     });
 
     toast.success('Valores e tempos dos 5 portes sugeridos com sucesso!');
   };
 
-  // Gerenciamento de componentes do combo
   const handleAddComponent = () => {
     if (!selectedComponentToAdd) return;
     const exists = comboComponents.some(c => c.componentServiceId === selectedComponentToAdd);
@@ -550,7 +567,6 @@ export function ServiceEditorModal({
     setComboComponents(prev => prev.filter(c => c.componentServiceId !== serviceIdToRemove));
   };
 
-  // Regras avançadas de pelagem
   const handleAddCoatRule = () => {
     setCoatRules(prev => [
       ...prev,
@@ -558,7 +574,7 @@ export function ServiceEditorModal({
         species: targetSpecies,
         size: 'medium',
         coatType: 'long',
-        price: String(Number(sizePrices.medium?.price || basePrice || 70) + 15),
+        price: (parseCurrencyInput(sizePrices.medium?.price || basePrice || 70) + 15).toFixed(2).replace('.', ','),
         durationMinutes: String(Number(sizePrices.medium?.duration || baseDurationMinutes || 60) + 15),
         label: 'Médio / Pelo Longo',
       },
@@ -575,9 +591,11 @@ export function ServiceEditorModal({
     );
   };
 
-  // Gerenciamento de Etapas Operacionais
   const handleNameChange = (newName: string) => {
     setName(newName);
+    if (!iconTouched) {
+      setSelectedIcon(inferIconFromName(newName, category));
+    }
     if (!customStagesModified) {
       const suggested = suggestStagesForService(newName, category);
       setSelectedStages(suggested);
@@ -590,6 +608,9 @@ export function ServiceEditorModal({
 
   const handleCategoryChange = (newCat: string) => {
     setCategory(newCat);
+    if (!iconTouched) {
+      setSelectedIcon(inferIconFromName(name, newCat));
+    }
     if (!customStagesModified) {
       const suggested = suggestStagesForService(name, newCat);
       setSelectedStages(suggested);
@@ -759,7 +780,7 @@ export function ServiceEditorModal({
       }
     } else {
       if (pricingMode === 'SINGLE') {
-        if (Number(basePrice) < 0 || isNaN(Number(basePrice))) {
+        if (parseCurrencyInput(basePrice) < 0) {
           toast.error('Informe um preço base válido.');
           return;
         }
@@ -768,20 +789,23 @@ export function ServiceEditorModal({
 
     setSaving(true);
     try {
-      let finalPrice = Number(basePrice) || 60;
+      let finalPrice = parseCurrencyInput(basePrice) || 60;
       let finalDuration = Number(baseDurationMinutes) || 60;
 
       if (serviceType === 'COMBO') {
-        finalPrice = comboPricingType !== 'FIXED_PRICE' ? comboSummary.finalPrice : Number(basePrice);
+        finalPrice = comboPricingType !== 'FIXED_PRICE' ? comboSummary.finalPrice : parseCurrencyInput(basePrice);
         finalDuration = autoCalculateDuration ? comboSummary.duration : Number(customComboDuration);
       } else if (pricingMode === 'BY_SIZE') {
-        finalPrice = Number(sizePrices.medium?.price || sizePrices.small?.price || 60);
+        finalPrice = parseCurrencyInput(sizePrices.medium?.price || sizePrices.small?.price || 60);
         finalDuration = Number(sizePrices.medium?.duration || sizePrices.small?.duration || 60);
       }
 
+      let cleanDesc = description.replace(/\[icon:[a-z_]+\]/gi, '').trim();
+      const descWithIcon = cleanDesc ? `${cleanDesc}\n\n[icon:${selectedIcon}]` : `[icon:${selectedIcon}]`;
+
       const payload: any = {
         name: name.trim(),
-        description: description.trim() ? `${description.trim()}\n\n[icon:${selectedIcon}]` : `[icon:${selectedIcon}]`,
+        description: descWithIcon,
         serviceType,
         category,
         targetSpecies,
@@ -818,19 +842,18 @@ export function ServiceEditorModal({
             species: targetSpecies,
             size: s.id,
             coatType: 'all',
-            price: Math.max(0, Number(sizePrices[s.id]?.price || 0)),
+            price: Math.max(0, parseCurrencyInput(sizePrices[s.id]?.price || 0)),
             durationMinutes: Math.max(5, Number(sizePrices[s.id]?.duration || 60)),
             label: s.label,
           }));
 
-          // Inclui também regras avançadas de pelagem se houver
           if (coatRules.length > 0) {
             for (const cr of coatRules) {
               rules.push({
                 species: cr.species || targetSpecies,
                 size: cr.size,
                 coatType: cr.coatType,
-                price: Math.max(0, Number(cr.price || 0)),
+                price: Math.max(0, parseCurrencyInput(cr.price || 0)),
                 durationMinutes: cr.durationMinutes ? Math.max(5, Number(cr.durationMinutes)) : finalDuration,
                 label: cr.label || (undefined as any),
               });
@@ -863,1084 +886,579 @@ export function ServiceEditorModal({
     }
   };
 
+  const ActiveIconComponent = THEMATIC_SERVICE_ICONS.find(i => i.id === selectedIcon)?.icon || Bath;
+
   return (
     <Modal
       title={serviceId ? 'Editar Serviço / Combo' : 'Novo Serviço / Combo'}
+      subtitle="Configure a cobrança, valores e duração do serviço."
       onClose={onClose}
-      maxWidth="sm:max-w-4xl"
+      showBack={true}
+      maxWidth="sm:max-w-3xl"
+      headerRight={
+        <button
+          type="button"
+          onClick={() => toast.info('Defina o modelo de cobrança, valores por porte e tempos de atendimento do serviço.')}
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-zinc-200 bg-white text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50 transition cursor-pointer shadow-2xs"
+          title="Ajuda sobre o cadastro de serviços"
+        >
+          <HelpCircle size={18} />
+        </button>
+      }
     >
       {loadingDetails ? (
         <div className="py-20 text-center text-xs text-slate-500 animate-pulse">
           Carregando informações do serviço...
         </div>
       ) : (
-        <form onSubmit={handleSubmit} className="space-y-6">
-          {/* SELETOR DE FORMATO COMERCIAL */}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* 1. TOPO: ÍCONE SELECIONADO + NOME DO SERVIÇO */}
+          <div className="flex items-center gap-3">
+            <div className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-[#0d6e5a] border border-emerald-200/80 shadow-2xs">
+              <ActiveIconComponent size={24} strokeWidth={2.2} />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                {serviceType === 'COMBO' ? 'Nome do combo *' : 'Nome do serviço *'}
+              </label>
+              <input
+                required
+                type="text"
+                value={name}
+                onChange={e => handleNameChange(e.target.value)}
+                placeholder="Ex: Banho Completo, Tosa Higiênica..."
+                className="w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-xs sm:text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:border-[#0d6e5a] focus:ring-1 focus:ring-[#0d6e5a] outline-none"
+              />
+            </div>
+          </div>
+
+          {/* 2. OS 6 ÍCONES TEMÁTICOS SELETOR */}
           <div>
-            <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
-              Formato Comercial da Oferta
-            </span>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => {
-                  setServiceType('INDIVIDUAL');
-                  setActiveTab('pricing');
-                }}
-                className={`flex items-start gap-3.5 rounded-2xl p-4 text-left transition border ${
-                  serviceType === 'INDIVIDUAL'
-                    ? 'border-teal-600 bg-teal-50/50 ring-2 ring-teal-600/20'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              >
-                <div
-                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
-                    serviceType === 'INDIVIDUAL'
-                      ? 'bg-teal-700 text-white'
-                      : 'bg-slate-100 text-slate-600'
-                  }`}
-                >
-                  <Scissors size={20} />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <strong className="text-sm font-bold text-slate-900">Serviço Individual</strong>
-                    <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-                      Padrão
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500 leading-relaxed">
-                    Banho, tosa, hidratação ou unhas com preços e tempos calculados por porte do pet.
-                  </p>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setServiceType('COMBO');
-                  setActiveTab('combo');
-                }}
-                className={`flex items-start gap-3.5 rounded-2xl p-4 text-left transition border ${
-                  serviceType === 'COMBO'
-                    ? 'border-purple-600 bg-purple-50/50 ring-2 ring-purple-600/20'
-                    : 'border-slate-200 bg-white hover:border-slate-300'
-                }`}
-              >
-                <div
-                  className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${
-                    serviceType === 'COMBO'
-                      ? 'bg-purple-700 text-white'
-                      : 'bg-slate-100 text-slate-600'
-                  }`}
-                >
-                  <Layers size={20} />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <strong className="text-sm font-bold text-slate-900">Combo Promocional</strong>
-                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-[10px] font-semibold text-purple-700">
-                      Mais Vendas
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-slate-500 leading-relaxed">
-                    Pacote comercial agrupando 2 ou mais serviços individuais com desconto promocional.
-                  </p>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* INFORMAÇÕES BÁSICAS DO SERVIÇO */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-            <span className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-              Dados Gerais do Serviço
-            </span>
-
-            <div className="grid gap-4 sm:grid-cols-12">
-              <label className="sm:col-span-6">
-                <span className={labelClass}>
-                  {serviceType === 'COMBO' ? 'Nome do Combo *' : 'Nome do Serviço *'}
-                </span>
-                <input
-                  required
-                  className={inputClass}
-                  value={name}
-                  onChange={e => handleNameChange(e.target.value)}
-                  placeholder={
-                    serviceType === 'COMBO'
-                      ? 'Ex.: Combo Spa Relaxante (Banho + Tosa + Hidratação)'
-                      : 'Ex.: Banho Tradicional'
-                  }
-                />
-              </label>
-
-              <label className="sm:col-span-3">
-                <span className={labelClass}>Categoria *</span>
-                <select
-                  value={category}
-                  onChange={e => handleCategoryChange(e.target.value)}
-                  className={inputClass}
-                >
-                  {CATEGORY_OPTIONS.map(c => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label className="sm:col-span-3">
-                <span className={labelClass}>Público-alvo *</span>
-                <select
-                  value={targetSpecies}
-                  onChange={e => setTargetSpecies(e.target.value)}
-                  className={inputClass}
-                >
-                  <option value="all">Cães e Gatos</option>
-                  <option value="dog">Apenas Cães</option>
-                  <option value="cat">Apenas Gatos</option>
-                </select>
-              </label>
-            </div>
-          </div>
-
-          {/* ETAPAS OPERACIONAIS DO ATENDIMENTO */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-100 pb-3">
-              <div>
-                <div className="flex items-center gap-2">
-                  <ListChecks size={18} className="text-teal-700 shrink-0" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-800">
-                    Etapas do Atendimento
-                  </span>
-                  <span className="rounded-full bg-teal-50 border border-teal-200 px-2 py-0.5 text-[10px] font-bold text-teal-700">
-                    {selectedStages.length} etapas ativas
-                  </span>
-                </div>
-                <p className="text-xs text-slate-500 mt-1">
-                  Selecione quais etapas se aplicam a este serviço. Você também pode renomear qualquer etapa ou adicionar uma etapa exclusiva.
-                </p>
-              </div>
-
-              {/* Presets Rápidos e Botão de Nova Etapa */}
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] font-semibold text-slate-400 mr-0.5">Padrões:</span>
-                  {STAGE_PRESETS.map(preset => {
-                    const isCurrent = stagePresetId === preset.id;
-                    return (
-                      <button
-                        key={preset.id}
-                        type="button"
-                        onClick={() => handleSelectPreset(preset)}
-                        className={`inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-xs font-semibold transition cursor-pointer ${
-                          isCurrent
-                            ? 'bg-teal-700 text-white shadow-xs'
-                            : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                        }`}
-                        title={preset.description}
-                      >
-                        {isCurrent && <Check size={12} />}
-                        <span>{preset.name}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowAddCustomStage(prev => !prev)}
-                  className="inline-flex items-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-bold text-teal-800 hover:bg-teal-100 transition cursor-pointer ml-auto sm:ml-0"
-                >
-                  <Plus size={13} />
-                  <span>Nova Etapa</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Formulário Inline de Nova Etapa Customizada */}
-            {showAddCustomStage && (
-              <form
-                onSubmit={handleAddInlineCustomStage}
-                className="rounded-xl border-2 border-dashed border-teal-300 bg-teal-50/40 p-4 space-y-3 animate-in fade-in"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="text-xs font-bold text-teal-950 uppercase tracking-wider flex items-center gap-1.5">
-                    <Sparkles size={14} className="text-teal-700" />
-                    Adicionar Etapa Personalizada a este Serviço
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => setShowAddCustomStage(false)}
-                    className="text-zinc-400 hover:text-zinc-600 text-xs"
-                  >
-                    Fechar
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                      Nome da Etapa *
-                    </label>
-                    <input
-                      type="text"
-                      value={newCustomStageName}
-                      onChange={e => setNewCustomStageName(e.target.value)}
-                      placeholder="Ex: Secador e Soprador, Ozônio, Unhas..."
-                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                      autoFocus
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                      Onde deve entrar no fluxo?
-                    </label>
-                    <select
-                      value={newCustomStagePos}
-                      onChange={e => setNewCustomStagePos(e.target.value as any)}
-                      className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                    >
-                      <option value="after_bathing">Após o Banho</option>
-                      <option value="after_grooming">Após a Tosa</option>
-                      <option value="before_ready">Antes de Pronto / Final</option>
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 mb-1">
-                    Descrição Curta (opcional)
-                  </label>
-                  <input
-                    type="text"
-                    value={newCustomStageDesc}
-                    onChange={e => setNewCustomStageDesc(e.target.value)}
-                    placeholder="Ex: Secagem profunda e remoção de nós"
-                    className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-900 focus:border-teal-500 focus:outline-none focus:ring-1 focus:ring-teal-500"
-                  />
-                </div>
-
-                <div className="flex items-center justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setShowAddCustomStage(false)}
-                    className="rounded-lg border border-zinc-300 px-3 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                  >
-                    Cancelar
-                  </button>
-                  <button
-                    type="submit"
-                    className="rounded-lg bg-teal-700 px-3 py-1 text-xs font-semibold text-white hover:bg-teal-800 shadow-xs"
-                  >
-                    Incluir Etapa
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Grid Dinâmico de Todas as Etapas da Loja e Customizadas */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2.5">
-              {storeStages.map((st, idx) => {
-                const isSelected = selectedStages.includes(st.key);
-                const isSystem = st.key === 'checked_in' || st.key === 'ready';
-                const displayName = getStageDisplayName(st.key);
-                const isEditingThis = editingStageKey === st.key;
-                const isCustom = st.isCustom || st.key.startsWith('custom_');
-
-                const getIcon = () => {
-                  if (st.key === 'checked_in') return <LogIn size={15} className="text-teal-700" />;
-                  if (st.key === 'bathing') return <Droplets size={15} className={isSelected ? 'text-sky-700' : 'text-slate-500'} />;
-                  if (st.key === 'grooming') return <Scissors size={15} className={isSelected ? 'text-purple-700' : 'text-slate-500'} />;
-                  if (st.key === 'finishing') return <Sparkles size={15} className={isSelected ? 'text-amber-700' : 'text-slate-500'} />;
-                  if (st.key === 'ready') return <CheckCircle2 size={15} className="text-emerald-700" />;
-                  return <Workflow size={15} className={isSelected ? 'text-indigo-700' : 'text-slate-500'} />;
-                };
-
-                // Check-in (Início)
-                if (st.key === 'checked_in') {
-                  return (
-                    <div
-                      key={st.key}
-                      className="flex flex-col justify-between rounded-xl border border-teal-200 bg-teal-50/50 p-3"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {getIcon()}
-                          {isEditingThis ? (
-                            <input
-                              type="text"
-                              value={editingStageInput}
-                              onChange={e => setEditingStageInput(e.target.value)}
-                              className="w-24 rounded border border-teal-300 bg-white px-1.5 py-0.5 text-xs font-bold text-teal-950 focus:outline-none"
-                              autoFocus
-                            />
-                          ) : (
-                            <span className="text-xs font-bold text-teal-950 truncate" title={displayName}>
-                              1. {displayName}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {isEditingThis ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleSaveRenameStage(st.key)}
-                                className="text-[10px] font-bold text-teal-800 bg-teal-100 hover:bg-teal-200 px-1 py-0.5 rounded cursor-pointer"
-                              >
-                                OK
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingStageKey(null)}
-                                className="text-[10px] text-zinc-400 hover:text-zinc-600 px-0.5"
-                              >
-                                ✕
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleStartRenameStage(st.key)}
-                                className="text-zinc-400 hover:text-teal-700 transition p-0.5 cursor-pointer"
-                                title="Alterar nome desta etapa"
-                              >
-                                <Pencil size={11} />
-                              </button>
-                              <span className="text-[10px] font-bold uppercase tracking-wider bg-teal-100 text-teal-800 px-1.5 py-0.5 rounded">
-                                Início
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-teal-800 mt-1 truncate">
-                        {st.description || 'Recepção do pet na loja'}
-                      </p>
-                      <div className="mt-2 text-[10px] font-semibold text-teal-600 flex items-center gap-1">
-                        <Check size={11} /> Sempre ativo
-                      </div>
-                    </div>
-                  );
-                }
-
-                // Pronto (Fim)
-                if (st.key === 'ready') {
-                  return (
-                    <div
-                      key={st.key}
-                      className="flex flex-col justify-between rounded-xl border border-emerald-200 bg-emerald-50/50 p-3"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {getIcon()}
-                          {isEditingThis ? (
-                            <input
-                              type="text"
-                              value={editingStageInput}
-                              onChange={e => setEditingStageInput(e.target.value)}
-                              className="w-24 rounded border border-emerald-300 bg-white px-1.5 py-0.5 text-xs font-bold text-emerald-950 focus:outline-none"
-                              autoFocus
-                            />
-                          ) : (
-                            <span className="text-xs font-bold text-emerald-950 truncate" title={displayName}>
-                              {displayName}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1">
-                          {isEditingThis ? (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleSaveRenameStage(st.key)}
-                                className="text-[10px] font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 px-1 py-0.5 rounded cursor-pointer"
-                              >
-                                OK
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingStageKey(null)}
-                                className="text-[10px] text-zinc-400 hover:text-zinc-600 px-0.5"
-                              >
-                                ✕
-                              </button>
-                            </>
-                          ) : (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() => handleStartRenameStage(st.key)}
-                                className="text-zinc-400 hover:text-emerald-700 transition p-0.5 cursor-pointer"
-                                title="Alterar nome desta etapa"
-                              >
-                                <Pencil size={11} />
-                              </button>
-                              <span className="text-[10px] font-bold uppercase tracking-wider bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded">
-                                Fim
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <p className="text-[11px] text-emerald-800 mt-1 truncate">
-                        {st.description || 'Avisar tutor p/ buscar'}
-                      </p>
-                      <div className="mt-2 text-[10px] font-semibold text-emerald-600 flex items-center gap-1">
-                        <Check size={11} /> Sempre ativo
-                      </div>
-                    </div>
-                  );
-                }
-
-                // Etapas Intermediárias (Banho, Tosa, Finalização ou Customizadas)
-                const cardBorder = isSelected
-                  ? isCustom
-                    ? 'border-indigo-300 bg-indigo-50/60 ring-1 ring-indigo-300'
-                    : st.key === 'bathing'
-                    ? 'border-sky-300 bg-sky-50/60 ring-1 ring-sky-300'
-                    : st.key === 'grooming'
-                    ? 'border-purple-300 bg-purple-50/60 ring-1 ring-purple-300'
-                    : 'border-amber-300 bg-amber-50/60 ring-1 ring-amber-300'
-                  : 'border-slate-200 bg-slate-50/50 opacity-60 hover:opacity-100';
-
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+              {THEMATIC_SERVICE_ICONS.map(item => {
+                const IconComponent = item.icon;
+                const isSelected = selectedIcon === item.id;
                 return (
-                  <div
-                    key={st.key}
-                    className={`flex flex-col justify-between rounded-xl border p-3 text-left transition ${cardBorder}`}
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSelectedIcon(item.id);
+                      setIconTouched(true);
+                    }}
+                    className={`flex items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-bold transition cursor-pointer border ${
+                      isSelected
+                        ? 'border-[#0d6e5a] bg-teal-50/90 text-[#0d6e5a] shadow-xs ring-1 ring-[#0d6e5a]/30'
+                        : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50'
+                    }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        {getIcon()}
-                        {isEditingThis ? (
-                          <input
-                            type="text"
-                            value={editingStageInput}
-                            onChange={e => setEditingStageInput(e.target.value)}
-                            className="w-24 rounded border border-zinc-300 bg-white px-1.5 py-0.5 text-xs font-bold text-zinc-900 focus:outline-none"
-                            autoFocus
-                          />
-                        ) : (
-                          <span className={`text-xs font-bold truncate ${isSelected ? 'text-zinc-900' : 'text-slate-600'}`} title={displayName}>
-                            {displayName}
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center gap-1">
-                        {isEditingThis ? (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleSaveRenameStage(st.key)}
-                              className="text-[10px] font-bold text-teal-800 bg-teal-100 hover:bg-teal-200 px-1 py-0.5 rounded cursor-pointer"
-                            >
-                              OK
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setEditingStageKey(null)}
-                              className="text-[10px] text-zinc-400 hover:text-zinc-600 px-0.5"
-                            >
-                              ✕
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => handleStartRenameStage(st.key)}
-                              className="text-zinc-400 hover:text-zinc-700 transition p-0.5 cursor-pointer"
-                              title="Alterar nome desta etapa neste serviço"
-                            >
-                              <Pencil size={11} />
-                            </button>
-                            {isCustom && (
-                              <button
-                                type="button"
-                                onClick={() => handleRemoveCustomStage(st.key)}
-                                className="text-rose-400 hover:text-rose-600 transition p-0.5 cursor-pointer"
-                                title="Remover esta etapa customizada deste serviço"
-                              >
-                                <Trash2 size={11} />
-                              </button>
-                            )}
-                            <span
-                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                                isSelected
-                                  ? isCustom
-                                    ? 'bg-indigo-100 text-indigo-800'
-                                    : st.key === 'bathing'
-                                    ? 'bg-sky-100 text-sky-800'
-                                    : st.key === 'grooming'
-                                    ? 'bg-purple-100 text-purple-800'
-                                    : 'bg-amber-100 text-amber-800'
-                                  : 'bg-slate-200 text-slate-600'
-                              }`}
-                            >
-                              {isSelected ? 'Ativo' : 'Omitido'}
-                            </span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    <p className="text-[11px] text-slate-500 mt-1 truncate">
-                      {st.description || (st.key === 'bathing' ? 'Lavagem e secagem' : st.key === 'grooming' ? 'Máquina ou tesoura' : st.key === 'finishing' ? 'Perfume e adereços' : 'Etapa operacional')}
-                    </p>
-
-                    <button
-                      type="button"
-                      onClick={() => handleToggleStage(st.key)}
-                      className={`mt-2 text-[10px] font-semibold text-left transition cursor-pointer ${
-                        isSelected
-                          ? isCustom
-                            ? 'text-indigo-700 hover:text-indigo-900'
-                            : st.key === 'bathing'
-                            ? 'text-sky-700 hover:text-sky-900'
-                            : st.key === 'grooming'
-                            ? 'text-purple-700 hover:text-purple-900'
-                            : 'text-amber-700 hover:text-amber-900'
-                          : 'text-slate-500 hover:text-slate-800'
-                      }`}
-                    >
-                      {isSelected ? '✓ Incluído no fluxo (clique p/ omitir)' : '+ Clique p/ incluir no fluxo'}
-                    </button>
-                  </div>
+                    <IconComponent size={15} className={isSelected ? 'text-[#0d6e5a]' : 'text-slate-400'} />
+                    <span className="truncate">{item.label}</span>
+                  </button>
                 );
               })}
             </div>
+          </div>
 
-            {/* Régua visual do fluxo resultante */}
-            <div className="flex flex-wrap items-center gap-2 rounded-xl bg-slate-50 border border-slate-200/80 px-4 py-2.5">
-              <span className="text-xs font-bold text-slate-600 shrink-0">
-                Sequência deste Serviço na Agenda:
-              </span>
-              <div className="flex flex-wrap items-center gap-1.5">
-                {selectedStages.map((stageKey, sIdx) => {
-                  const label = getStageDisplayName(stageKey);
-                  return (
-                    <React.Fragment key={stageKey}>
-                      {sIdx > 0 && <ArrowRight size={13} className="text-slate-400" />}
-                      <span className="inline-flex items-center gap-1 rounded-md bg-white border border-slate-300 px-2 py-0.5 text-xs font-bold text-slate-800 shadow-2xs">
-                        <span className="text-[10px] text-teal-700 font-extrabold">{sIdx + 1}.</span>
-                        {label}
-                      </span>
-                    </React.Fragment>
-                  );
-                })}
-              </div>
+          {/* 3. CATEGORIA & DURAÇÃO PADRÃO */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <Tag size={13} className="text-slate-400" />
+                <span>Categoria *</span>
+              </label>
+              <select
+                value={category}
+                onChange={e => handleCategoryChange(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-800 focus:border-[#0d6e5a] focus:ring-1 focus:ring-[#0d6e5a] outline-none cursor-pointer"
+              >
+                {CATEGORY_OPTIONS.map(c => (
+                  <option key={c} value={c}>
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1 flex items-center gap-1.5">
+                <Clock size={13} className="text-slate-400" />
+                <span>Duração padrão</span>
+              </label>
+              <select
+                value={baseDurationMinutes}
+                onChange={e => {
+                  const val = Number(e.target.value);
+                  setBaseDurationMinutes(val);
+                  setSizePrices(prev => ({
+                    mini: { ...prev.mini, duration: String(Math.max(20, Math.round(val * 0.65))) },
+                    small: { ...prev.small, duration: String(Math.max(25, Math.round(val * 0.75))) },
+                    medium: { ...prev.medium, duration: String(val) },
+                    large: { ...prev.large, duration: String(Math.round(val * 1.25)) },
+                    giant: { ...prev.giant, duration: String(Math.round(val * 1.5)) },
+                  }));
+                }}
+                className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs sm:text-sm font-semibold text-slate-800 focus:border-[#0d6e5a] focus:ring-1 focus:ring-[#0d6e5a] outline-none cursor-pointer"
+              >
+                <option value={30}>30 min</option>
+                <option value={40}>40 min</option>
+                <option value={45}>45 min</option>
+                <option value={50}>50 min</option>
+                <option value={60}>60 min (1 hora)</option>
+                <option value={75}>75 min (1h15)</option>
+                <option value={90}>90 min (1h30)</option>
+                <option value={120}>120 min (2 horas)</option>
+              </select>
             </div>
           </div>
 
-          {/* ABA / SEÇÃO DE PRECIFICAÇÃO PARA SERVIÇO INDIVIDUAL */}
-          {serviceType === 'INDIVIDUAL' && (
-            <div className="rounded-2xl border border-teal-200 bg-teal-50/20 p-5 space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-teal-100 pb-3">
-                <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-teal-950 block">
-                    Modelo de Cobrança do Banho & Tosa
-                  </span>
-                  <p className="text-xs text-slate-600 mt-0.5">
-                    Defina se o valor é calculado automaticamente pelo porte do pet ou se tem preço fixo.
+          {/* 4. MODELO DE COBRANÇA */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/60 p-3.5 space-y-2.5">
+            <span className="block text-xs font-bold uppercase tracking-wider text-slate-600">
+              Modelo de cobrança {name ? `do ${name}` : 'do serviço'}
+            </span>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setPricingMode('BY_SIZE')}
+                className={`flex items-start gap-3 rounded-xl p-3 text-left transition border cursor-pointer ${
+                  pricingMode === 'BY_SIZE'
+                    ? 'border-[#0d6e5a] bg-teal-50/70 ring-1 ring-[#0d6e5a]'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <div
+                  className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+                    pricingMode === 'BY_SIZE'
+                      ? 'border-[#0d6e5a] bg-[#0d6e5a]'
+                      : 'border-slate-300 bg-white'
+                  }`}
+                >
+                  {pricingMode === 'BY_SIZE' && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <strong className="text-xs font-bold text-slate-900">Preço por Porte do Pet</strong>
+                    <span className="rounded-full bg-teal-100 text-teal-800 px-1.5 py-0.2 text-[10px] font-bold">
+                      Recomendado
+                    </span>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-slate-500 leading-snug">
+                    Cobrança varia de acordo com o tamanho do cão ou gato
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setPricingMode('SINGLE')}
+                className={`flex items-start gap-3 rounded-xl p-3 text-left transition border cursor-pointer ${
+                  pricingMode === 'SINGLE'
+                    ? 'border-[#0d6e5a] bg-teal-50/70 ring-1 ring-[#0d6e5a]'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                }`}
+              >
+                <div
+                  className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border ${
+                    pricingMode === 'SINGLE'
+                      ? 'border-[#0d6e5a] bg-[#0d6e5a]'
+                      : 'border-slate-300 bg-white'
+                  }`}
+                >
+                  {pricingMode === 'SINGLE' && <div className="h-1.5 w-1.5 rounded-full bg-white" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <strong className="text-xs font-bold text-slate-900 block">Preço Fixo Único</strong>
+                  <p className="mt-0.5 text-[11px] text-slate-500 leading-snug">
+                    Mesmo valor para qualquer porte ou raça
+                  </p>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* 5. CONFIGURAÇÃO POR PORTE (QUANDO BY_SIZE) */}
+          {pricingMode === 'BY_SIZE' && (
+            <div className="space-y-3">
+              {/* BARRA DE AUTO-CÁLCULO */}
+              <div className="rounded-xl border border-teal-200/80 bg-teal-50/60 p-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+                <div className="flex items-center gap-2">
+                  <Sparkles size={15} className="text-[#0d6e5a] shrink-0" />
+                  <p className="text-xs text-teal-950 font-medium">
+                    Preencha um valor base para auto-escalonar os 5 portes proporcionalmente:
                   </p>
                 </div>
 
-                <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1">
-                  <button
-                    type="button"
-                    onClick={() => setPricingMode('BY_SIZE')}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                      pricingMode === 'BY_SIZE'
-                        ? 'bg-teal-700 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <PawPrint size={14} />
-                    <span>Preço por Porte do Pet</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPricingMode('SINGLE')}
-                    className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                      pricingMode === 'SINGLE'
-                        ? 'bg-teal-700 text-white shadow-xs'
-                        : 'text-slate-600 hover:text-slate-900'
-                    }`}
-                  >
-                    <DollarSign size={14} />
-                    <span>Preço Fixo Único</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* COBRANÇA POR PORTE (PADRÃO PROFISSIONAL) */}
-              {pricingMode === 'BY_SIZE' && (
-                <div className="space-y-4 pt-1">
-                  {/* BARRA DE AUTO-CÁLCULO RÁPIDO */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-teal-200/80 bg-teal-50/70 px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <Sparkles size={16} className="text-teal-700 shrink-0" />
-                      <p className="text-xs text-teal-950 font-medium">
-                        Preencha um valor base para auto-escalonar os 5 portes proporcionalmente:
-                      </p>
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center gap-1 bg-white border border-teal-300 rounded-lg px-2.5 py-1">
-                        <span className="text-xs font-bold text-slate-500">R$</span>
-                        <input
-                          type="number"
-                          step="0.01"
-                          min={0}
-                          value={quickBaseRef}
-                          onChange={e => setQuickBaseRef(e.target.value)}
-                          className="w-16 text-xs font-bold text-slate-900 outline-none"
-                          placeholder="60.00"
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        onClick={handleAutoCalculateSizes}
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-teal-700 px-3 py-1.5 text-xs font-bold text-white hover:bg-teal-800 transition cursor-pointer shadow-xs"
-                      >
-                        <Wand2 size={13} />
-                        Auto-calcular Portes
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* TABELA ESPAÇOSA E LIMPA DOS 5 PORTES */}
-                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50/70 text-[11px] font-bold uppercase tracking-wider text-slate-600">
-                          <th className="px-4 py-3">Porte & Categoria</th>
-                          <th className="px-4 py-3 w-44">Preço de Venda (R$)</th>
-                          <th className="px-4 py-3 w-36">Duração Estimada</th>
-                          <th className="px-4 py-3 hidden md:table-cell text-slate-400">Exemplos / Raças</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-xs">
-                        {SIZES_DEFINITION.map(sizeDef => {
-                          const sizeKey = sizeDef.id;
-                          const val = sizePrices[sizeKey] || { price: '0', duration: '60' };
-
-                          return (
-                            <tr key={sizeKey} className="hover:bg-slate-50/50 transition-colors">
-                              {/* COLUNA 1: IDENTIFICAÇÃO DO PORTE */}
-                              <td className="px-4 py-3.5">
-                                <div className="flex items-center gap-3">
-                                  <span
-                                    className={`inline-flex h-7 w-10 items-center justify-center rounded-md border text-[11px] font-bold ${sizeDef.badgeColor}`}
-                                  >
-                                    {sizeDef.short}
-                                  </span>
-                                  <div>
-                                    <strong className="block font-bold text-slate-900">
-                                      {sizeDef.label}
-                                    </strong>
-                                    <span className="text-[11px] text-slate-500 md:hidden block">
-                                      {sizeDef.weightHint}
-                                    </span>
-                                  </div>
-                                </div>
-                              </td>
-
-                              {/* COLUNA 2: PREÇO */}
-                              <td className="px-4 py-3.5">
-                                <div className="flex items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 focus-within:border-teal-600 focus-within:ring-1 focus-within:ring-teal-600">
-                                  <span className="text-xs font-bold text-slate-500 mr-1.5 select-none">
-                                    R$
-                                  </span>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    min={0}
-                                    value={val.price}
-                                    onChange={e => handleUpdateSizePrice(sizeKey, 'price', e.target.value)}
-                                    className="w-full text-xs font-bold tabular-nums text-slate-900 outline-none"
-                                    placeholder="0,00"
-                                  />
-                                </div>
-                              </td>
-
-                              {/* COLUNA 3: DURAÇÃO */}
-                              <td className="px-4 py-3.5">
-                                <div className="flex items-center rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 focus-within:border-teal-600 focus-within:ring-1 focus-within:ring-teal-600">
-                                  <Clock size={14} className="text-slate-400 mr-1.5 shrink-0" />
-                                  <input
-                                    type="number"
-                                    min={5}
-                                    max={720}
-                                    value={val.duration}
-                                    onChange={e => handleUpdateSizePrice(sizeKey, 'duration', e.target.value)}
-                                    className="w-full text-xs font-bold tabular-nums text-slate-900 outline-none"
-                                    placeholder="60"
-                                  />
-                                  <span className="text-[11px] text-slate-500 ml-1 select-none">min</span>
-                                </div>
-                              </td>
-
-                              {/* COLUNA 4: DICA DE RAÇA E PESO */}
-                              <td className="px-4 py-3.5 hidden md:table-cell text-[11px] text-slate-500 leading-tight">
-                                {sizeDef.weightHint}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-
-                  {/* FAIXA DE RESUMO DA OFERTA */}
-                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-teal-50 border border-teal-200/70 p-3.5 text-xs">
-                    <div className="flex items-center gap-2">
-                      <Tag size={15} className="text-teal-700 shrink-0" />
-                      <span className="text-slate-700">
-                        Faixa de preço no catálogo:{' '}
-                        <strong className="text-teal-950 font-bold text-sm">
-                          {priceRangeSummary.formatted}
-                        </strong>
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-4 text-slate-600 text-xs">
-                      <span className="flex items-center gap-1">
-                        <Clock size={13} className="text-slate-400" />
-                        <span>
-                          Duração:{' '}
-                          <strong className="text-slate-800">
-                            {priceRangeSummary.minDuration} a {priceRangeSummary.maxDuration} min
-                          </strong>
-                        </span>
-                      </span>
-                      <span className="rounded-full bg-teal-200/60 text-teal-900 font-semibold px-2 py-0.5 text-[10px]">
-                        5 portes configurados
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {/* COBRANÇA POR PREÇO ÚNICO */}
-              {pricingMode === 'SINGLE' && (
-                <div className="grid gap-4 sm:grid-cols-2 pt-2">
-                  <label>
-                    <span className={labelClass}>Preço Fixo do Serviço (R$) *</span>
-                    <div className="flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-teal-600 focus-within:ring-1 focus-within:ring-teal-600">
-                      <span className="text-xs font-bold text-slate-500 mr-2">R$</span>
-                      <input
-                        required
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        value={basePrice}
-                        onChange={e => setBasePrice(e.target.value)}
-                        className="w-full text-sm font-bold text-slate-900 outline-none"
-                        placeholder="60.00"
-                      />
-                    </div>
-                    <span className="mt-1 block text-[11px] text-slate-500">
-                      Valor único cobrado para qualquer animal independente do porte.
-                    </span>
-                  </label>
-
-                  <label>
-                    <span className={labelClass}>Duração Estimada (minutos) *</span>
-                    <div className="flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-teal-600 focus-within:ring-1 focus-within:ring-teal-600">
-                      <Clock size={15} className="text-slate-400 mr-2" />
-                      <input
-                        required
-                        type="number"
-                        min={5}
-                        max={720}
-                        value={baseDurationMinutes}
-                        onChange={e => setBaseDurationMinutes(Number(e.target.value))}
-                        className="w-full text-sm font-bold text-slate-900 outline-none"
-                        placeholder="60"
-                      />
-                      <span className="text-xs text-slate-500 ml-2">minutos</span>
-                    </div>
-                    <span className="mt-1 block text-[11px] text-slate-500">
-                      Tempo padrão de bloqueio na agenda de atendimento.
-                    </span>
-                  </label>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ABA / SEÇÃO DE COMPOSIÇÃO DE COMBO */}
-          {serviceType === 'COMBO' && (
-            <div className="rounded-2xl border border-purple-200 bg-purple-50/20 p-5 space-y-4">
-              <span className="text-xs font-bold uppercase tracking-wider text-purple-950 block border-b border-purple-100 pb-2">
-                Composição dos Serviços Inclusos no Combo
-              </span>
-
-              {/* SELETOR DE COMPONENTES */}
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3 bg-white p-3.5 rounded-xl border border-purple-200/80">
-                <div className="flex-1">
-                  <span className={labelClass}>Selecione um serviço individual para incluir:</span>
-                  <select
-                    value={selectedComponentToAdd}
-                    onChange={e => setSelectedComponentToAdd(e.target.value)}
-                    className={inputClass}
-                  >
-                    <option value="">-- Escolha um serviço do catálogo --</option>
-                    {eligibleServicesForCombo.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} ({money(Number(s.price || 0))})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleAddComponent}
-                  disabled={!selectedComponentToAdd}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-purple-700 px-4 py-2.5 text-xs font-bold text-white hover:bg-purple-800 disabled:opacity-50 transition cursor-pointer shadow-xs"
-                >
-                  <Plus size={16} />
-                  Incluir no Combo
-                </button>
-              </div>
-
-              {/* LISTA DE ITENS INCLUÍDOS */}
-              <div className="space-y-2">
-                {comboComponents.length === 0 ? (
-                  <div className="py-8 text-center text-xs text-slate-400 bg-white rounded-xl border border-dashed border-slate-300">
-                    Nenhum serviço adicionado ainda. Escolha os serviços acima para compor este combo promocional.
-                  </div>
-                ) : (
-                  <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
-                    <table className="w-full text-left text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase text-slate-600">
-                          <th className="px-4 py-2.5">Serviço Componente</th>
-                          <th className="px-4 py-2.5 w-32 text-center">Quantidade</th>
-                          <th className="px-4 py-2.5 w-32 text-right">Subtotal Avulso</th>
-                          <th className="px-4 py-2.5 w-16"></th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {comboComponents.map(ci => {
-                          const item = existingServices.find(s => s.id === ci.componentServiceId);
-                          const subtotal = Number(item?.price || 0) * ci.quantity;
-
-                          return (
-                            <tr key={ci.componentServiceId}>
-                              <td className="px-4 py-3 font-semibold text-slate-900">
-                                {item?.name || 'Serviço'}
-                              </td>
-                              <td className="px-4 py-3 text-center">
-                                <div className="inline-flex items-center gap-2 border border-slate-300 rounded-lg px-2 py-1">
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateComponentQty(ci.componentServiceId, -1)}
-                                    className="text-slate-500 hover:text-slate-900 font-bold px-1"
-                                  >
-                                    -
-                                  </button>
-                                  <span className="font-bold text-slate-800 w-4 text-center">
-                                    {ci.quantity}
-                                  </span>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleUpdateComponentQty(ci.componentServiceId, 1)}
-                                    className="text-slate-500 hover:text-slate-900 font-bold px-1"
-                                  >
-                                    +
-                                  </button>
-                                </div>
-                              </td>
-                              <td className="px-4 py-3 text-right font-bold tabular-nums text-slate-800">
-                                {money(subtotal)}
-                              </td>
-                              <td className="px-4 py-3 text-right">
-                                <button
-                                  type="button"
-                                  onClick={() => handleRemoveComponent(ci.componentServiceId)}
-                                  className="text-slate-400 hover:text-rose-600 transition"
-                                  title="Remover do combo"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* REGRAS DE PREÇO DO COMBO */}
-              {comboComponents.length > 0 && (
-                <div className="grid gap-4 sm:grid-cols-2 pt-2 border-t border-purple-100">
-                  <div>
-                    <span className={labelClass}>Estratégia de Desconto do Combo</span>
-                    <select
-                      value={comboPricingType}
-                      onChange={e => setComboPricingType(e.target.value as any)}
-                      className={inputClass}
-                    >
-                      <option value="PERCENT_DISCOUNT">Desconto Percentual (%) sobre os serviços</option>
-                      <option value="FIXED_DISCOUNT">Desconto Fixo em Reais (R$)</option>
-                      <option value="FIXED_PRICE">Preço Fechado Promocional (R$)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <span className={labelClass}>
-                      {comboPricingType === 'PERCENT_DISCOUNT'
-                        ? 'Percentual de Desconto (%) *'
-                        : comboPricingType === 'FIXED_DISCOUNT'
-                        ? 'Valor do Desconto (R$) *'
-                        : 'Valor Final do Combo (R$) *'}
-                    </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center rounded-xl border border-teal-300 bg-white px-2.5 py-1.5 shadow-2xs">
+                    <span className="text-xs font-bold text-slate-500 mr-1 select-none">R$</span>
                     <input
-                      type="number"
-                      step={comboPricingType === 'PERCENT_DISCOUNT' ? '1' : '0.01'}
-                      min={0}
-                      value={
-                        comboPricingType === 'FIXED_PRICE'
-                          ? basePrice
-                          : comboDiscountValue
-                      }
-                      onChange={e => {
-                        if (comboPricingType === 'FIXED_PRICE') {
-                          setBasePrice(e.target.value);
-                        } else {
-                          setComboDiscountValue(e.target.value);
-                        }
-                      }}
-                      className={inputClass}
-                      placeholder={comboPricingType === 'PERCENT_DISCOUNT' ? '15' : '20.00'}
+                      type="text"
+                      inputMode="decimal"
+                      value={quickBaseRef}
+                      onChange={e => setQuickBaseRef(e.target.value.replace(/[^0-9.,]/g, ''))}
+                      className="w-16 text-xs font-bold text-slate-900 outline-none tabular-nums"
+                      placeholder="60,00"
                     />
                   </div>
+                  <button
+                    type="button"
+                    onClick={handleAutoCalculateSizes}
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-[#0d6e5a] hover:bg-[#0a5747] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition cursor-pointer"
+                  >
+                    <Wand2 size={13} />
+                    <span>Auto-calcular Portes</span>
+                  </button>
                 </div>
-              )}
+              </div>
 
-              {/* CARD DE RESUMO FINANCEIRO DO COMBO */}
-              {comboComponents.length > 0 && (
-                <div className="rounded-xl border border-purple-200 bg-white p-4 space-y-2">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-500">Soma dos serviços avulsos:</span>
-                    <span className="font-semibold text-slate-700 line-through tabular-nums">
-                      {money(comboSummary.rawTotal)}
+              {/* TABELA DE PORTES */}
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-2xs">
+                <table className="w-full min-w-[380px] text-left border-collapse">
+                  <thead>
+                    <tr className="border-b border-slate-200 bg-slate-50/80 text-[11px] font-bold uppercase tracking-wider text-slate-500">
+                      <th className="px-3 sm:px-4 py-2.5">PORTE</th>
+                      <th className="px-3 sm:px-4 py-2.5">PESO DO PET</th>
+                      <th className="px-3 sm:px-4 py-2.5 w-32 sm:w-36">PREÇO DE VENDA</th>
+                      <th className="px-3 sm:px-4 py-2.5 w-28 sm:w-32">DURAÇÃO</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs">
+                    {SIZES_DEFINITION.map(sizeDef => {
+                      const sizeKey = sizeDef.id;
+                      const val = sizePrices[sizeKey] || { price: '0', duration: '60' };
+
+                      return (
+                        <tr key={sizeKey} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="px-3 sm:px-4 py-2.5 align-middle">
+                            <span
+                              className={`inline-flex items-center justify-center rounded-lg border px-2 py-0.5 text-xs font-bold ${sizeDef.badgeColor}`}
+                            >
+                              {sizeDef.short}
+                            </span>
+                          </td>
+
+                          <td className="px-3 sm:px-4 py-2.5 align-middle">
+                            <div className="min-w-0">
+                              <strong className="block text-xs font-bold text-slate-900 leading-tight">
+                                {sizeDef.label}
+                              </strong>
+                              <span className="text-[11px] text-slate-500 block leading-tight">
+                                {sizeDef.weightHint.split('(')[0].trim()}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="px-3 sm:px-4 py-2.5 align-middle">
+                            <div className="flex items-center rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 focus-within:border-[#0d6e5a] focus-within:ring-1 focus-within:ring-[#0d6e5a] shadow-2xs">
+                              <span className="text-xs font-bold text-slate-500 mr-1 select-none">
+                                R$
+                              </span>
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                value={val.price}
+                                onChange={e =>
+                                  handleUpdateSizePrice(
+                                    sizeKey,
+                                    'price',
+                                    e.target.value.replace(/[^0-9.,]/g, ''),
+                                  )
+                                }
+                                onBlur={() => {
+                                  const clean = parseCurrencyInput(val.price);
+                                  handleUpdateSizePrice(
+                                    sizeKey,
+                                    'price',
+                                    clean.toFixed(2).replace('.', ','),
+                                  );
+                                }}
+                                className="w-full text-xs sm:text-sm font-bold tabular-nums text-slate-900 outline-none bg-transparent"
+                                placeholder="0,00"
+                              />
+                            </div>
+                          </td>
+
+                          <td className="px-3 sm:px-4 py-2.5 align-middle">
+                            <div className="flex items-center rounded-xl border border-slate-300 bg-white px-2 py-1.5 focus-within:border-[#0d6e5a] focus-within:ring-1 focus-within:ring-[#0d6e5a] shadow-2xs">
+                              <Clock size={13} className="text-slate-400 mr-1 shrink-0" />
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                value={val.duration}
+                                onChange={e =>
+                                  handleUpdateSizePrice(
+                                    sizeKey,
+                                    'duration',
+                                    e.target.value.replace(/[^0-9]/g, ''),
+                                  )
+                                }
+                                className="w-full text-xs sm:text-sm font-bold tabular-nums text-slate-900 outline-none bg-transparent text-center"
+                                placeholder="60"
+                              />
+                              <span className="text-[11px] text-slate-500 ml-1 select-none">min</span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* FAIXA DE RESUMO */}
+              <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl bg-teal-50/70 border border-teal-200/60 p-3 text-xs">
+                <div className="flex items-center gap-2">
+                  <Tag size={14} className="text-[#0d6e5a] shrink-0" />
+                  <span className="text-slate-700">
+                    Faixa de preço no catálogo:{' '}
+                    <strong className="text-teal-950 font-bold text-sm">
+                      {priceRangeSummary.formatted}
+                    </strong>
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3 text-slate-600 text-xs">
+                  <span className="flex items-center gap-1">
+                    <Clock size={13} className="text-slate-400" />
+                    <span>
+                      Duração:{' '}
+                      <strong className="text-slate-800">
+                        {priceRangeSummary.minDuration} a {priceRangeSummary.maxDuration} min
+                      </strong>
                     </span>
-                  </div>
-
-                  {comboSummary.discount > 0 && (
-                    <div className="flex items-center justify-between text-xs text-emerald-700">
-                      <span className="font-medium">Economia gerada para o cliente:</span>
-                      <span className="font-bold tabular-nums">
-                        - {money(comboSummary.discount)}
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
-                    <div>
-                      <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 block">
-                        Preço Final do Combo
-                      </span>
-                      <strong className="text-xl font-bold text-purple-900 tabular-nums">
-                        {money(comboSummary.finalPrice)}
-                      </strong>
-                    </div>
-
-                    <div className="text-right text-xs text-slate-500">
-                      <span>Duração estimada total:</span>
-                      <strong className="block text-slate-900 font-bold">
-                        {comboSummary.duration} minutos
-                      </strong>
-                    </div>
-                  </div>
+                  </span>
+                  <span className="rounded-full bg-teal-200/70 text-teal-900 font-bold px-2 py-0.5 text-[10px]">
+                    5 portes configurados
+                  </span>
                 </div>
-              )}
+              </div>
             </div>
           )}
 
-          {/* CONFIGURAÇÕES OPERACIONAIS (STATUS, COR E DESCRIÇÃO) */}
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 space-y-4">
-            <span className="block text-xs font-bold uppercase tracking-wider text-slate-700">
-              Configurações Operacionais & Visualização
-            </span>
-
-            <div className="grid gap-4 sm:grid-cols-12">
-              <label className="sm:col-span-4">
-                <span className={labelClass}>Cor na Agenda</span>
-                <div className="flex min-h-11 items-center gap-3 rounded-xl border border-slate-300 bg-white px-3">
+          {/* 6. COBRANÇA POR PREÇO ÚNICO (QUANDO SINGLE) */}
+          {pricingMode === 'SINGLE' && (
+            <div className="grid gap-3 sm:grid-cols-2 rounded-xl border border-slate-200 bg-white p-3.5">
+              <div>
+                <span className="block text-xs font-bold text-slate-700 mb-1">
+                  Preço Fixo do Serviço (R$) *
+                </span>
+                <div className="flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-[#0d6e5a] focus-within:ring-1 focus-within:ring-[#0d6e5a]">
+                  <span className="text-xs font-bold text-slate-500 mr-1.5 select-none">R$</span>
                   <input
-                    type="color"
-                    className="h-7 w-9 cursor-pointer border-0 bg-transparent p-0"
-                    value={color}
-                    onChange={e => setColor(e.target.value)}
+                    type="text"
+                    inputMode="decimal"
+                    value={basePrice}
+                    onChange={e => setBasePrice(e.target.value.replace(/[^0-9.,]/g, ''))}
+                    onBlur={() => {
+                      const clean = parseCurrencyInput(basePrice);
+                      setBasePrice(clean.toFixed(2).replace('.', ','));
+                    }}
+                    className="w-full text-sm font-bold text-slate-900 outline-none tabular-nums"
+                    placeholder="60,00"
                   />
-                  <span className="text-xs font-mono uppercase text-slate-600 font-semibold">
-                    {color}
-                  </span>
                 </div>
-              </label>
-
-              <div className="sm:col-span-8 flex items-center">
-                <label className="flex cursor-pointer items-center gap-2.5 text-xs font-semibold text-slate-800">
-                  <input
-                    type="checkbox"
-                    checked={active}
-                    onChange={e => setActive(e.target.checked)}
-                    className="h-4 w-4 rounded accent-teal-700"
-                  />
-                  <span>Serviço Ativo (disponível para agendamentos e recepção)</span>
-                </label>
               </div>
 
-              <label className="sm:col-span-12">
-                <span className={labelClass}>Descrição e Orientações Operacionais (Opcional)</span>
-                <textarea
-                  rows={2}
-                  className={inputClass}
-                  value={description}
-                  onChange={e => setDescription(e.target.value)}
-                  placeholder="Orientações aos profissionais do banho & tosa ou detalhes visíveis no comprovante do tutor."
-                />
-              </label>
+              <div>
+                <span className="block text-xs font-bold text-slate-700 mb-1">
+                  Duração Estimada *
+                </span>
+                <div className="flex items-center rounded-xl border border-slate-300 bg-white px-3 py-2 focus-within:border-[#0d6e5a] focus-within:ring-1 focus-within:ring-[#0d6e5a]">
+                  <Clock size={15} className="text-slate-400 mr-2 shrink-0" />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={baseDurationMinutes}
+                    onChange={e =>
+                      setBaseDurationMinutes(Number(e.target.value.replace(/[^0-9]/g, '')) || 60)
+                    }
+                    className="w-full text-sm font-bold text-slate-900 outline-none tabular-nums"
+                    placeholder="60"
+                  />
+                  <span className="text-xs text-slate-500 ml-2">minutos</span>
+                </div>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* RODAPÉ DO MODAL (AÇÕES) */}
-          <div className="flex flex-col-reverse sm:flex-row justify-end gap-3 border-t border-slate-200 pt-4">
+          {/* 7. CONFIGURAÇÕES AVANÇADAS (SANFONA / DETAILS) */}
+          <details className="group rounded-2xl border border-slate-200 bg-white overflow-hidden shadow-2xs">
+            <summary className="flex items-center justify-between px-4 py-3 text-xs font-bold text-slate-700 cursor-pointer hover:bg-slate-50 select-none">
+              <div className="flex items-center gap-2">
+                <Workflow size={15} className="text-[#0d6e5a]" />
+                <span>Opções Avançadas (Etapas na Agenda, Cor, Observações)</span>
+              </div>
+              <ChevronDown size={14} className="text-slate-400 transition-transform group-open:rotate-180" />
+            </summary>
+
+            <div className="p-4 border-t border-slate-100 space-y-4">
+              {/* FORMATO COMERCIAL */}
+              <div>
+                <span className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 mb-2">
+                  Formato Comercial
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setServiceType('INDIVIDUAL')}
+                    className={`p-3 rounded-xl border text-left cursor-pointer ${
+                      serviceType === 'INDIVIDUAL'
+                        ? 'border-[#0d6e5a] bg-teal-50/50 font-bold text-[#0d6e5a]'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                  >
+                    Serviço Individual Padrão
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServiceType('COMBO')}
+                    className={`p-3 rounded-xl border text-left cursor-pointer ${
+                      serviceType === 'COMBO'
+                        ? 'border-purple-600 bg-purple-50/50 font-bold text-purple-700'
+                        : 'border-slate-200 bg-white text-slate-700'
+                    }`}
+                  >
+                    Combo Promocional (Pacote)
+                  </button>
+                </div>
+              </div>
+
+              {/* ETAPAS DO ATENDIMENTO NA AGENDA */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3.5 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-200 pb-2.5">
+                  <div>
+                    <span className="text-xs font-bold uppercase tracking-wider text-slate-800 block">
+                      Etapas do Atendimento na Agenda
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Marque as etapas que se aplicam a este serviço.
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {STAGE_PRESETS.map(preset => {
+                      const isCurrent = stagePresetId === preset.id;
+                      return (
+                        <button
+                          key={preset.id}
+                          type="button"
+                          onClick={() => handleSelectPreset(preset)}
+                          className={`rounded-lg px-2 py-0.5 text-[11px] font-semibold transition cursor-pointer ${
+                            isCurrent
+                              ? 'bg-teal-700 text-white shadow-2xs'
+                              : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                          }`}
+                        >
+                          {preset.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Grid das etapas */}
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {storeStages.map(st => {
+                    const isSelected = selectedStages.includes(st.key);
+                    const isSystem = st.key === 'checked_in' || st.key === 'ready';
+                    const displayName = getStageDisplayName(st.key);
+
+                    return (
+                      <div
+                        key={st.key}
+                        onClick={() => !isSystem && handleToggleStage(st.key)}
+                        className={`p-2.5 rounded-xl border transition ${
+                          isSystem ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
+                        } ${
+                          isSelected
+                            ? 'border-teal-500 bg-teal-50/60 text-teal-900'
+                            : 'border-slate-200 bg-white text-slate-500'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold truncate">{displayName}</span>
+                          {isSelected && <Check size={13} className="text-teal-700 shrink-0" />}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* COR NA AGENDA & OBSERVAÇÕES */}
+              <div className="grid gap-3 sm:grid-cols-12">
+                <div className="sm:col-span-4">
+                  <span className="block text-xs font-bold text-slate-700 mb-1">Cor na Agenda</span>
+                  <div className="flex h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-3">
+                    <input
+                      type="color"
+                      className="h-6 w-8 cursor-pointer border-0 bg-transparent p-0"
+                      value={color}
+                      onChange={e => setColor(e.target.value)}
+                    />
+                    <span className="text-xs font-mono uppercase text-slate-600 font-semibold">
+                      {color}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="sm:col-span-8 flex items-center pt-5">
+                  <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      onChange={e => setActive(e.target.checked)}
+                      className="h-4 w-4 rounded accent-[#0d6e5a]"
+                    />
+                    <span>Serviço ativo para agendamentos</span>
+                  </label>
+                </div>
+
+                <div className="sm:col-span-12">
+                  <span className="block text-xs font-bold text-slate-700 mb-1">
+                    Orientações operacionais / Descrição (opcional)
+                  </span>
+                  <textarea
+                    rows={2}
+                    value={description}
+                    onChange={e => setDescription(e.target.value)}
+                    placeholder="Instruções aos profissionais do banho & tosa..."
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 focus:border-[#0d6e5a] focus:ring-1 focus:ring-[#0d6e5a] outline-none"
+                  />
+                </div>
+              </div>
+            </div>
+          </details>
+
+          {/* 8. BOTÕES INFERIORES */}
+          <div className="sticky bottom-0 z-10 -mx-4 -mb-4 sm:-mx-5 sm:-mb-5 flex items-center justify-between gap-3 border-t border-slate-200 bg-white/95 px-4 py-3 sm:px-5 sm:py-3.5 backdrop-blur">
             <button
               type="button"
               disabled={saving}
               onClick={onClose}
-              className={secondaryButton}
+              className="rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 transition cursor-pointer shadow-2xs"
             >
               Cancelar
             </button>
             <button
               type="submit"
               disabled={saving}
-              className={primaryButton}
+              className="inline-flex items-center gap-2 rounded-xl bg-[#0d6e5a] hover:bg-[#0a5747] px-6 py-2.5 text-xs sm:text-sm font-bold text-white shadow-xs transition cursor-pointer disabled:opacity-50"
             >
-              <Check size={16} />
-              <span>
-                {saving
-                  ? 'Salvando...'
-                  : serviceId
-                  ? 'Salvar Alterações'
-                  : serviceType === 'COMBO'
-                  ? 'Criar Combo Promocional'
-                  : 'Cadastrar Serviço'}
-              </span>
+              {saving ? (
+                <>
+                  <RefreshCw size={15} className="animate-spin" />
+                  <span>Salvando...</span>
+                </>
+              ) : (
+                <>
+                  <Check size={16} strokeWidth={2.5} />
+                  <span>Salvar serviço</span>
+                </>
+              )}
             </button>
           </div>
         </form>
