@@ -200,7 +200,7 @@ export function LoginPage() {
             </button>
           </form>
 
-          <p className="pratic-login-footer">Uma solução Pratic</p>
+          <p className="pratic-login-footer">Uma solução Pract</p>
         </div>
 
         <footer className="pratic-login-tagline">
