@@ -380,8 +380,8 @@ export default function SysInitPage() {
             setPinDigits(next);
             setStep("list");
           })
-          .catch(() => {
-            sessionStorage.removeItem('7bar_sysinit_pin');
+          .catch((err: any) => {
+            if (err?.response?.status === 401) sessionStorage.removeItem('7bar_sysinit_pin');
           });
       }
     } catch {}
@@ -500,9 +500,19 @@ export default function SysInitPage() {
       await api.post("/tenants/setup/validate-pin", { pin });
       try { sessionStorage.setItem('7bar_sysinit_pin', pin); } catch {}
       setTimeout(() => setStep("list"), 300);
-    } catch {
-      setpinError("PIN incorreto. Acesso negado."); triggerShake();
-      setPinDigits(Array(PIN_LENGTH).fill("")); pinRefs.current[0]?.focus();
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 401) {
+        setpinError("PIN incorreto. Acesso negado.");
+        setPinDigits(Array(PIN_LENGTH).fill("")); pinRefs.current[0]?.focus();
+      } else if (status >= 500) {
+        setpinError(`Servidor indisponível (HTTP ${status}). Verifique o backend e tente novamente.`);
+      } else if (!status) {
+        setpinError("Sem conexão com o servidor. Verifique a rede e tente novamente.");
+      } else {
+        setpinError(`Não foi possível validar o PIN (HTTP ${status}). Tente novamente.`);
+      }
+      triggerShake();
     } finally {
       setPinLoading(false);
     }

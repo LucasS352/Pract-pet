@@ -21,6 +21,12 @@ O frontend publica 3531. API 3530 e NFC-e 3532 ficam em loopback; o MySQL fica a
 7. Configure os módulos do cliente; para usar somente Pet Shop, desative PDV Caixa.
 8. Cadastre equipe com PINs individuais, serviços, tutores, pets e regras de comissões. Configure automações WhatsApp conforme a operação real.
 
+### Portainer com volume MySQL já existente
+
+O Docker executa `mysql/init.sql` somente ao criar um volume MySQL vazio. Se o volume já existia, a API pode falhar na inicialização com `Database heart_practpet does not exist`; nesse caso o frontend retorna HTTP 502, mesmo para rotas sem PIN. No console do contêiner MySQL, entre com `mysql -uroot -p` e execute `CREATE DATABASE IF NOT EXISTS heart_practpet CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`. Digite a senha apenas no prompt do MySQL, sem colocá-la em comandos ou capturas. Em seguida, no console do contêiner backend, execute `npx prisma db push --schema=prisma/heart.schema.prisma --skip-generate` para criar as tabelas do Heart novo. Use esse procedimento apenas quando o Heart ainda não tiver tabelas; para instalações com dados, revise o schema e faça backup antes de alterar tabelas. Não remova o volume MySQL.
+
+Antes de informar o PIN, `GET /api/tenants/setup/list` deve retornar HTTP 401. HTTP 502 indica que o proxy ainda não alcança a API e não confirma um PIN incorreto.
+
 ## Atualização de instalação existente
 
 Faça backup do Heart e de cada banco de cliente e preserve os volumes antes de atualizar. Não execute down -v. Atualize código e imagens. O startup não atualiza automaticamente schemas dos clientes.
