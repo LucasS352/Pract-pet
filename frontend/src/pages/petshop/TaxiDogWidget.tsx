@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Car,
   Check,
@@ -47,13 +47,17 @@ export function TaxiDogWidget({
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [overdueItems, setOverdueItems] = useState<Appointment[]>([]);
   const [routeLinks, setRouteLinks] = useState<string[]>([]);
+  const manifestToken = useRef(`taxi-manifest-${Math.random().toString(36).slice(2)}`);
+  const historyCleanup = useRef<number | null>(null);
 
   useEffect(() => {
     if (!openManifestModal) return;
-    const token = `taxi-manifest-${Math.random().toString(36).slice(2)}`;
+    const token = manifestToken.current;
+    if (historyCleanup.current !== null) window.clearTimeout(historyCleanup.current);
+    historyCleanup.current = null;
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
-    window.history.pushState({ ...window.history.state, petshopModal: token }, '');
+    if (window.history.state?.petshopModal !== token) window.history.pushState({ ...window.history.state, petshopModal: token }, '');
     const close = () => setOpenManifestModal(false);
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
     window.addEventListener('popstate', close);
@@ -62,7 +66,10 @@ export function TaxiDogWidget({
       window.removeEventListener('popstate', close);
       window.removeEventListener('keydown', onKeyDown);
       document.body.style.overflow = previousOverflow;
-      if (window.history.state?.petshopModal === token) window.history.back();
+      if (window.history.state?.petshopModal === token) historyCleanup.current = window.setTimeout(() => {
+        historyCleanup.current = null;
+        if (window.history.state?.petshopModal === token) window.history.back();
+      }, 0);
     };
   }, [openManifestModal]);
 

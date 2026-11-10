@@ -19,8 +19,8 @@ const ORIGEM_OPTIONS = [
 
 interface GrupoTributacao { id: string; nome: string; csosn?: string; cfop: string; aliqIcms?: string; }
 
-export function AddProductModal({ isOpen, onClose, onSuccess }: {
-  isOpen: boolean; onClose: () => void; onSuccess: () => void;
+export function AddProductModal({ isOpen, onClose, onSuccess, variant = 'default' }: {
+  isOpen: boolean; onClose: () => void; onSuccess: () => void; variant?: 'default' | 'petshop';
 }) {
   const { user } = useAuthStore();
   const { enabled: kdsEnabled, carvoariaEnabled } = useKdsConfig();
@@ -35,8 +35,45 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
   const eanDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const copyModalRef = useRef(false);
+  const historyToken = useRef(`petshop-product-${Math.random().toString(36).slice(2)}`);
+  const historyCleanup = useRef<number | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || variant !== 'petshop') return;
+    const token = historyToken.current;
+    if (historyCleanup.current !== null) window.clearTimeout(historyCleanup.current);
+    historyCleanup.current = null;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    if (window.history.state?.petshopModal !== token) window.history.pushState({ ...window.history.state, petshopModal: token }, '');
+    const close = () => {
+      if (copyModalRef.current) {
+        setShowCopyModal(false);
+        window.history.pushState({ ...window.history.state, petshopModal: token }, '');
+      } else closeRef.current();
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (copyModalRef.current) setShowCopyModal(false);
+      else closeRef.current();
+    };
+    window.addEventListener('popstate', close);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('popstate', close);
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (window.history.state?.petshopModal === token) historyCleanup.current = window.setTimeout(() => {
+        historyCleanup.current = null;
+        if (window.history.state?.petshopModal === token) window.history.back();
+      }, 0);
+    };
+  }, [isOpen, variant]);
 
   // ── Compressor de imagem (Canvas API nativa, zero deps) ──────────────────
   const compressImage = (file: File, maxPx = 1200, quality = 0.82): Promise<Blob> =>
@@ -133,6 +170,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
   const [modifierGroups, setModifierGroups] = useState<any[]>([]);
   const [allProducts, setAllProducts] = useState<any[]>([]);
   const [showCopyModal, setShowCopyModal] = useState(false);
+  copyModalRef.current = showCopyModal;
 
   // ── Auto-sugestão tributária ──
   const [suggestedGroupName, setSuggestedGroupName] = useState<string | null>(null);
@@ -385,8 +423,8 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
   const sectionCls = 'bg-zinc-950/60 border border-zinc-800 rounded-2xl p-5 space-y-4';
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border-l border-zinc-800 w-full max-w-lg h-full shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
+    <div className={`fixed inset-0 z-50 flex items-center justify-end bg-black/60 backdrop-blur-sm ${variant === 'petshop' ? 'petshop-product-modal' : ''}`}>
+      <div role="dialog" aria-modal="true" aria-label="Novo produto" className="bg-zinc-900 border-l border-zinc-800 w-full max-w-lg h-dvh shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
 
         {/* Header */}
         <div className="flex justify-between items-center px-6 py-5 border-b border-zinc-800 bg-zinc-950/70 shrink-0">
@@ -394,7 +432,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
             <PackagePlus className="text-blue-500" size={24} />
             Novo Produto
           </h2>
-          <button onClick={onClose} className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition text-zinc-400 hover:text-white">
+          <button type="button" onClick={onClose} aria-label="Fechar cadastro de produto" className="grid h-11 w-11 place-items-center bg-zinc-800 hover:bg-zinc-700 rounded-full transition text-zinc-400 hover:text-white">
             <X size={18} />
           </button>
         </div>
@@ -403,7 +441,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto custom-scrollbar px-6 py-5 space-y-5">
 
           {/* ── FOTO DO PRODUTO ──────────────────────────────── */}
-          <div className={sectionCls}>
+          <div className={sectionCls} data-product-section="image">
             <p className="text-[11px] font-black uppercase tracking-widest text-blue-400 border-b border-zinc-800 pb-2 mb-1">Foto do Produto</p>
             
             <div className="flex flex-col items-center justify-center">
@@ -460,7 +498,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
                     {isUploading ? 'Enviando foto...' : 'Adicionar Foto'}
                   </span>
                   <span className="text-[10px] text-zinc-600 text-center px-4">
-                    Arraste uma imagem ou clique para selecionar (PNG, JPG, máx. 5MB)
+                    Arraste uma imagem ou clique para selecionar (PNG, JPG, máx. 15 MB)
                   </span>
                 </div>
               )}
@@ -468,8 +506,8 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
           </div>
 
           {/* ── DADOS PRINCIPAIS ──────────────────────────────── */}
-          <div className={sectionCls}>
-            <p className="text-[11px] font-black uppercase tracking-widest text-blue-400 border-b border-zinc-800 pb-2 mb-1">Dados Principais</p>
+          <div className={sectionCls} data-product-section="main">
+            <p className="text-[11px] font-black uppercase tracking-widest text-blue-400 border-b border-zinc-800 pb-2 mb-1">Informações principais</p>
 
             <div>
               <label className={labelCls}>Nome da Mercadoria <span className="text-red-500">*</span></label>
@@ -499,24 +537,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className={labelCls}>Preço de Venda <span className="text-red-500">*</span></label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 font-bold text-sm">R$</span>
-                  <input
-                    required={!isStockist}
-                    type="number" step="0.01" min="0"
-                    className={`${inputCls} pl-9 ${isStockist ? 'text-zinc-600 cursor-not-allowed' : 'text-emerald-400 font-black'}`}
-                    placeholder="0.00"
-                    value={formData.priceSell}
-                    onChange={e => !isStockist && f('priceSell', e.target.value)}
-                    disabled={isStockist}
-                    title={isStockist ? 'Estoquista não pode alterar preço de venda' : ''}
-                  />
-                </div>
-                {isStockist && <p className="text-[10px] text-amber-500/70 mt-1">🔒 Sem permissão para alterar preço de venda</p>}
-              </div>
+            <div>
               <div>
                 <label className={labelCls}>Categoria <span className="text-red-500">*</span></label>
                 <select required className={inputCls} value={formData.categoryId} onChange={e => f('categoryId', e.target.value)}>
@@ -579,8 +600,17 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
           </div>
 
           {/* ── PREÇOS & ESTOQUE ──────────────────────────────── */}
-          <div className={sectionCls}>
-            <p className="text-[11px] font-black uppercase tracking-widest text-emerald-400 border-b border-zinc-800 pb-2 mb-1">Preços & Estoque</p>
+          <div className={sectionCls} data-product-section="commercial">
+            <p className="text-[11px] font-black uppercase tracking-widest text-emerald-400 border-b border-zinc-800 pb-2 mb-1">Comercial e estoque</p>
+
+            <div>
+              <label className={labelCls}>Preço de Venda <span className="text-red-500">*</span></label>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 font-bold text-sm">R$</span>
+                <input required={!isStockist} type="number" step="0.01" min="0" className={`${inputCls} pl-9 ${isStockist ? 'text-zinc-600 cursor-not-allowed' : 'text-emerald-400 font-black'}`} placeholder="0.00" value={formData.priceSell} onChange={e => !isStockist && f('priceSell', e.target.value)} disabled={isStockist} title={isStockist ? 'Estoquista não pode alterar preço de venda' : ''} />
+              </div>
+              {isStockist && <p className="text-[10px] text-amber-500/70 mt-1">🔒 Sem permissão para alterar preço de venda</p>}
+            </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -634,7 +664,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
           </div>
 
           {/* ── FRACIONAMENTO & COMPOSIÇÃO ────────────────────── */}
-          <div className={sectionCls}>
+          <div className={sectionCls} data-product-section="composition">
             <p className="text-[11px] font-black uppercase tracking-widest text-indigo-400 border-b border-zinc-800 pb-2 mb-1">Fracionamento &amp; Composição</p>
             
             <div className="grid grid-cols-2 gap-4">
@@ -863,7 +893,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
 
 
           {/* ── FISCAL ─────────────────────────────────────────── */}
-          <div className={sectionCls}>
+          <div className={sectionCls} data-product-section="tax">
             <p className="text-[11px] font-black uppercase tracking-widest text-indigo-400 border-b border-zinc-800 pb-2 mb-1">Fiscal / NFC-e</p>
 
             <div>
@@ -921,7 +951,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess }: {
         </form>
 
         {/* Footer */}
-        <div className="px-6 pt-4 pb-28 md:py-4 border-t border-zinc-800 bg-zinc-950/70 shrink-0">
+        <div className="px-6 pt-4 pb-[calc(1rem+env(safe-area-inset-bottom,0px))] md:py-4 border-t border-zinc-800 bg-zinc-950/70 shrink-0">
           <button
             onClick={handleSubmit as unknown as React.MouseEventHandler}
             disabled={loading}

@@ -137,6 +137,7 @@ export function Modal({
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const historyToken = useRef(`petshop-modal-${Math.random().toString(36).slice(2)}`);
+  const historyCleanup = useRef<number | null>(null);
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -167,8 +168,10 @@ export function Modal({
 
     document.addEventListener('keydown', handleKeyDown);
     const token = historyToken.current;
+    if (historyCleanup.current !== null) window.clearTimeout(historyCleanup.current);
+    historyCleanup.current = null;
     modalHistoryTokens.push(token);
-    window.history.pushState({ ...window.history.state, petshopModal: token }, '');
+    if (window.history.state?.petshopModal !== token) window.history.pushState({ ...window.history.state, petshopModal: token }, '');
     const handleBack = () => {
       if (suppressModalPopstate) return;
       if (modalHistoryTokens[modalHistoryTokens.length - 1] === token) closeRef.current();
@@ -181,10 +184,15 @@ export function Modal({
       const tokenIndex = modalHistoryTokens.indexOf(token);
       if (tokenIndex >= 0) modalHistoryTokens.splice(tokenIndex, 1);
       if (window.history.state?.petshopModal === token) {
-        suppressModalPopstate = true;
-        const fallback = window.setTimeout(() => { suppressModalPopstate = false; }, 500);
-        window.addEventListener('popstate', () => { window.clearTimeout(fallback); suppressModalPopstate = false; }, { once: true });
-        window.history.back();
+        historyCleanup.current = window.setTimeout(() => {
+          historyCleanup.current = null;
+          if (window.history.state?.petshopModal !== token) return;
+          suppressModalPopstate = true;
+          const reset = () => { window.clearTimeout(fallback); suppressModalPopstate = false; window.removeEventListener('popstate', reset); };
+          const fallback = window.setTimeout(reset, 500);
+          window.addEventListener('popstate', reset, { once: true });
+          window.history.back();
+        }, 0);
       }
       if (--modalLocks === 0) document.body.style.overflow = originalOverflow;
       previousFocus?.focus();

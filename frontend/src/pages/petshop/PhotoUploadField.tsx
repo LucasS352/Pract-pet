@@ -37,6 +37,7 @@ async function compressImage(file: File): Promise<File> {
 
 export function PhotoUploadField({ value, onChange, label, subjectName, circular = true }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const cameraRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
   const selectPhoto = async (file?: File) => {
@@ -63,6 +64,7 @@ export function PhotoUploadField({ value, onChange, label, subjectName, circular
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = '';
+      if (cameraRef.current) cameraRef.current.value = '';
     }
   };
 
@@ -77,7 +79,9 @@ export function PhotoUploadField({ value, onChange, label, subjectName, circular
         <p className="mt-1 text-xs leading-5 text-[var(--pc-text-muted)]">JPG, PNG ou WebP. A imagem é redimensionada e otimizada automaticamente.</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => void selectPhoto(event.target.files?.[0])} />
-          <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--pc-action)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--pc-action-hover)] disabled:cursor-wait disabled:opacity-60">{uploading ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <Upload aria-hidden="true" size={16} />}{uploading ? 'Enviando…' : value ? 'Trocar foto' : 'Escolher foto'}</button>
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Tirar foto com a câmera" onChange={event => void selectPhoto(event.target.files?.[0])} />
+          <button type="button" disabled={uploading} onClick={() => cameraRef.current?.click()} className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--pc-action)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--pc-action-hover)] disabled:cursor-wait disabled:opacity-60">{uploading ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <Camera aria-hidden="true" size={16} />}{uploading ? 'Enviando…' : 'Tirar foto'}</button>
+          <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} className="flex min-h-11 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] bg-white px-4 text-sm font-semibold text-[var(--pc-action)] transition hover:bg-[var(--pc-action-soft)] disabled:cursor-wait disabled:opacity-60"><Upload aria-hidden="true" size={16} />Escolher da galeria</button>
           {value && <button type="button" disabled={uploading} onClick={() => onChange('')} className="flex min-h-11 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] bg-white px-3 text-sm font-semibold text-[var(--pc-danger)] transition hover:bg-[var(--pc-danger-soft)]"><Trash2 aria-hidden="true" size={16} />Remover</button>}
         </div>
       </div>

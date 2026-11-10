@@ -99,6 +99,7 @@ describe('PetshopPackagesService & PetshopWhatsappService', () => {
         $queryRaw: jest.fn(),
         customerPetPackage: {
           findUnique: jest.fn(),
+          findMany: jest.fn(),
           update: jest.fn(),
         },
         customerPetPackageItem: {
@@ -115,6 +116,7 @@ describe('PetshopPackagesService & PetshopWhatsappService', () => {
         },
         petAppointmentService: {
           findUnique: jest.fn(),
+          findFirst: jest.fn().mockResolvedValue({ id: 'app-svc-1', priceSnapshot: 50 }),
           findMany: jest.fn(),
           update: jest.fn(),
           updateMany: jest.fn(),
@@ -186,6 +188,64 @@ describe('PetshopPackagesService & PetshopWhatsappService', () => {
           packageSelections: { 'svc-1': 'pkg-1' },
         }),
       ).rejects.toThrow(ConflictException);
+    });
+
+    it('rejeita serviço de pacote ausente do agendamento antes de mexer no saldo', async () => {
+      mockTx.customerPetPackageLedger.findUnique.mockResolvedValue(null);
+      mockTx.petAppointmentService.findFirst.mockResolvedValue(null);
+
+      await expect(service.reserveSessionsForAppointmentInTx(mockTx, {
+        appointmentId: 'app-2', petId: 'pet-1', customerId: 'cust-1', startsAt: new Date(),
+        packageSelections: { 'svc-intruso': 'pkg-1' },
+      })).rejects.toThrow(BadRequestException);
+
+      expect(mockTx.$queryRaw).not.toHaveBeenCalled();
+      expect(mockTx.customerPetPackageItem.update).not.toHaveBeenCalled();
+    });
+
+    it('bloqueia pacote pendente no agendamento comum e preserva reserva interna na criação do contrato', async () => {
+      const contract = {
+        id: 'pkg-1', customerId: 'cust-1', petId: 'pet-1', isShared: false,
+        status: 'active', paymentStatus: 'pending',
+        expiresAt: new Date(Date.now() + 86400000), planNameSnapshot: 'Pacote pendente',
+      };
+      const item = { id: 'item-1', totalQuantity: 2, reservedQuantity: 0, usedQuantity: 0, availableQuantity: 2, serviceNameSnapshot: 'Banho' };
+      const params = { appointmentId: 'app-3', petId: 'pet-1', customerId: 'cust-1', startsAt: new Date(), packageSelections: { 'svc-1': 'pkg-1' } };
+      mockTx.customerPetPackageLedger.findUnique.mockResolvedValue(null);
+      mockTx.$queryRaw.mockResolvedValueOnce([contract]);
+
+      await expect(service.reserveSessionsForAppointmentInTx(mockTx, params)).rejects.toThrow(BadRequestException);
+      expect(mockTx.customerPetPackageItem.update).not.toHaveBeenCalled();
+
+      mockTx.$queryRaw.mockResolvedValueOnce([contract]).mockResolvedValueOnce([item]);
+      mockTx.petAppointmentService.findFirst.mockResolvedValue({ id: 'app-svc-1', priceSnapshot: 50 });
+      expect(await service.reserveSessionsForAppointmentInTx(mockTx, { ...params, allowPendingPayment: true })).toHaveLength(1);
+      expect(mockTx.customerPetPackageItem.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ reservedQuantity: 1, availableQuantity: 1 }) }));
+    });
+
+    it('lista para agendamento somente pacotes pagos do tutor do pet', async () => {
+      mockPrisma.customerPetPackage = { updateMany: jest.fn(), findMany: jest.fn().mockResolvedValue([]) };
+      mockPrisma.pet = { findUnique: jest.fn().mockResolvedValue({ id: 'pet-1', customerId: 'cust-1' }) };
+
+      await service.getAvailablePackagesForPet('pet-1');
+
+      expect(mockPrisma.customerPetPackage.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: expect.objectContaining({ customerId: 'cust-1', paymentStatus: 'paid' }),
+      }));
+    });
+
+    it('concede Táxi Dog somente pelo contrato da sessão reservada na mesma transação', async () => {
+      await expect(service.assertTransportCoverageForReservationsInTx(mockTx, [], 'pickup_only')).rejects.toThrow(BadRequestException);
+      expect(mockTx.customerPetPackage.findMany).not.toHaveBeenCalled();
+
+      const reserved = [{ customerPackageId: 'pkg-1' }];
+      mockTx.customerPetPackage.findMany.mockResolvedValue([{ id: 'pkg-1', notes: JSON.stringify({ transport: { enabled: true, mode: 'pickup_only' } }) }]);
+      await expect(service.assertTransportCoverageForReservationsInTx(mockTx, reserved, 'dropoff_only')).rejects.toThrow(BadRequestException);
+      await expect(service.assertTransportCoverageForReservationsInTx(mockTx, reserved, 'pickup_only')).resolves.toBeUndefined();
+      expect(mockTx.customerPetPackage.findMany).toHaveBeenCalledWith({ where: { id: { in: ['pkg-1'] } }, select: { id: true, notes: true } });
+
+      mockTx.customerPetPackage.findMany.mockResolvedValue([{ id: 'pkg-1', notes: JSON.stringify({ transport: { enabled: true, mode: 'round_trip' } }) }]);
+      await expect(service.assertTransportCoverageForReservationsInTx(mockTx, reserved, 'round_trip')).resolves.toBeUndefined();
     });
 
     it('deve consumir sessão reservada ao concluir atendimento e marcar contrato como completed na última sessão', async () => {

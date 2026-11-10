@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
+import { hasTaxiDropoff, hasTaxiPickup, type TaxiMode } from './petshop-transport';
 
 const VALID_SPECIES = new Set(['all', 'dog', 'cat']);
 const VALID_SIZES = new Set(['all', 'small', 'medium', 'large', 'giant']);
@@ -591,7 +592,7 @@ export class PetshopPackagesService {
       where: {
         customerId: pet.customerId,
         status: 'active',
-        paymentStatus: { not: 'cancelled' },
+        paymentStatus: 'paid',
         expiresAt: { gte: checkDate },
         OR: [{ petId: pet.id }, { isShared: true }, { petId: null }],
       },
@@ -607,6 +608,27 @@ export class PetshopPackagesService {
     });
 
     return contracts.map((c: any) => this.enrichContractTransport(c));
+  }
+
+  async assertTransportCoverageForReservationsInTx(
+    tx: any,
+    reservations: Array<{ customerPackageId: string }>,
+    mode: TaxiMode,
+  ) {
+    if (!reservations.length) throw new BadRequestException('O transporte gratuito exige uma sessão de pacote reservada neste agendamento.');
+    const ids = [...new Set(reservations.map(item => item.customerPackageId))];
+    const contracts = await tx.customerPetPackage.findMany({
+      where: { id: { in: ids } },
+      select: { id: true, notes: true },
+    });
+    const covered = contracts.some((contract: any) => {
+      const transport = this.enrichContractTransport(contract).transport;
+      const packageMode = transport?.mode as TaxiMode | undefined;
+      return transport?.enabled && packageMode &&
+        (!hasTaxiPickup(mode) || hasTaxiPickup(packageMode)) &&
+        (!hasTaxiDropoff(mode) || hasTaxiDropoff(packageMode));
+    });
+    if (!covered) throw new BadRequestException('O pacote reservado não cobre esta modalidade de Táxi Dog.');
   }
 
   async createContract(data: any, actor?: PackageActor) {
@@ -898,6 +920,7 @@ export class PetshopPackagesService {
             customerId,
             startsAt: sessStart,
             packageSelections,
+            allowPendingPayment: true,
             actor,
           });
         }
@@ -1036,6 +1059,7 @@ export class PetshopPackagesService {
       customerId: string;
       startsAt: Date;
       packageSelections: Record<string, string>; // { [serviceId]: customerPackageId }
+      allowPendingPayment?: boolean; // Somente para sessões criadas na própria transação do contrato.
       actor?: PackageActor;
     },
   ) {
@@ -1056,6 +1080,11 @@ export class PetshopPackagesService {
         where: { idempotencyKey },
       });
       if (existingLedger) continue;
+
+      const appSvc = await tx.petAppointmentService.findFirst({
+        where: { appointmentId: params.appointmentId, serviceId },
+      });
+      if (!appSvc) throw new BadRequestException('O serviço do pacote não pertence ao agendamento.');
 
       const contractRows: any[] = await tx.$queryRaw(
         Prisma.sql`SELECT id, customerId, petId, isShared, status, paymentStatus, expiresAt, planNameSnapshot
@@ -1079,8 +1108,8 @@ export class PetshopPackagesService {
       if (contract.status !== 'active') {
         throw new BadRequestException(`O pacote "${contract.planNameSnapshot}" não está ativo (status: ${contract.status}).`);
       }
-      if (contract.paymentStatus === 'cancelled') {
-        throw new BadRequestException(`O pacote "${contract.planNameSnapshot}" foi cancelado.`);
+      if (contract.paymentStatus !== 'paid' && !(params.allowPendingPayment && contract.paymentStatus === 'pending')) {
+        throw new BadRequestException(`O pacote "${contract.planNameSnapshot}" ainda não está pago.`);
       }
       if (new Date(contract.expiresAt) < params.startsAt) {
         throw new BadRequestException(
@@ -1118,24 +1147,15 @@ export class PetshopPackagesService {
         },
       });
 
-      const appSvc = await tx.petAppointmentService.findFirst({
-        where: {
-          appointmentId: params.appointmentId,
-          serviceId,
+      await tx.petAppointmentService.update({
+        where: { id: appSvc.id },
+        data: {
+          customerPackageId,
+          customerPackageItemId: pkgItem.id,
+          coverageStatus: 'reserved',
+          coveredAmount: appSvc.priceSnapshot,
         },
       });
-
-      if (appSvc) {
-        await tx.petAppointmentService.update({
-          where: { id: appSvc.id },
-          data: {
-            customerPackageId,
-            customerPackageItemId: pkgItem.id,
-            coverageStatus: 'reserved',
-            coveredAmount: appSvc.priceSnapshot,
-          },
-        });
-      }
 
       await tx.customerPetPackageLedger.create({
         data: {

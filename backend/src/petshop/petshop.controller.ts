@@ -35,6 +35,7 @@ export class PetshopController {
   @Post('reception/registrations') registerReception(@Body() body: any) { return this.petshop.registerReception(body); }
 
   @Get('tutors') listTutors(@Query('search') search?: string) { return this.petshop.listTutors(search); }
+  @Get('tutors/booking-search') searchTutorsForBooking(@Query('search') search?: string) { return this.petshop.searchTutorsForBooking(search); }
   @Post('tutors') createTutor(@Body() body: any) { return this.petshop.createTutor(body); }
   @Patch('tutors/:id') updateTutor(@Param('id') id: string, @Body() body: any) { return this.petshop.updateTutor(id, body); }
   @Post('tutors/:id/portal-link') createPortalLink(@Param('id') id: string, @Body() body?: any) { return this.petshop.createPortalLink(id, Boolean(body?.rotate)); }
@@ -60,6 +61,7 @@ export class PetshopController {
   @Get('pending-reservations') pendingReservations() { return this.petshop.pendingReservations(); }
   @Post('appointments/:id/receive') receivePayment(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.receivePayment(id, body, req); }
   @Get('appointments') listAppointments(@Query('from') from?: string, @Query('to') to?: string) { return this.petshop.listAppointments(from, to); }
+  @Get('appointments/overdue-pickups') overduePickups(@Query('before') before?: string) { return this.petshop.listOverduePickups(before); }
   @Post('appointments') createAppointment(@Body() body: any) { return this.petshop.createAppointment(body); }
   @Post('appointments/:id/checkout') prepareCheckout(@Param('id') id: string) { return this.petshop.prepareCheckout(id); }
   @Patch('appointments/:id') updateAppointment(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointment(id, body, req); }

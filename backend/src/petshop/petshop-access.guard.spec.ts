@@ -9,6 +9,12 @@ describe('Pet Shop operational authorization', () => {
   it.each(['overview', 'appointments', 'pets', 'services', 'stages', 'packages/available/pet'])('allows agenda dependency %s', async path => {
     expect(await guard.canActivate(context(path))).toBe(true);
   });
+  it.each(['tutors/booking-search?search=Ana', 'appointments/overdue-pickups?before=2026-11-09', 'pets/pet-1'])('allows new booking and overdue dependency %s for staff', async path => {
+    expect(await guard.canActivate(context(path))).toBe(true);
+  });
+  it.each(['tutors', 'tutors/customer-1', 'appointments/overdue-pickups/private', 'pets/pet-1/vaccinations'])('keeps administrative routes blocked for staff: %s', async path => {
+    await expect(guard.canActivate(context(path))).rejects.toThrow('restrito');
+  });
   it('permits stage updates but not forced checkout or service editing', async () => {
     expect(await guard.canActivate(context('appointments/a/status', 'PATCH'))).toBe(true);
     expect(await guard.canActivate(context('appointments/a/checkout', 'POST'))).toBe(true);

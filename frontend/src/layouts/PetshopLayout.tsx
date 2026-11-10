@@ -485,7 +485,7 @@ export function PetshopLayout() {
       {/* Navegação Mobile Inferior (com Safe-Area nativa) */}
       <nav
         aria-label="Navegação mobile"
-        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-2' : 'grid-cols-5'} border-t border-zinc-200/80 bg-white/95 px-1.5 py-1 pb-[calc(env(safe-area-inset-bottom,0px)+4px)] backdrop-blur lg:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.04)]`}
+        className={`fixed inset-x-0 bottom-0 z-30 grid ${isRestrictedStaff ? 'grid-cols-3' : 'grid-cols-5'} border-t border-zinc-200/80 bg-white/95 px-1.5 py-1 pb-[calc(env(safe-area-inset-bottom,0px)+4px)] backdrop-blur lg:hidden shadow-[0_-4px_12px_rgba(0,0,0,0.04)]`}
       >
         <NavLink
           to="/petshop"
@@ -534,16 +534,6 @@ export function PetshopLayout() {
               <PackageCheck size={19} strokeWidth={2} />
               <span>Pacotes</span>
             </NavLink>
-            <button
-              type="button"
-              onClick={() => setMobileMenuOpen(true)}
-              className={`flex min-h-[50px] flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition rounded-2xl py-1 my-0.5 ${
-                mobileMenuOpen ? 'bg-[#e8f5f1] text-[#0d6e5a] font-bold' : 'text-zinc-500 hover:text-zinc-800'
-              }`}
-            >
-              <Menu size={19} strokeWidth={2} />
-              <span>Menu</span>
-            </button>
             <NavLink
               to={hasPdv ? '/' : '/petshop/agenda'}
               className="hidden"
@@ -553,6 +543,13 @@ export function PetshopLayout() {
             </NavLink>
           </>
         )}
+        <NavLink
+          to="/petshop/taxidog"
+          className={({ isActive }) => `flex min-h-[50px] flex-col items-center justify-center gap-0.5 text-[11px] font-medium transition rounded-2xl py-1 my-0.5 ${isActive ? 'bg-[#e8f5f1] text-[#0d6e5a] font-bold' : 'text-zinc-500 hover:text-zinc-800'}`}
+        >
+          <Car size={19} strokeWidth={2} />
+          <span>Táxi Dog</span>
+        </NavLink>
       </nav>
 
       {/* Drawer Mobile Completo (com Safe-Area no topo e rodapé para iPhone) */}

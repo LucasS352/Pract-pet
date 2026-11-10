@@ -387,6 +387,18 @@ export class PetshopService {
     });
   }
 
+  async searchTutorsForBooking(search?: string) {
+    const query = String(search ?? '').trim();
+    if (query.length < 2) return [];
+    const prisma = await this.prisma();
+    return prisma.customer.findMany({
+      where: { OR: [{ name: { contains: query } }, { phone: { contains: query.replace(/\D/g, '') || query } }] },
+      select: { id: true, name: true, phone: true },
+      orderBy: { name: 'asc' },
+      take: 20,
+    });
+  }
+
   private tutorData(data: any) {
     const phone = requiredText(data?.phone, 'Telefone').replace(/\D/g, '');
     if (phone.length < 10 || phone.length > 15) throw new BadRequestException('Informe um telefone válido com DDD.');
@@ -1300,6 +1312,30 @@ export class PetshopService {
     }));
   }
 
+  async listOverduePickups(before?: string) {
+    const prisma = await this.prisma();
+    const cutoff = optionalDate(before, 'Data limite') || new Date();
+    const appointments = await prisma.petAppointment.findMany({
+      where: {
+        startsAt: { lt: cutoff },
+        status: { in: ['requested', 'scheduled', 'confirmed'] },
+        checkInNotes: { contains: '"transport"' },
+      },
+      include: {
+        pet: true,
+        customer: true,
+        professional: { select: { id: true, name: true } },
+        services: { include: { service: true, customerPackage: true, customerPackageItem: true, comboParent: true, comboComponents: true } },
+      },
+      orderBy: { startsAt: 'asc' },
+    });
+    return appointments.flatMap((apt: any) => {
+      const transport = parseAppointmentTransport(apt.checkInNotes);
+      if (!transport || !['round_trip', 'pickup_only'].includes(transport.mode)) return [];
+      return [{ ...apt, transport, resolvedStages: this.pricing.resolveAppointmentStages(apt) }];
+    });
+  }
+
   async createAppointment(data: any) {
     const prisma = await this.prisma();
     const { userId } = this.tenantContext.get();
@@ -1395,15 +1431,6 @@ export class PetshopService {
     const transport = normalizeTransport(data.transport);
     const professionalId = optionalText(data.professionalId) ?? null;
 
-    if (professionalId) {
-      const professional = await prisma.operator.findFirst({ where: { id: professionalId, active: true }, select: { id: true } });
-      if (!professional) throw new BadRequestException('Profissional inválido.');
-      const conflict = await prisma.petAppointment.findFirst({ where: {
-        professionalId, status: { notIn: ['cancelled', 'no_show'] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt },
-      } });
-      if (conflict) throw new ConflictException('Este profissional já possui um atendimento nesse horário.');
-    }
-
     const packageSelections: Record<string, string> =
       data.packageSelections && typeof data.packageSelections === 'object'
         ? data.packageSelections
@@ -1440,6 +1467,16 @@ export class PetshopService {
     ];
 
     const created = await prisma.$transaction(async tx => {
+      if (professionalId) {
+        const professional = await tx.$queryRaw<Array<{ id: string }>>(
+          Prisma.sql`SELECT id FROM operators WHERE id = ${professionalId} AND active = 1 FOR UPDATE`,
+        );
+        if (!professional.length) throw new BadRequestException('Profissional inválido.');
+        const conflict = await tx.petAppointment.findFirst({ where: {
+          professionalId, status: { notIn: ['cancelled', 'no_show'] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt },
+        } });
+        if (conflict) throw new ConflictException('Este profissional já possui um atendimento nesse horário.');
+      }
       const app = await tx.petAppointment.create({
         data: {
           customerId: pet.customerId,
@@ -1474,8 +1511,9 @@ export class PetshopService {
         insertedServices.push(inserted);
       }
 
+      let reservations: Array<{ customerPackageId: string }> = [];
       if (Object.keys(packageSelections).length > 0) {
-        await this.packages.reserveSessionsForAppointmentInTx(tx, {
+        reservations = await this.packages.reserveSessionsForAppointmentInTx(tx, {
           appointmentId: app.id,
           petId,
           customerId: pet.customerId,
@@ -1483,6 +1521,9 @@ export class PetshopService {
           packageSelections,
           actor: { userId, operatorId: data.operatorId, name: data.operatorName },
         });
+      }
+      if (transport?.coveredByPackage) {
+        await this.packages.assertTransportCoverageForReservationsInTx(tx, reservations, transport.mode);
       }
 
       return tx.petAppointment.findUnique({
@@ -1582,29 +1623,8 @@ export class PetshopService {
         });
         if (!professional) throw new BadRequestException('Profissional inválido.');
 
-        const conflict = await prisma.petAppointment.findFirst({
-          where: {
-            id: { not: id },
-            professionalId: professional.id,
-            status: { notIn: ['cancelled', 'no_show'] },
-            startsAt: { lt: endsAt },
-            endsAt: { gt: startsAt },
-          },
-        });
-        if (conflict) throw new ConflictException(`O profissional ${professional.name} já possui outro atendimento nesse horário.`);
         professionalId = professional.id;
       }
-    } else if (rescheduled && professionalId) {
-      const conflict = await prisma.petAppointment.findFirst({
-        where: {
-          id: { not: id },
-          professionalId,
-          status: { notIn: ['cancelled', 'no_show'] },
-          startsAt: { lt: endsAt },
-          endsAt: { gt: startsAt },
-        },
-      });
-      if (conflict) throw new ConflictException(`O profissional responsável já possui outro atendimento nesse novo horário.`);
     }
 
     // A autoria de adicionais é vinculada à sessão de colaborador, nunca ao nome enviado pelo cliente.
@@ -1699,9 +1719,23 @@ export class PetshopService {
 
     const updated = await prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${id} FOR UPDATE`;
+      if (professionalId && !['cancelled', 'no_show'].includes(newStatus)) {
+        const rows = await tx.$queryRaw<Array<{ id: string; active: number }>>(
+          Prisma.sql`SELECT id, active FROM operators WHERE id = ${professionalId} FOR UPDATE`,
+        );
+        if (!rows.length || (data.professionalId && !rows[0].active)) throw new BadRequestException('Profissional inválido.');
+      }
       const latest = await tx.petAppointment.findUnique({ where: { id }, select: { status: true, updatedAt: true } });
       if (!latest || latest.updatedAt.getTime() !== current.updatedAt.getTime()) {
         throw new ConflictException('O atendimento foi alterado por outra pessoa. Recarregue antes de editar.');
+      }
+      if (professionalId && !['cancelled', 'no_show'].includes(newStatus)) {
+        const conflict = await tx.petAppointment.findFirst({ where: {
+          id: { not: id }, professionalId,
+          status: { notIn: ['cancelled', 'no_show'] },
+          startsAt: { lt: endsAt }, endsAt: { gt: startsAt },
+        } });
+        if (conflict) throw new ConflictException('O profissional já possui outro atendimento nesse horário.');
       }
       if (data.removeAppointmentServiceId) await tx.petAppointmentService.deleteMany({ where: { id: String(data.removeAppointmentServiceId), appointmentId: id } });
       for (const addition of additions) await tx.petAppointmentService.create({ data: addition });

@@ -647,7 +647,7 @@ export default function PetshopProductsPage() {
       })}</div>}
     </section>
 
-    {addOpen && <AddProductModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSuccess={() => void load()} />}
+    {addOpen && <AddProductModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSuccess={() => void load()} variant="petshop" />}
     {editingProduct && <EditProductModal isOpen={Boolean(editingProduct)} product={editingProduct as any} onClose={() => setEditingProduct(null)} onSuccess={() => void load()} />}
     {selectedLotsProduct && <PetshopProductLotsModal isOpen={Boolean(selectedLotsProduct)} product={selectedLotsProduct} onClose={() => setSelectedLotsProduct(null)} onUpdate={() => void load()} />}
   </div>;

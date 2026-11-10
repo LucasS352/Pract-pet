@@ -61,6 +61,7 @@ import {
 } from './ui';
 import { PhotoUploadField } from './PhotoUploadField';
 import { TaxiDogWidget } from './TaxiDogWidget';
+import { packageTransportCovers, packageTransportUiMode } from './taxi-operations';
 
 type ViewMode = 'day' | 'week' | 'timeline' | 'professionals';
 
@@ -342,6 +343,9 @@ export default function PetshopAgendaPage() {
   const [packagesRequest, retryPackages] = useState(0);
   const coveredServiceIds = useMemo(() => new Set(availablePackages.flatMap(pkg => pkg.items.filter(item => Number(item.availableQuantity) > 0).map(item => item.serviceId))), [availablePackages]);
   const [packageSelections, setPackageSelections] = useState<Record<string, string>>({});
+  const selectedTransportPackages = useMemo(() => availablePackages.filter(pkg =>
+    pkg.transport?.enabled && form.serviceIds.some(serviceId => packageSelections[serviceId] === pkg.id),
+  ), [availablePackages, form.serviceIds, packageSelections]);
 
   const parseAddressParts = (addr?: string | null) => {
     if (!addr) return { street: '', neighborhood: '' };
@@ -373,27 +377,37 @@ export default function PetshopAgendaPage() {
           if (pkg) selections[serviceId] = pkg.id;
         }
         setPackageSelections(selections);
-        const pkgWithTransport = pkgs.find(p => p.transport?.enabled);
-        if (pkgWithTransport?.transport && !transportEdited.current) {
-          const t = pkgWithTransport.transport;
-          const parsed = parseAddressParts(t.address);
-          setForm(prev => ({
-            ...prev,
-            transportEnabled: true,
-            transportMode: (t.mode as 'both' | 'pickup' | 'dropoff') || 'both',
-            transportFee: '0',
-            transportCoveredByPackage: true,
-            customerStreet: prev.customerStreet || t.street || parsed.street || '',
-            customerNeighborhood: prev.customerNeighborhood || t.neighborhood || parsed.neighborhood || '',
-            customerReference: prev.customerReference || t.reference || '',
-            transportNotes: prev.transportNotes || t.notes || '',
-          }));
-        }
       })
       .catch(() => { if (!controller.signal.aborted) setPackagesError(true); })
       .finally(() => { if (!controller.signal.aborted) setLoadingPackages(false); });
     return () => controller.abort();
   }, [openNew, form.petId, form.startsAt, packagesRequest]);
+
+  useEffect(() => {
+    if (!openNew) return;
+    const first = selectedTransportPackages[0]?.transport;
+    setForm(prev => {
+      if (!first) {
+        return prev.transportCoveredByPackage
+          ? { ...prev, transportCoveredByPackage: false, transportFee: prev.transportFee === '0' ? '40' : prev.transportFee }
+          : prev;
+      }
+      const mode = transportEdited.current ? prev.transportMode : packageTransportUiMode(first.mode);
+      const covered = selectedTransportPackages.some(pkg => packageTransportCovers(mode, pkg.transport?.mode));
+      const parsed = parseAddressParts(first.address);
+      return {
+        ...prev,
+        transportEnabled: transportEdited.current ? prev.transportEnabled : true,
+        transportMode: mode as typeof prev.transportMode,
+        transportCoveredByPackage: Boolean(covered),
+        transportFee: covered ? '0' : prev.transportFee === '0' ? '40' : prev.transportFee,
+        customerStreet: prev.customerStreet || first.street || parsed.street || '',
+        customerNeighborhood: prev.customerNeighborhood || first.neighborhood || parsed.neighborhood || '',
+        customerReference: prev.customerReference || first.reference || '',
+        transportNotes: prev.transportNotes || first.notes || '',
+      };
+    });
+  }, [openNew, selectedTransportPackages, form.transportMode]);
 
   // Cálculo da semana ativa
   const monday = useMemo(() => getMonday(anchorDate), [anchorDate]);
@@ -435,6 +449,8 @@ export default function PetshopAgendaPage() {
     setSelectedTutor(tutor);
     setTutorResults([]);
     setPets([]);
+    setAvailablePackages([]);
+    setPackageSelections({});
     setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: '40', transportCoveredByPackage: false, transportNotes: '' }));
     try {
       const { data } = await api.get<Pet[]>('/petshop/pets', { params: { customerId: tutor.id } });
@@ -3088,6 +3104,34 @@ export default function PetshopAgendaPage() {
               >
                 + Cadastrar tutor e pet
               </button>
+            </div>
+
+            <div className="rounded-xl border border-zinc-200 bg-white p-3">
+              <label htmlFor="booking-tutor-search" className="mb-1 block text-xs font-bold text-zinc-700">Tutor *</label>
+              {selectedTutor ? (
+                <div className="flex items-center justify-between gap-2 text-sm">
+                  <span className="min-w-0 truncate text-zinc-800">{selectedTutor.name} · {selectedTutor.phone}</span>
+                  <button type="button" className="shrink-0 font-semibold text-[#0d6e5a]" onClick={() => {
+                    ++petsRequest.current;
+                    setSelectedTutor(null);
+                    setTutorQuery('');
+                    setPets([]);
+                    setAvailablePackages([]);
+                    setPackageSelections({});
+                    setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportCoveredByPackage: false }));
+                  }}>Trocar</button>
+                </div>
+              ) : (
+                <>
+                  <input id="booking-tutor-search" className={inputClass} value={tutorQuery} onChange={event => setTutorQuery(event.target.value)} placeholder="Buscar por nome ou telefone" autoComplete="off" />
+                  {searchingTutors && <p className="mt-1 text-xs text-zinc-500" role="status">Buscando tutores…</p>}
+                  {tutorResults.length > 0 && <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-zinc-200">
+                    {tutorResults.map(tutor => <button key={tutor.id} type="button" className="flex w-full min-h-11 items-center justify-between gap-2 border-b border-zinc-100 px-3 text-left text-sm last:border-0 hover:bg-emerald-50" onClick={() => void chooseTutor(tutor)}>
+                      <span className="truncate font-medium text-zinc-800">{tutor.name}</span><span className="shrink-0 text-xs text-zinc-500">{tutor.phone}</span>
+                    </button>)}
+                  </div>}
+                </>
+              )}
             </div>
 
             {/* 2. SELETOR DE PET */}
