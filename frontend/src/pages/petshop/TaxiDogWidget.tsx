@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Car,
   Check,
@@ -17,6 +17,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { Appointment } from './types';
 import { PetAvatar } from './ui';
+import { buildGoogleMapsRoutes, isMobileMapsClient, requireRouteAddresses } from './taxi-route';
+import { isPickupMode, isDropoffMode, isPreCheckinStatus, isInStoreStatus, needsTaxiStop, summarizeTaxiAppointments } from './taxi-operations';
 
 interface TaxiDogWidgetProps {
   appointments: Appointment[];
@@ -43,71 +45,56 @@ export function TaxiDogWidget({
   const [openManifestModal, setOpenManifestModal] = useState(false);
   const [checkedStops, setCheckedStops] = useState<Record<string, boolean>>({});
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [overdueItems, setOverdueItems] = useState<Appointment[]>([]);
+  const [routeLinks, setRouteLinks] = useState<string[]>([]);
 
-  // Helpers de modalidade e fase do ciclo de vida do Táxi Dog
-  const isPickupMode = (mode?: string | null) =>
-    mode === 'pickup_only' || mode === 'pickup' || mode === 'round_trip' || mode === 'both';
+  useEffect(() => {
+    if (!openManifestModal) return;
+    const token = `taxi-manifest-${Math.random().toString(36).slice(2)}`;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    window.history.pushState({ ...window.history.state, petshopModal: token }, '');
+    const close = () => setOpenManifestModal(false);
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') close(); };
+    window.addEventListener('popstate', close);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('popstate', close);
+      window.removeEventListener('keydown', onKeyDown);
+      document.body.style.overflow = previousOverflow;
+      if (window.history.state?.petshopModal === token) window.history.back();
+    };
+  }, [openManifestModal]);
 
-  const isDropoffMode = (mode?: string | null) =>
-    mode === 'dropoff_only' || mode === 'dropoff' || mode === 'round_trip' || mode === 'both';
-
-  const isPreCheckinStatus = (status: string) =>
-    status === 'scheduled' || status === 'confirmed' || status === 'requested';
-
-  const isInStoreStatus = (status: string) =>
-    status === 'checked_in' ||
-    status === 'in_progress' ||
-    status === 'bathing' ||
-    status === 'drying' ||
-    status === 'grooming' ||
-    status === 'finishing';
+  useEffect(() => {
+    const controller = new AbortController();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    api.get<Appointment[]>('/petshop/appointments/overdue-pickups', {
+      params: { before: today.toISOString() }, signal: controller.signal,
+    }).then(({ data }) => setOverdueItems(data || []))
+      .catch(() => { if (!controller.signal.aborted) toast.error('Não foi possível carregar coletas antigas pendentes.'); });
+    return () => controller.abort();
+  }, [appointments]);
 
   // Filtra apenas agendamentos ativos (não cancelados) com transporte ativo
-  const transportItems = useMemo(() => {
-    return appointments
-      .filter(item => Boolean(item.transport?.enabled) && item.status !== 'cancelled')
-      .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
-  }, [appointments]);
+  const operation = useMemo(() => summarizeTaxiAppointments([...overdueItems, ...appointments]), [appointments, overdueItems]);
+  const transportItems = operation.all;
+  useEffect(() => { setRouteLinks([]); }, [appointments, overdueItems, checkedStops]);
 
   // 1. FALTA BUSCAR: Apenas agendamentos com coleta que AINDA NÃO FIZERAM CHECK-IN
   // Assim que o motorista/recepção dá Check-in, o pet sai imediatamente desta lista!
-  const pendingPickups = useMemo(() => {
-    return transportItems.filter(
-      item => isPickupMode(item.transport?.mode) && isPreCheckinStatus(item.status),
-    );
-  }, [transportItems]);
+  const pendingPickups = operation.pickups;
 
   // 2. JÁ COLETADOS / NA LOJA (Check-in feito, em banho/tosa aguardando finalizar para levar)
-  const inStoreWaitingDropoff = useMemo(() => {
-    return transportItems.filter(
-      item => isDropoffMode(item.transport?.mode) && isInStoreStatus(item.status),
-    );
-  }, [transportItems]);
+  const inStoreWaitingDropoff = operation.inStore;
 
   // 3. PRONTOS PARA LEVAR AGORA (Finalizados na loja, aguardando motorista levar)
-  const readyDropoffs = useMemo(() => {
-    return transportItems.filter(
-      item => isDropoffMode(item.transport?.mode) && item.status === 'ready',
-    );
-  }, [transportItems]);
+  const readyDropoffs = operation.ready;
 
   // 4. FILA DA ABA "LEVAR": Todos que terão entrega (e ainda não foram entregues),
   // priorizando no topo quem já está PRONTO P/ LEVAR, depois quem JÁ FEZ CHECK-IN (aguardando finalizar)
-  const dropoffQueue = useMemo(() => {
-    const list = transportItems.filter(
-      item => isDropoffMode(item.transport?.mode) && item.status !== 'delivered',
-    );
-    const priorityScore = (status: string) => {
-      if (status === 'ready') return 1; // 1º: Pronto para levar agora!
-      if (isInStoreStatus(status)) return 2; // 2º: Já coletado (Check-in), aguardando finalizar banho
-      return 3; // 3º: Ainda nem foi coletado
-    };
-    return [...list].sort((a, b) => {
-      const diff = priorityScore(a.status) - priorityScore(b.status);
-      if (diff !== 0) return diff;
-      return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
-    });
-  }, [transportItems]);
+  const dropoffQueue = operation.dropoffs;
 
   // Itens exibidos conforme a aba selecionada no widget
   const displayedItems = useMemo(() => {
@@ -190,7 +177,7 @@ export function TaxiDogWidget({
   };
 
   const selectedRouteItems = useMemo(
-    () => transportItems.filter(item => Boolean(checkedStops[item.id])),
+    () => transportItems.filter(item => Boolean(checkedStops[item.id]) && needsTaxiStop(item)),
     [transportItems, checkedStops],
   );
 
@@ -200,35 +187,16 @@ export function TaxiDogWidget({
       return;
     }
 
-    const addresses = selectedRouteItems
-      .map(item => {
-        const street = item.transport?.street || item.transport?.address || item.customer?.address || '';
-        const neighborhood = item.transport?.neighborhood || '';
-        return [street, neighborhood].filter(Boolean).join(', ').trim();
-      })
-      .filter(Boolean);
-
-    if (addresses.length === 0) {
-      toast.error('Os agendamentos selecionados não possuem endereço cadastrado.');
-      return;
+    try {
+      const addresses = requireRouteAddresses(selectedRouteItems.map(item => item.transport?.address || item.customer?.address));
+      const mobile = isMobileMapsClient(navigator.userAgent, window.matchMedia('(pointer: coarse)').matches, window.innerWidth);
+      const links = buildGoogleMapsRoutes(addresses, mobile);
+      setRouteLinks(links);
+      if (links.length === 1) window.open(links[0], '_blank', 'noopener,noreferrer');
+      else toast.info(`Roteiro dividido em ${links.length} trechos. Abra cada um em ordem.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível montar a rota.');
     }
-
-    if (addresses.length === 1) {
-      const dest = encodeURIComponent(addresses[0]);
-      window.open(
-        `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`,
-        '_blank',
-        'noopener,noreferrer',
-      );
-      toast.success('Abrindo rota no Google Maps (1 parada)!');
-      return;
-    }
-
-    const destination = encodeURIComponent(addresses[addresses.length - 1]);
-    const waypoints = encodeURIComponent(addresses.slice(0, -1).join('|'));
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-    toast.success(`Rota inteligente montada com ${addresses.length} paradas no Google Maps!`);
   };
 
   const formatTime = (iso: string) => {
@@ -288,7 +256,7 @@ export function TaxiDogWidget({
     if (isPreCheckinStatus(item.status) && hasPickup) {
       return (
         <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 border border-amber-300 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
-          <Clock size={10} /> Falta Buscar
+          <Clock size={10} /> {new Date(item.startsAt).getTime() < Date.now() ? 'Coleta atrasada' : 'Falta Buscar'}
         </span>
       );
     }
@@ -488,6 +456,7 @@ export function TaxiDogWidget({
           </button>
         </div>
       )}
+      {overdueItems.length > 0 && <p className="mb-2 text-xs font-semibold text-amber-800">Inclui {overdueItems.length} coleta{overdueItems.length === 1 ? '' : 's'} pendente{overdueItems.length === 1 ? '' : 's'} anterior{overdueItems.length === 1 ? '' : 'es'} ao dia de hoje.</p>}
 
       {/* 3. Abas de Filtro: Buscar (só pendentes), Levar (fila de entrega) e Todos */}
       {transportItems.length > 0 && (
@@ -561,7 +530,7 @@ export function TaxiDogWidget({
           )}
         </div>
       ) : (
-        <div className="space-y-2.5 max-h-[420px] overflow-y-auto pr-1">
+        <div className="space-y-2.5 pr-1 lg:max-h-[420px] lg:overflow-y-auto">
           {displayedItems.map(item => {
             const modeInfo = getModeInfo(item.transport?.mode);
             const address = item.transport?.address || item.customer?.address || '';
@@ -763,13 +732,15 @@ export function TaxiDogWidget({
               <button
                 type="button"
                 onClick={() => setOpenManifestModal(false)}
-                className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 transition cursor-pointer"
+                aria-label="Fechar manifesto de rota"
+                className="grid h-11 w-11 place-items-center rounded-lg text-zinc-600 hover:bg-zinc-100 hover:text-zinc-700 transition cursor-pointer"
               >
                 <X size={18} />
               </button>
             </div>
 
             {/* Filtros por Fase dentro do Manifesto */}
+            {routeLinks.length > 1 && <div className="flex flex-wrap gap-2 mb-3">{routeLinks.map((url, index) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-800">Abrir trecho {index + 1} de {routeLinks.length}</a>)}</div>}
             <div className="flex flex-wrap items-center gap-1.5 mb-3">
               <button
                 type="button"
@@ -864,7 +835,7 @@ export function TaxiDogWidget({
                     } else {
                       const all: Record<string, boolean> = {};
                       manifestDisplayedItems.forEach(it => {
-                        all[it.id] = true;
+                        if (needsTaxiStop(it)) all[it.id] = true;
                       });
                       setCheckedStops(all);
                     }
@@ -936,7 +907,7 @@ export function TaxiDogWidget({
                   const address = item.transport?.address || item.customer?.address || '';
                   const reference = item.transport?.reference || item.customer?.reference || '';
                   const modeInfo = getModeInfo(item.transport?.mode);
-                  const isChecked = Boolean(checkedStops[item.id]);
+                  const isChecked = Boolean(checkedStops[item.id]) && needsTaxiStop(item);
                   const preCheckin = isPreCheckinStatus(item.status);
                   const hasPickup = isPickupMode(item.transport?.mode);
                   const isBusy = updatingId === item.id;
@@ -954,6 +925,7 @@ export function TaxiDogWidget({
                       <input
                         type="checkbox"
                         checked={isChecked}
+                        disabled={!needsTaxiStop(item)}
                         onChange={e =>
                           setCheckedStops(prev => ({
                             ...prev,

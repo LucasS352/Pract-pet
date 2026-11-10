@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Car,
@@ -17,6 +17,7 @@ import {
   Phone,
   Printer,
   RefreshCw,
+  Calendar,
   CalendarDays,
   Search,
   Share2,
@@ -33,6 +34,8 @@ import type { Appointment } from './types';
 import { Modal, pageClass, PageHeader, PetAvatar, primaryButton, secondaryButton } from './ui';
 import { CancelAppointmentModal } from './CancelAppointmentModal';
 import { RescheduleAppointmentModal } from './RescheduleAppointmentModal';
+import { buildGoogleMapsRoutes, isMobileMapsClient, requireRouteAddresses } from './taxi-route';
+import { isPickupMode, isDropoffMode, isPreCheckinStatus, isInStoreStatus, needsTaxiStop, summarizeTaxiAppointments } from './taxi-operations';
 
 // Helpers de formatação e horários
 function time(value: string) {
@@ -52,6 +55,10 @@ function formatDate(dateStr: string) {
   }
 }
 
+function localDateKey(date: Date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
 function getPetSpeciesSize(pet: any): string {
   if (!pet) return 'Pet';
   if (pet.species === 'cat') return 'Gato';
@@ -66,31 +73,13 @@ function getPetSpeciesSize(pet: any): string {
   return `Cão (${size})`;
 }
 
-// Helpers operacionais do Táxi Dog
-const isPickupMode = (mode?: string | null) =>
-  mode === 'pickup_only' || mode === 'pickup' || mode === 'round_trip' || mode === 'both';
-
-const isDropoffMode = (mode?: string | null) =>
-  mode === 'dropoff_only' || mode === 'dropoff' || mode === 'round_trip' || mode === 'both';
-
-const isPreCheckinStatus = (status: string) =>
-  status === 'scheduled' || status === 'confirmed' || status === 'requested';
-
-const isInStoreStatus = (status: string) =>
-  status === 'checked_in' ||
-  status === 'in_progress' ||
-  status === 'bathing' ||
-  status === 'drying' ||
-  status === 'grooming' ||
-  status === 'finishing';
-
 export default function PetshopTaxiDogPage() {
   const { tenant } = usePetshopContext();
 
   // Seletor de data
   const [selectedDate, setSelectedDate] = useState(() => {
     const now = new Date();
-    return now.toISOString().slice(0, 10);
+    return localDateKey(now);
   });
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
@@ -104,6 +93,9 @@ export default function PetshopTaxiDogPage() {
   // Modal de Manifesto de Rota
   const [openManifestModal, setOpenManifestModal] = useState(false);
   const [checkedStops, setCheckedStops] = useState<Record<string, boolean>>({});
+  const [routeLinks, setRouteLinks] = useState<string[]>([]);
+  const [overdueCount, setOverdueCount] = useState(0);
+  const loadController = useRef<AbortController | null>(null);
 
   // Modais de Cancelamento e Reagendamento Fácil
   const [appointmentToCancel, setAppointmentToCancel] = useState<Appointment | null>(null);
@@ -111,72 +103,54 @@ export default function PetshopTaxiDogPage() {
 
   // Carrega agendamentos da data selecionada
   const loadAppointments = useCallback(async () => {
+    loadController.current?.abort();
+    const controller = new AbortController();
+    loadController.current = controller;
     setLoading(true);
     try {
-      const from = `${selectedDate}T00:00:00.000Z`;
-      const to = `${selectedDate}T23:59:59.999Z`;
-      const res = await api.get<Appointment[]>('/petshop/appointments', {
-        params: { from, to },
-      });
-      setAppointments(res.data || []);
+      const from = new Date(`${selectedDate}T00:00:00`).toISOString();
+      const to = new Date(`${selectedDate}T23:59:59.999`).toISOString();
+      const [res, overdue] = await Promise.all([
+        api.get<Appointment[]>('/petshop/appointments', { params: { from, to }, signal: controller.signal }),
+        api.get<Appointment[]>('/petshop/appointments/overdue-pickups', { params: { before: from }, signal: controller.signal }),
+      ]);
+      if (controller.signal.aborted) return;
+      const current = res.data || [];
+      const older = overdue.data || [];
+      setOverdueCount(older.length);
+      setAppointments([...new Map([...older, ...current].map(item => [item.id, item])).values()]);
     } catch {
-      toast.error('Não foi possível carregar as corridas do Táxi Dog.');
+      if (!controller.signal.aborted) toast.error('Não foi possível carregar as corridas do Táxi Dog.');
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) setLoading(false);
     }
   }, [selectedDate]);
 
   useEffect(() => {
     void loadAppointments();
+    return () => loadController.current?.abort();
   }, [loadAppointments]);
 
+  useEffect(() => { setRouteLinks([]); }, [selectedDate, appointments, checkedStops]);
+
   // Filtra apenas agendamentos com transporte habilitado e não cancelados
-  const taxiAppointments = useMemo(() => {
-    return appointments
-      .filter(item => Boolean(item.transport?.enabled) && item.status !== 'cancelled')
-      .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
-  }, [appointments]);
+  const operation = useMemo(() => summarizeTaxiAppointments(appointments), [appointments]);
+  const taxiAppointments = operation.all;
 
   // 1. FALTA BUSCAR (Coleta pendente antes do check-in)
-  const pendingPickups = useMemo(() => {
-    return taxiAppointments.filter(
-      item => isPickupMode(item.transport?.mode) && isPreCheckinStatus(item.status),
-    );
-  }, [taxiAppointments]);
+  const pendingPickups = operation.pickups;
 
   // 2. NO PET SHOP / EM CUIDADOS (Check-in realizado, em banho/tosa aguardando finalizar)
-  const inStorePets = useMemo(() => {
-    return taxiAppointments.filter(item => isInStoreStatus(item.status));
-  }, [taxiAppointments]);
+  const inStorePets = operation.inStore;
 
   // 3. PRONTOS PARA LEVAR AGORA (Finalizados na loja aguardando transporte de volta)
-  const readyDropoffs = useMemo(() => {
-    return taxiAppointments.filter(
-      item => isDropoffMode(item.transport?.mode) && item.status === 'ready',
-    );
-  }, [taxiAppointments]);
+  const readyDropoffs = operation.ready;
 
   // 4. FILA GERAL DE ENTREGA (Prontos no topo + na loja em andamento)
-  const dropoffQueue = useMemo(() => {
-    const list = taxiAppointments.filter(
-      item => isDropoffMode(item.transport?.mode) && item.status !== 'delivered',
-    );
-    const score = (status: string) => {
-      if (status === 'ready') return 1; // 1º: Pronto para levar agora!
-      if (isInStoreStatus(status)) return 2; // 2º: Na loja finalizando banho
-      return 3; // 3º: Ainda a coletar
-    };
-    return [...list].sort((a, b) => {
-      const diff = score(a.status) - score(b.status);
-      if (diff !== 0) return diff;
-      return new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime();
-    });
-  }, [taxiAppointments]);
+  const dropoffQueue = operation.dropoffs;
 
   // 5. ENTREGUES HOJE
-  const deliveredPets = useMemo(() => {
-    return taxiAppointments.filter(item => item.status === 'delivered');
-  }, [taxiAppointments]);
+  const deliveredPets = operation.delivered;
 
   // Itens da aba ativa com busca textual
   const displayedItems = useMemo(() => {
@@ -300,31 +274,18 @@ export default function PetshopTaxiDogPage() {
 
   // Abrir rota completa no Google Maps (com múltiplas paradas / waypoints)
   const handleOpenGoogleMapsRoute = () => {
-    const validAddresses = taxiAppointments
-      .map(item => item.transport?.address?.trim())
-      .filter((addr): addr is string => Boolean(addr && addr !== 'Sem endereço'));
-
-    if (validAddresses.length === 0) {
-      toast.error('Nenhum endereço válido cadastrado nas paradas.');
-      return;
+    try {
+      const stops = taxiAppointments.filter(item => !checkedStops[item.id] && needsTaxiStop(item));
+      if (!stops.length) { toast.error('Nenhuma parada pendente para montar a rota.'); return; }
+      const validAddresses = requireRouteAddresses(stops.map(item => item.transport?.address));
+      const mobile = isMobileMapsClient(navigator.userAgent, window.matchMedia('(pointer: coarse)').matches, window.innerWidth);
+      const links = buildGoogleMapsRoutes(validAddresses, mobile);
+      setRouteLinks(links);
+      if (links.length === 1) window.open(links[0], '_blank', 'noopener,noreferrer');
+      else toast.info(`O roteiro tem ${links.length} trechos. Abra cada um em ordem para visitar todas as paradas.`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Não foi possível montar a rota.');
     }
-
-    if (validAddresses.length === 1) {
-      const dest = encodeURIComponent(validAddresses[0]);
-      window.open(
-        `https://www.google.com/maps/dir/?api=1&destination=${dest}&travelmode=driving`,
-        '_blank',
-        'noopener,noreferrer',
-      );
-      toast.success('Abrindo destino no Google Maps!');
-      return;
-    }
-
-    const destination = encodeURIComponent(validAddresses[validAddresses.length - 1]);
-    const waypoints = encodeURIComponent(validAddresses.slice(0, -1).join('|'));
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${destination}&waypoints=${waypoints}&travelmode=driving`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-    toast.success(`Rota com ${validAddresses.length} paradas aberta no Google Maps!`);
   };
 
   // Imprimir manifesto de rota
@@ -332,8 +293,8 @@ export default function PetshopTaxiDogPage() {
     window.print();
   };
 
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const tomorrowStr = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
+  const todayStr = localDateKey(new Date());
+  const tomorrowStr = localDateKey(new Date(Date.now() + 86400000));
 
   return (
     <div className={pageClass}>
@@ -348,10 +309,11 @@ export default function PetshopTaxiDogPage() {
               type="button"
               onClick={() => setOpenManifestModal(true)}
               disabled={taxiAppointments.length === 0}
-              className={`${secondaryButton} flex items-center gap-1.5`}
+              className="flex h-10 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 text-xs font-bold text-zinc-700 shadow-2xs transition hover:bg-zinc-50 disabled:opacity-50 cursor-pointer"
             >
               <Navigation size={15} />
-              <span>Manifesto de Rota</span>
+              <span className="hidden sm:inline">Manifesto de Rota</span>
+              <span className="sm:hidden">Rota</span>
             </button>
             <button
               type="button"
@@ -360,8 +322,7 @@ export default function PetshopTaxiDogPage() {
               className="flex h-10 items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-3.5 text-xs font-bold text-emerald-800 shadow-2xs transition hover:bg-emerald-100 disabled:opacity-50 cursor-pointer"
             >
               <Share2 size={15} />
-              <span className="hidden sm:inline">Enviar Rota p/ WhatsApp</span>
-              <span className="sm:hidden">WhatsApp</span>
+              <span>WhatsApp</span>
             </button>
             <button
               type="button"
@@ -376,33 +337,38 @@ export default function PetshopTaxiDogPage() {
         }
       />
 
-      {/* 2. SELETOR DE DATA OPERACIONAL */}
+      {/* 2. SELETOR DE DATA OPERACIONAL (Fiel ao Mockup Image 2) */}
       <section
         aria-label="Seletor de data operacional"
-        className="mb-6 rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs"
+        className="mb-4 sm:mb-6 rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 shadow-2xs"
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
-            <span className="grid h-9 w-9 place-items-center rounded-xl bg-amber-50 text-amber-700">
-              <Car size={18} />
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-amber-50 text-amber-700 shrink-0">
+              <Calendar size={18} />
             </span>
             <div>
-              <p className="text-xs font-bold text-zinc-900 uppercase tracking-wider">
-                Data das Corridas
+              <p className="text-xs font-bold text-zinc-900">
+                Data das corridas
               </p>
               <p className="text-[11px] text-zinc-400">
-                {selectedDate === todayStr ? 'Visualizando coletas e entregas de Hoje' : `Visualizando: ${formatDate(selectedDate)}`}
+                Coletas e entregas de hoje.
               </p>
+              {overdueCount > 0 && (
+                <p className="text-[10px] font-bold text-amber-800">
+                  + {overdueCount} coleta{overdueCount === 1 ? '' : 's'} pendente{overdueCount === 1 ? '' : 's'} de dias anteriores
+                </p>
+              )}
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 self-end sm:self-auto">
             <button
               type="button"
               onClick={() => setSelectedDate(todayStr)}
-              className={`rounded-xl px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
                 selectedDate === todayStr
-                  ? 'bg-teal-800 text-white shadow-xs'
+                  ? 'bg-[#0d6e5a] text-white shadow-xs'
                   : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200/80'
               }`}
             >
@@ -411,9 +377,9 @@ export default function PetshopTaxiDogPage() {
             <button
               type="button"
               onClick={() => setSelectedDate(tomorrowStr)}
-              className={`rounded-xl px-3.5 py-2 text-xs font-bold transition cursor-pointer ${
+              className={`rounded-lg px-3 py-1.5 text-xs font-bold transition cursor-pointer ${
                 selectedDate === tomorrowStr
-                  ? 'bg-teal-800 text-white shadow-xs'
+                  ? 'bg-[#0d6e5a] text-white shadow-xs'
                   : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200/80'
               }`}
             >
@@ -423,113 +389,114 @@ export default function PetshopTaxiDogPage() {
               type="date"
               value={selectedDate}
               onChange={e => setSelectedDate(e.target.value)}
-              className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-900 outline-none focus:border-teal-700 focus:ring-1 focus:ring-teal-700"
+              className="rounded-lg border border-zinc-200 bg-white px-2 py-1 text-xs font-semibold text-zinc-800 outline-none focus:border-teal-700 focus:ring-1 focus:ring-teal-700"
             />
           </div>
         </div>
       </section>
 
-      {/* 3. CARDS DE RESUMO OPERACIONAL (4 KPIS DE TRANSPORTE) */}
+      {/* 3. CARDS DE RESUMO OPERACIONAL (4 KPIS - Fiel ao Mockup Image 2) */}
       <section
-        aria-label="Resumo das corridas de hoje"
-        className="mb-6 grid gap-3 sm:gap-4 grid-cols-2 lg:grid-cols-4"
+        aria-label="Resumo das corridas do período"
+        className="mb-4 sm:mb-6 grid gap-2.5 sm:gap-4 grid-cols-2 lg:grid-cols-4"
       >
         {/* Card 1: Falta Buscar */}
         <div
           onClick={() => setActiveTab('pickups')}
-          className={`cursor-pointer rounded-2xl border p-4 shadow-xs transition hover:shadow-md flex items-center gap-3.5 ${
+          className={`cursor-pointer rounded-2xl border p-3.5 sm:p-4 shadow-2xs transition flex items-center gap-3 ${
             activeTab === 'pickups'
               ? 'border-amber-400 bg-amber-50/60 ring-2 ring-amber-400/20'
-              : 'border-zinc-200/90 bg-white'
+              : 'border-amber-200/80 bg-white hover:border-amber-300'
           }`}
         >
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-amber-50 text-amber-700">
-            <Truck size={22} />
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-50 text-amber-700">
+            <Truck size={20} />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-zinc-600">Falta buscar</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">
+            <p className="text-xs font-bold text-zinc-700">Falta buscar</p>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">
                 {pendingPickups.length}
               </strong>
-              <span className="truncate text-xs text-zinc-400">coletas pendentes</span>
+              <span className="truncate text-[11px] sm:text-xs text-zinc-500">coletas pendentes</span>
             </div>
           </div>
         </div>
 
-        {/* Card 2: No Pet Shop (Em Cuidados) */}
+        {/* Card 2: No Pet Shop */}
         <div
           onClick={() => setActiveTab('in_store')}
-          className={`cursor-pointer rounded-2xl border p-4 shadow-xs transition hover:shadow-md flex items-center gap-3.5 ${
+          className={`cursor-pointer rounded-2xl border p-3.5 sm:p-4 shadow-2xs transition flex items-center gap-3 ${
             activeTab === 'in_store'
               ? 'border-sky-400 bg-sky-50/60 ring-2 ring-sky-400/20'
-              : 'border-zinc-200/90 bg-white'
+              : 'border-zinc-200/90 bg-white hover:border-zinc-300'
           }`}
         >
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-sky-50 text-sky-700">
-            <Hourglass size={22} />
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-sky-50 text-sky-700">
+            <Hourglass size={20} />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-zinc-600">No Pet Shop</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">
+            <p className="text-xs font-bold text-zinc-700">No Pet Shop</p>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">
                 {inStorePets.length}
               </strong>
-              <span className="truncate text-xs text-zinc-400">em atendimento</span>
+              <span className="truncate text-[11px] sm:text-xs text-zinc-500">em atendimento</span>
             </div>
           </div>
         </div>
 
-        {/* Card 3: Prontos para Levar Agora */}
+        {/* Card 3: Prontos p/ levar */}
         <div
           onClick={() => setActiveTab('dropoffs')}
-          className={`cursor-pointer rounded-2xl border p-4 shadow-xs transition hover:shadow-md flex items-center gap-3.5 ${
+          className={`cursor-pointer rounded-2xl border p-3.5 sm:p-4 shadow-2xs transition flex items-center gap-3 ${
             activeTab === 'dropoffs'
               ? 'border-emerald-400 bg-emerald-50/60 ring-2 ring-emerald-400/20'
-              : readyDropoffs.length > 0
-              ? 'border-emerald-200 bg-emerald-50/30'
-              : 'border-zinc-200/90 bg-white'
+              : 'border-emerald-200/80 bg-white hover:border-emerald-300'
           }`}
         >
-          <span className="relative grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
-            <Home size={22} />
+          <span className="relative grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+            <Home size={20} />
             {readyDropoffs.length > 0 && (
-              <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+              <span className="absolute -top-1 -right-1 flex h-3 w-3">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-600" />
+                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-600" />
               </span>
             )}
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-emerald-800 font-bold">Prontos p/ levar</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <strong className="text-2xl font-extrabold text-emerald-900 tabular-nums">
+            <p className="text-xs font-bold text-emerald-800 flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full bg-emerald-600 inline-block" />
+              Prontos p/ levar
+            </p>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <strong className="text-xl sm:text-2xl font-black text-emerald-950 tabular-nums">
                 {readyDropoffs.length}
               </strong>
-              <span className="truncate text-xs text-emerald-700">levar p/ casa agora</span>
+              <span className="truncate text-[11px] sm:text-xs text-emerald-700">levar p/ casa</span>
             </div>
           </div>
         </div>
 
-        {/* Card 4: Entregues Hoje */}
+        {/* Card 4: Entregues */}
         <div
           onClick={() => setActiveTab('delivered')}
-          className={`cursor-pointer rounded-2xl border p-4 shadow-xs transition hover:shadow-md flex items-center gap-3.5 ${
+          className={`cursor-pointer rounded-2xl border p-3.5 sm:p-4 shadow-2xs transition flex items-center gap-3 ${
             activeTab === 'delivered'
               ? 'border-teal-400 bg-teal-50/60 ring-2 ring-teal-400/20'
-              : 'border-zinc-200/90 bg-white'
+              : 'border-zinc-200/90 bg-white hover:border-zinc-300'
           }`}
         >
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-teal-50 text-teal-800">
-            <CheckCircle2 size={22} />
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-teal-50 text-teal-800">
+            <CheckCircle2 size={20} />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-zinc-600">Entregues</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">
+            <p className="text-xs font-bold text-zinc-700">Entregues</p>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">
                 {deliveredPets.length}
               </strong>
-              <span className="truncate text-xs text-zinc-400">corridas concluídas</span>
+              <span className="truncate text-[11px] sm:text-xs text-zinc-500">corridas concluídas</span>
             </div>
           </div>
         </div>
@@ -538,18 +505,18 @@ export default function PetshopTaxiDogPage() {
       {/* 4. BARRA DE BUSCA E ABAS OPERACIONAIS */}
       <section aria-label="Abas e busca" className="mb-6 space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Abas */}
-          <div className="flex flex-wrap items-center gap-1.5 p-1 bg-zinc-100 rounded-2xl">
+          {/* Abas (Fiel ao Mockup Image 2) */}
+          <div className="flex items-center gap-1.5 p-1 bg-zinc-100 rounded-2xl overflow-x-auto no-scrollbar">
             <button
               type="button"
               onClick={() => setActiveTab('pickups')}
-              className={`rounded-xl px-4 py-2 text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+              className={`rounded-xl px-3 sm:px-4 py-2 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                 activeTab === 'pickups'
-                  ? 'bg-white text-teal-900 shadow-2xs'
+                  ? 'bg-white text-zinc-900 shadow-2xs'
                   : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
-              <span>📥 Buscar no Endereço</span>
+              <span>📦 Buscar</span>
               <span
                 className={`rounded-md px-1.5 py-0.2 text-[10px] font-extrabold ${
                   pendingPickups.length > 0 ? 'bg-amber-100 text-amber-900' : 'bg-zinc-200 text-zinc-600'
@@ -562,13 +529,13 @@ export default function PetshopTaxiDogPage() {
             <button
               type="button"
               onClick={() => setActiveTab('dropoffs')}
-              className={`rounded-xl px-4 py-2 text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+              className={`rounded-xl px-3 sm:px-4 py-2 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                 activeTab === 'dropoffs'
-                  ? 'bg-white text-teal-900 shadow-2xs'
+                  ? 'bg-white text-zinc-900 shadow-2xs'
                   : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
-              <span>📤 Levar para Casa</span>
+              <span>📦 Levar</span>
               <span
                 className={`rounded-md px-1.5 py-0.2 text-[10px] font-extrabold ${
                   readyDropoffs.length > 0
@@ -576,20 +543,20 @@ export default function PetshopTaxiDogPage() {
                     : 'bg-zinc-200 text-zinc-600'
                 }`}
               >
-                {readyDropoffs.length > 0 ? `${readyDropoffs.length} prontos` : dropoffQueue.length}
+                {readyDropoffs.length > 0 ? readyDropoffs.length : dropoffQueue.length}
               </span>
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab('in_store')}
-              className={`rounded-xl px-4 py-2 text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+              className={`rounded-xl px-3 sm:px-4 py-2 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                 activeTab === 'in_store'
-                  ? 'bg-white text-teal-900 shadow-2xs'
+                  ? 'bg-white text-zinc-900 shadow-2xs'
                   : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
-              <span>🏪 Na Loja (Cuidados)</span>
+              <span>🏬 Loja</span>
               <span className="rounded-md bg-zinc-200 text-zinc-600 px-1.5 py-0.2 text-[10px] font-extrabold">
                 {inStorePets.length}
               </span>
@@ -597,29 +564,17 @@ export default function PetshopTaxiDogPage() {
 
             <button
               type="button"
-              onClick={() => setActiveTab('delivered')}
-              className={`rounded-xl px-4 py-2 text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
-                activeTab === 'delivered'
-                  ? 'bg-white text-teal-900 shadow-2xs'
-                  : 'text-zinc-600 hover:text-zinc-900'
-              }`}
-            >
-              <span>🏁 Entregues</span>
-              <span className="rounded-md bg-zinc-200 text-zinc-600 px-1.5 py-0.2 text-[10px] font-extrabold">
-                {deliveredPets.length}
-              </span>
-            </button>
-
-            <button
-              type="button"
               onClick={() => setActiveTab('all')}
-              className={`rounded-xl px-3 py-2 text-xs font-bold transition cursor-pointer ${
+              className={`rounded-xl px-3 sm:px-4 py-2 text-xs font-bold transition flex items-center gap-1.5 cursor-pointer whitespace-nowrap ${
                 activeTab === 'all'
-                  ? 'bg-white text-teal-900 shadow-2xs'
+                  ? 'bg-white text-zinc-900 shadow-2xs'
                   : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
-              Todas ({taxiAppointments.length})
+              <span>📑 Todas</span>
+              <span className="rounded-md bg-zinc-200 text-zinc-600 px-1.5 py-0.2 text-[10px] font-extrabold">
+                {taxiAppointments.length}
+              </span>
             </button>
           </div>
 
@@ -761,7 +716,7 @@ export default function PetshopTaxiDogPage() {
                       {isPreCheckin && (
                         <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800 flex items-center gap-1">
                           <Clock size={11} />
-                          Aguardando Coleta
+                          {new Date(item.startsAt).getTime() < Date.now() ? 'Coleta atrasada' : 'Aguardando Coleta'}
                         </span>
                       )}
                       {isDelivered && (
@@ -940,6 +895,7 @@ export default function PetshopTaxiDogPage() {
             <p className="text-xs text-zinc-500">
               Roteiro ordenado com checklist de coletas e entregas do motorista.
             </p>
+            {overdueCount > 0 && <p className="text-xs font-semibold text-amber-800">Inclui {overdueCount} coleta{overdueCount === 1 ? '' : 's'} pendente{overdueCount === 1 ? '' : 's'} de dias anteriores.</p>}
           <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
             <div>
               <p className="text-xs font-bold text-zinc-900">
@@ -958,6 +914,7 @@ export default function PetshopTaxiDogPage() {
                 <Navigation size={14} />
                 <span>Abrir Rota no Maps</span>
               </button>
+              {routeLinks.length > 1 && <div className="flex flex-wrap gap-2">{routeLinks.map((url, index) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-800">Abrir trecho {index + 1} de {routeLinks.length}</a>)}</div>}
               <button
                 type="button"
                 onClick={handleShareManifestWhatsApp}

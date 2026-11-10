@@ -111,6 +111,8 @@ export function PageHeader({ eyebrow, title, description, action }: { eyebrow: s
 
 let modalLocks = 0;
 let originalOverflow = '';
+const modalHistoryTokens: string[] = [];
+let suppressModalPopstate = false;
 export function Modal({
   title,
   subtitle,
@@ -119,6 +121,7 @@ export function Modal({
   maxWidth = 'sm:max-w-2xl',
   showBack = false,
   headerRight,
+  suspended = false,
 }: {
   title: string;
   subtitle?: string;
@@ -127,11 +130,13 @@ export function Modal({
   maxWidth?: string;
   showBack?: boolean;
   headerRight?: ReactNode;
+  suspended?: boolean;
 }) {
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const historyToken = useRef(`petshop-modal-${Math.random().toString(36).slice(2)}`);
 
   useEffect(() => {
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -140,6 +145,7 @@ export function Modal({
     focusable()[0]?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (modalHistoryTokens[modalHistoryTokens.length - 1] !== historyToken.current) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         closeRef.current();
@@ -160,9 +166,26 @@ export function Modal({
     };
 
     document.addEventListener('keydown', handleKeyDown);
+    const token = historyToken.current;
+    modalHistoryTokens.push(token);
+    window.history.pushState({ ...window.history.state, petshopModal: token }, '');
+    const handleBack = () => {
+      if (suppressModalPopstate) return;
+      if (modalHistoryTokens[modalHistoryTokens.length - 1] === token) closeRef.current();
+    };
+    window.addEventListener('popstate', handleBack);
     if (modalLocks++ === 0) { originalOverflow = document.body.style.overflow; document.body.style.overflow = 'hidden'; }
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('popstate', handleBack);
+      const tokenIndex = modalHistoryTokens.indexOf(token);
+      if (tokenIndex >= 0) modalHistoryTokens.splice(tokenIndex, 1);
+      if (window.history.state?.petshopModal === token) {
+        suppressModalPopstate = true;
+        const fallback = window.setTimeout(() => { suppressModalPopstate = false; }, 500);
+        window.addEventListener('popstate', () => { window.clearTimeout(fallback); suppressModalPopstate = false; }, { once: true });
+        window.history.back();
+      }
       if (--modalLocks === 0) document.body.style.overflow = originalOverflow;
       previousFocus?.focus();
     };
@@ -170,7 +193,8 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-[80] grid place-items-end bg-slate-950/50 p-0 pt-[max(0.75rem,env(safe-area-inset-top,0px))] backdrop-blur-[2px] sm:place-items-center sm:p-4"
+      className={`fixed inset-0 z-[80] grid place-items-end bg-slate-950/50 p-0 pt-[max(0.75rem,env(safe-area-inset-top,0px))] backdrop-blur-[2px] sm:place-items-center sm:p-4 ${suspended ? 'invisible pointer-events-none' : ''}`}
+      aria-hidden={suspended}
       onMouseDown={event => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -189,7 +213,7 @@ export function Modal({
                 type="button"
                 onClick={onClose}
                 aria-label="Voltar"
-                className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 transition hover:bg-slate-200 cursor-pointer"
+                className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-slate-100 text-slate-700 transition hover:bg-slate-200 cursor-pointer"
               >
                 <ChevronLeft aria-hidden="true" size={20} />
               </button>
@@ -211,7 +235,7 @@ export function Modal({
               type="button"
               onClick={onClose}
               aria-label="Fechar"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100/80 text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)] cursor-pointer"
+              className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-slate-100/80 text-[var(--pc-text-secondary)] transition hover:bg-[var(--pc-surface-subtle)] cursor-pointer"
             >
               <X aria-hidden="true" size={18} />
             </button>

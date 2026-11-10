@@ -1,5 +1,5 @@
 import { buildWhatsAppMessage } from './appointment-media';
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -9,6 +9,7 @@ import {
   Camera,
   Check,
   CheckCircle2,
+  ClipboardList,
   Clock,
   Clock3,
   ExternalLink,
@@ -152,6 +153,7 @@ export default function PetshopDashboardPage() {
   const navigate = useNavigate();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const loadRequest = useRef(0);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState<string>('');
@@ -174,6 +176,7 @@ export default function PetshopDashboardPage() {
   const [appointmentToReschedule, setAppointmentToReschedule] = useState<Appointment | null>(null);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    const request = ++loadRequest.current;
     setError('');
     setLoading(true);
     try {
@@ -184,16 +187,17 @@ export default function PetshopDashboardPage() {
         api.get<Appointment[]>('/petshop/appointments', { params: range, signal }),
         api.get('/operators', { signal }).catch(() => ({ data: [] })),
       ]);
+      if (signal?.aborted || request !== loadRequest.current) return;
       setOverview(overviewResponse.data);
       setPendingReservations(pendingResponse.data || []);
       setAppointments(appointmentsResponse.data || []);
       setOperators(Array.isArray(operatorsResponse.data) ? operatorsResponse.data : []);
     } catch (requestError: any) {
-      if (requestError?.code !== 'ERR_CANCELED') {
+      if (!signal?.aborted && request === loadRequest.current && requestError?.code !== 'ERR_CANCELED') {
         setError(requestError?.response?.data?.message || 'Não foi possível carregar a operação de hoje.');
       }
     } finally {
-      if (!signal?.aborted) setLoading(false);
+      if (!signal?.aborted && request === loadRequest.current) setLoading(false);
     }
   }, []);
 
@@ -351,8 +355,54 @@ export default function PetshopDashboardPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1600px] p-4 sm:p-6 lg:p-8 space-y-6">
-      {/* 1. Header do Painel */}
-      <header className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* 1. Header do Painel - Mobile (Fiel ao Mockup Image 1) */}
+      <div className="md:hidden relative overflow-hidden rounded-3xl border border-[#cfe5df] bg-gradient-to-br from-[#eaf4f1] via-[#f7fbf9] to-white p-4 shadow-2xs">
+        <div className="pointer-events-none absolute right-1 -top-1 h-28 w-36 select-none opacity-95">
+          <span className="absolute -left-2 -top-1 text-[#0d6e5a]/15">
+            <PawPrint size={32} />
+          </span>
+          <img
+            src="/petcare/hero-dog-cat.webp"
+            alt=""
+            className="h-full w-full object-contain object-right-top"
+          />
+        </div>
+
+        <div className="relative z-10 pr-24">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100/80 border border-emerald-200/70 px-3 py-1 text-[11px] font-bold text-[#0d6e5a] mb-2">
+            <CalendarDays size={13} className="text-[#0d6e5a]" />
+            <span>{dateLabel}</span>
+          </span>
+          <h1 className="text-2xl font-black tracking-tight text-teal-950">
+            Operação de hoje
+          </h1>
+          <p className="mt-1 text-xs text-zinc-500 leading-snug">
+            Agenda, andamento dos serviços e pendências do estabelecimento.
+          </p>
+        </div>
+
+        <div className="relative z-10 flex items-center gap-2.5 mt-4">
+          <button
+            type="button"
+            onClick={() => load()}
+            disabled={loading}
+            className="flex items-center gap-1.5 rounded-2xl border border-zinc-200 bg-white px-3.5 py-2 text-xs font-bold text-zinc-700 shadow-2xs hover:bg-zinc-50 transition cursor-pointer disabled:opacity-60"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            <span>Atualizar</span>
+          </button>
+          <Link
+            to="/petshop/agenda?new=1"
+            className="flex items-center gap-1.5 rounded-2xl bg-[#0d6e5a] hover:bg-[#0a5747] px-4 py-2 text-xs font-bold text-white shadow-xs transition"
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            <span>Novo atendimento</span>
+          </Link>
+        </div>
+      </div>
+
+      {/* 1. Header do Painel - Desktop */}
+      <header className="hidden md:flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0 flex-1">
           <p className="flex items-center gap-1.5 text-xs font-semibold text-teal-800">
             <CalendarDays aria-hidden="true" size={14} className="text-teal-700" />
@@ -401,60 +451,60 @@ export default function PetshopDashboardPage() {
         </div>
       )}
 
-      {/* 2. Top 4 Cards de Resumo Operacional */}
-      <section aria-label="Resumo da operação" className="grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4">
+      {/* 2. Top 4 Cards de Resumo Operacional (Fiel ao Mockup Image 1) */}
+      <section aria-label="Resumo da operação" className="grid grid-cols-2 xl:grid-cols-4 gap-2.5 sm:gap-4">
         {/* Card 1: Agenda de hoje */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
-            <CalendarDays size={22} />
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 shadow-2xs flex items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-700">
+            <CalendarDays size={20} />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-zinc-600">Agenda de hoje</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">{agendaCount}</strong>
-              <span className="truncate text-xs text-zinc-400">atendimentos no dia</span>
+            <p className="text-xs font-bold text-zinc-700">Agenda de hoje</p>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{agendaCount}</strong>
+              <span className="truncate text-[11px] sm:text-xs text-zinc-500">atendimentos</span>
             </div>
           </div>
         </div>
 
         {/* Card 2: Em atendimento */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-amber-50 text-amber-700">
-            <Clock3 size={22} />
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 shadow-2xs flex items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-amber-50 text-amber-700">
+            <Clock3 size={20} />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-zinc-600">Em atendimento</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">{inProduction.length}</strong>
-              <span className="truncate text-xs text-zinc-400">serviços em execução</span>
+            <p className="text-xs font-bold text-zinc-700">Em atendimento</p>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{inProduction.length}</strong>
+              <span className="truncate text-[11px] sm:text-xs text-zinc-500">serviços em andamento</span>
             </div>
           </div>
         </div>
 
         {/* Card 3: Prontos para retirada */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-sky-50 text-sky-700">
-            <CheckCircle2 size={22} />
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 shadow-2xs flex items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-sky-50 text-sky-700">
+            <CheckCircle2 size={20} />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-zinc-600">Prontos para retirada</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">{ready.length}</strong>
-              <span className="truncate text-xs text-zinc-400">pets prontos hoje</span>
+            <p className="text-xs font-bold text-zinc-700">Prontos para retirada</p>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{ready.length}</strong>
+              <span className="truncate text-[11px] sm:text-xs text-zinc-500">pets prontos</span>
             </div>
           </div>
         </div>
 
         {/* Card 4: Pendentes / Aguardando confirmação */}
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-4 shadow-xs flex items-center gap-3.5">
-          <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-orange-50 text-orange-700">
-            <AlertTriangle size={22} />
+        <div className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 sm:p-4 shadow-2xs flex items-center gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-rose-50 text-rose-700">
+            <AlertTriangle size={20} />
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-semibold text-zinc-600">Pendentes / Aguardando confirmação</p>
-            <div className="mt-0.5 flex items-baseline gap-2">
-              <strong className="text-2xl font-extrabold text-zinc-900 tabular-nums">{requested.length}</strong>
-              <span className="truncate text-xs text-zinc-400">solicitações pendentes</span>
+            <p className="text-xs font-bold text-zinc-700">Pendentes / Aguardando confirmação</p>
+            <div className="mt-0.5 flex items-baseline gap-1.5">
+              <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{requested.length}</strong>
+              <span className="truncate text-[11px] sm:text-xs text-zinc-500">solicitações</span>
             </div>
           </div>
         </div>
@@ -463,19 +513,26 @@ export default function PetshopDashboardPage() {
       {/* 3. Grade Central: Tabela da Agenda Operacional (Esquerda) e Widgets de Acompanhamento (Direita) */}
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_390px] gap-5 items-start">
         {/* Coluna Esquerda: Agenda operacional do dia */}
-        <section className="rounded-2xl border border-zinc-200/90 bg-white shadow-xs overflow-hidden">
+        <section className="rounded-3xl border border-zinc-200/90 bg-white shadow-2xs overflow-hidden">
           <div className="flex items-center justify-between border-b border-zinc-100 p-4 sm:px-5">
-            <div>
-              <h2 className="text-sm font-bold text-zinc-900">Agenda operacional do dia</h2>
-              <p className="text-xs text-zinc-400">
-                Atendimentos programados, status em tempo real e ações de operação.
-              </p>
+            <div className="flex items-center gap-3 min-w-0 pr-2">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+                <ClipboardList size={20} />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-sm sm:text-base font-bold text-zinc-900 truncate">
+                  Agenda operacional do dia
+                </h2>
+                <p className="text-xs text-zinc-500 truncate">
+                  Atendimentos programados, status em tempo real e ações de operação.
+                </p>
+              </div>
             </div>
             <Link
               to="/petshop/agenda"
-              className="text-xs font-bold text-teal-800 hover:text-teal-900 hover:underline flex items-center gap-1"
+              className="inline-flex shrink-0 items-center gap-1 rounded-xl bg-emerald-50/80 px-3 py-1.5 text-xs font-bold text-[#0d6e5a] hover:bg-emerald-100 transition"
             >
-              Ver agenda completa →
+              <span>Ver agenda completa →</span>
             </Link>
           </div>
 
@@ -488,15 +545,15 @@ export default function PetshopDashboardPage() {
               </p>
               <Link
                 to="/petshop/agenda?new=1"
-                className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-teal-800 px-4 py-2 text-xs font-semibold text-white hover:bg-teal-900 transition"
+                className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-[#0d6e5a] px-4 py-2 text-xs font-semibold text-white hover:bg-[#0a5747] transition shadow-xs"
               >
                 <Plus size={14} /> Novo atendimento
               </Link>
             </div>
           ) : (
             <>
-              {/* Lista de Cards Nativa para Mobile (< md) */}
-              <div className="divide-y divide-zinc-100 md:hidden">
+              {/* Lista de Cards Nativa para Mobile (< md - Fiel ao Mockup Image 1) */}
+              <div className="p-3.5 space-y-3 md:hidden bg-zinc-50/40">
                 {activeAppointments.map(item => {
                   const statusInfo = STATUS_CONFIG[item.status] || {
                     label: item.status,
@@ -504,77 +561,164 @@ export default function PetshopDashboardPage() {
                   };
                   const primaryService = item.services[0]?.nameSnapshot || 'Serviço';
                   const hasMore = item.services.length > 1;
+                  const isReady = item.status === 'ready';
+                  const isInProgress = ['bathing', 'grooming', 'finishing', 'checked_in'].includes(item.status);
+
                   return (
-                    <div key={`mob-${item.id}`} className="p-3.5 space-y-2.5 bg-white active:bg-zinc-50/70">
+                    <div
+                      key={`mob-${item.id}`}
+                      className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 space-y-2.5 shadow-2xs"
+                    >
+                      {/* Top Row: Avatar + Time / Name / Tutor / Species + Status Badge */}
                       <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <PetAvatar pet={item.pet} size="sm" />
+                        <div className="flex items-center gap-3 min-w-0">
+                          <PetAvatar pet={item.pet} size="md" />
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <strong className="text-xs font-extrabold text-zinc-900 tabular-nums">{time(item.startsAt)}</strong>
-                              <span className="text-zinc-300">•</span>
-                              <span className="text-xs font-bold text-zinc-900 truncate">{item.pet?.name}</span>
+                              <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 text-teal-800 text-xs font-bold px-2 py-0.5">
+                                <Clock size={11} className="text-teal-700" />
+                                {time(item.startsAt)}
+                              </span>
+                              <strong className="text-xs font-extrabold text-zinc-900 truncate">
+                                {item.pet?.name}
+                              </strong>
                             </div>
+                            <p className="text-[11px] text-zinc-500 truncate mt-0.5">
+                              👤 Tutor: {item.customer?.name || 'Não informado'}
+                            </p>
                             <p className="text-[11px] text-zinc-500 truncate">
-                              Tutor: {item.customer?.name} • {getPetSpeciesSize(item.pet)}
+                              🐾 {getPetSpeciesSize(item.pet)}
                             </p>
                           </div>
                         </div>
-                        <span className={`inline-flex shrink-0 items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${statusInfo.badgeClass}`}>
-                          {statusInfo.label}
+
+                        <span
+                          className={`inline-flex shrink-0 items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                            isReady
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                              : isInProgress
+                              ? 'bg-sky-50 text-sky-700 border-sky-200'
+                              : statusInfo.badgeClass
+                          }`}
+                        >
+                          {isReady && item.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(item.transport.mode)
+                            ? '✓ Pronto p/ levar'
+                            : isReady
+                            ? '✓ Pronto p/ busca'
+                            : isInProgress
+                            ? 'Em atendimento'
+                            : statusInfo.label}
                         </span>
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-zinc-50 px-3 py-2 text-xs">
+                      {/* Middle Row: Service Details Bar */}
+                      <div className="flex items-center justify-between gap-2 rounded-xl bg-zinc-50/90 border border-zinc-100/90 px-3 py-2 text-xs">
                         <div className="min-w-0 flex-1">
-                          <p className="font-semibold text-zinc-800 truncate">
-                            {primaryService} {hasMore && <span className="text-[10px] text-zinc-400">+{item.services.length - 1}</span>}
-                          </p>
+                          <div className="flex items-center gap-1.5">
+                            <Scissors size={13} className="text-teal-700 shrink-0" />
+                            <p className="font-bold text-zinc-800 truncate text-xs">
+                              {primaryService}
+                            </p>
+                            {hasMore && (
+                              <span className="rounded-md bg-zinc-200 px-1.5 py-0.2 text-[10px] font-bold text-zinc-700">
+                                +{item.services.length - 1}
+                              </span>
+                            )}
+                          </div>
                           <p className="text-[11px] text-zinc-500 flex items-center gap-1 mt-0.5">
-                            <UserRound size={11} className="text-zinc-400" />
-                            <span>{item.professional?.name || 'Profissional a definir'}</span>
+                            <UserRound size={11} className="text-zinc-400 shrink-0" />
+                            <span className="truncate">
+                              {item.professional?.name ? `Profissional: ${item.professional.name}` : 'Profissional a definir'}
+                            </span>
                           </p>
                         </div>
+
                         {item.transport?.enabled && (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 border border-amber-300 text-[10px] font-bold text-amber-900 px-2 py-0.5">
+                          <span className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-amber-50 border border-amber-200/80 px-2 py-0.5 text-xs font-bold text-amber-900 shadow-2xs">
                             🚐 Táxi Dog
                           </span>
                         )}
                       </div>
 
-                      <div className="flex flex-wrap items-center justify-end gap-1.5 pt-0.5">
-                        {item.status === 'ready' && (
+                      {/* Bottom Row: Actions Buttons */}
+                      <div className="flex items-center justify-end gap-2 pt-1">
+                        {isInProgress && (
                           <>
-                            <button type="button" onClick={() => openStageModal(item)} className="h-8 px-2.5 rounded-lg border border-zinc-200 bg-white text-xs font-semibold text-zinc-700">Ver foto</button>
-                            <button type="button" onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white">Ver atendimento →</button>
+                            {nextCareStage(item) && (
+                              <button
+                                type="button"
+                                disabled={updatingId === item.id}
+                                onClick={() => changeStatus(item, nextCareStage(item)!)}
+                                className="rounded-xl bg-[#0d6e5a] hover:bg-[#0a5747] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition cursor-pointer disabled:opacity-50"
+                              >
+                                Avançar
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => openStageModal(item)}
+                              className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                            >
+                              <Camera size={13} />
+                              <span>Foto</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)}
+                              className="rounded-xl bg-[#094e40] hover:bg-[#063b30] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition cursor-pointer"
+                            >
+                              Atendimento →
+                            </button>
                           </>
                         )}
-                        {['bathing', 'grooming', 'finishing'].includes(item.status) && (
+
+                        {isReady && (
                           <>
-                            {nextCareStage(item) && <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, nextCareStage(item)!)} className="h-8 px-2.5 rounded-lg bg-teal-800 text-xs font-bold text-white disabled:opacity-50">Avançar</button>}
-                            <button type="button" onClick={() => openStageModal(item)} className="h-8 px-2.5 rounded-lg border border-zinc-200 bg-white text-xs font-semibold text-zinc-700 flex items-center gap-1"><Camera size={12} /> Foto</button>
-                            <button type="button" onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white">Atendimento →</button>
+                            <button
+                              type="button"
+                              onClick={() => openStageModal(item)}
+                              className="rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs font-bold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer flex items-center gap-1.5 shadow-2xs"
+                            >
+                              <Camera size={13} />
+                              <span>Foto</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/petshop/agenda?appointment=${item.id}&date=${localAppointmentDate(item.startsAt)}`)}
+                              className="rounded-xl bg-[#0d6e5a] hover:bg-[#0a5747] px-4 py-1.5 text-xs font-bold text-white shadow-xs transition cursor-pointer"
+                            >
+                              Atendimento →
+                            </button>
                           </>
                         )}
-                        {item.status === 'requested' && (
+
+                        {!isInProgress && !isReady && (
                           <>
-                            <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, 'scheduled')} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white flex items-center gap-1 disabled:opacity-50"><Check size={13} /> Confirmar</button>
-                            <button type="button" onClick={() => setAppointmentToReschedule(item)} className="h-8 px-2.5 rounded-lg border border-teal-200 bg-teal-50 text-xs font-bold text-teal-900 flex items-center gap-1"><CalendarDays size={12} /> Reagendar</button>
-                            <button type="button" onClick={() => setAppointmentToCancel(item)} className="h-8 px-2 rounded-lg border border-rose-200 bg-rose-50 text-xs font-semibold text-rose-700 flex items-center gap-1"><XCircle size={12} /> Cancelar</button>
-                          </>
-                        )}
-                        {(item.status === 'scheduled' || item.status === 'confirmed') && (
-                          <>
-                            <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, 'checked_in')} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white flex items-center gap-1.5 disabled:opacity-50"><PawPrint size={13} /> Check-in</button>
-                            <button type="button" onClick={() => setAppointmentToReschedule(item)} className="h-8 px-2.5 rounded-lg border border-teal-200 bg-teal-50 text-xs font-bold text-teal-900 flex items-center gap-1"><CalendarDays size={12} /> Reagendar</button>
-                            <button type="button" onClick={() => setAppointmentToCancel(item)} className="h-8 px-2 rounded-lg border border-rose-200 bg-rose-50 text-xs font-semibold text-rose-700 flex items-center gap-1"><XCircle size={12} /> Cancelar</button>
-                          </>
-                        )}
-                        {item.status === 'checked_in' && (
-                          <>
-                            <button type="button" disabled={updatingId === item.id} onClick={() => changeStatus(item, 'bathing')} className="h-8 px-3 rounded-lg bg-teal-800 text-xs font-bold text-white flex items-center gap-1.5 disabled:opacity-50"><Play size={11} fill="currentColor" /> Iniciar Banho</button>
-                            <button type="button" onClick={() => setAppointmentToReschedule(item)} className="h-8 w-8 grid place-items-center rounded-lg border border-teal-200 bg-teal-50 text-teal-900" title="Reagendar"><CalendarDays size={12} /></button>
-                            <button type="button" onClick={() => setAppointmentToCancel(item)} className="h-8 w-8 grid place-items-center rounded-lg border border-rose-200 bg-rose-50 text-rose-700" title="Cancelar"><XCircle size={12} /></button>
+                            <button
+                              type="button"
+                              disabled={updatingId === item.id}
+                              onClick={() => changeStatus(item, 'bathing')}
+                              className="rounded-xl bg-[#0d6e5a] hover:bg-[#0a5747] px-3.5 py-1.5 text-xs font-bold text-white shadow-xs transition cursor-pointer flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Play size={11} fill="currentColor" />
+                              <span>Iniciar Banho</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAppointmentToReschedule(item)}
+                              className="rounded-xl border border-teal-200 bg-teal-50 px-2.5 py-1.5 text-xs font-bold text-teal-900 hover:bg-teal-100 transition cursor-pointer"
+                              title="Reagendar"
+                            >
+                              <CalendarDays size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setAppointmentToCancel(item)}
+                              className="rounded-xl border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-bold text-rose-700 hover:bg-rose-100 transition cursor-pointer"
+                              title="Cancelar"
+                            >
+                              <XCircle size={13} />
+                            </button>
                           </>
                         )}
                       </div>
@@ -663,7 +807,7 @@ export default function PetshopDashboardPage() {
                             {['bathing', 'grooming', 'finishing', 'checked_in'].includes(item.status) && (
                               <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
                             )}
-                            {statusInfo.label}
+                            {item.status === 'ready' && item.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(item.transport.mode) ? 'Pronto p/ levar' : statusInfo.label}
                           </span>
                         </td>
 
@@ -886,7 +1030,7 @@ export default function PetshopDashboardPage() {
             <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
                 <CheckCircle2 size={15} className="text-emerald-600" />
-                <h3 className="text-xs font-bold text-zinc-900">Prontos para retirada</h3>
+                <h3 className="text-xs font-bold text-zinc-900">Pets prontos</h3>
               </div>
               <span className="grid h-5 w-5 place-items-center rounded-full bg-emerald-100 text-[10px] font-bold text-emerald-800">
                 {ready.length}

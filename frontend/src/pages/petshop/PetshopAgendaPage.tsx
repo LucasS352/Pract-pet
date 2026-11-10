@@ -4,7 +4,7 @@ import { CancelAppointmentModal } from './CancelAppointmentModal';
 import { RescheduleAppointmentModal } from './RescheduleAppointmentModal';
 import { buildWhatsAppMessage } from './appointment-media';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle,
@@ -22,6 +22,8 @@ import {
   ChevronRight,
   Clock,
   Clock3,
+  Coins,
+  MessageSquare,
   CreditCard,
   Filter,
   History,
@@ -44,7 +46,7 @@ import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
 
 
-import type { Appointment, CustomerPetPackage, Pet, PetService } from './types';
+import type { Appointment, CustomerPetPackage, Pet, PetService, Tutor } from './types';
 import { money, resolveAppointmentStages, resolveAppointmentSteps, getStageLabel } from './types';
 import {
   EmptyState,
@@ -225,9 +227,16 @@ export default function PetshopAgendaPage() {
 
   const [items, setItems] = useState<Appointment[]>([]);
   const [pets, setPets] = useState<Pet[]>([]);
+  const [selectedTutor, setSelectedTutor] = useState<Pick<Tutor, 'id' | 'name' | 'phone'> | null>(null);
+  const [tutorQuery, setTutorQuery] = useState('');
+  const [tutorResults, setTutorResults] = useState<Array<Pick<Tutor, 'id' | 'name' | 'phone'>>>([]);
+  const [searchingTutors, setSearchingTutors] = useState(false);
+  const petsRequest = useRef(0);
+  const transportEdited = useRef(false);
   const [services, setServices] = useState<PetService[]>([]);
   const [operators, setOperators] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const appointmentsRequest = useRef(0);
 
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
@@ -242,6 +251,19 @@ export default function PetshopAgendaPage() {
   // Modais e ações
   const [openReception, setOpenReception] = useState(false);
   const [openNew, setOpenNew] = useState(searchParams.get('new') === '1');
+
+  // Auto-carrega todos os pets para o seletor do modal de novo agendamento
+  useEffect(() => {
+    if (openNew && pets.length === 0) {
+      api.get<Pet[]>('/petshop/pets')
+        .then(res => {
+          if (Array.isArray(res.data) && res.data.length > 0) {
+            setPets(res.data);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [openNew]);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [updatingId, setUpdatingId] = useState('');
   const [notifyingId, setNotifyingId] = useState('');
@@ -352,7 +374,7 @@ export default function PetshopAgendaPage() {
         }
         setPackageSelections(selections);
         const pkgWithTransport = pkgs.find(p => p.transport?.enabled);
-        if (pkgWithTransport?.transport) {
+        if (pkgWithTransport?.transport && !transportEdited.current) {
           const t = pkgWithTransport.transport;
           const parsed = parseAddressParts(t.address);
           setForm(prev => ({
@@ -380,20 +402,51 @@ export default function PetshopAgendaPage() {
   // Carregar dados de apoio
   useEffect(() => {
     Promise.all([
-      api.get('/petshop/pets'),
       api.get('/petshop/services'),
       api.get('/operators'),
     ])
-      .then(([petsRes, svcRes, opRes]) => {
-        setPets(Array.isArray(petsRes.data) ? petsRes.data : []);
+      .then(([svcRes, opRes]) => {
         setServices(Array.isArray(svcRes.data) ? svcRes.data : []);
         setOperators(Array.isArray(opRes.data) ? opRes.data : []);
       })
       .catch(() => toast.error('Erro ao carregar dados auxiliares.'));
   }, []);
 
+  useEffect(() => {
+    if (!openNew || selectedTutor || tutorQuery.trim().length < 2) {
+      setTutorResults([]);
+      setSearchingTutors(false);
+      return;
+    }
+    const controller = new AbortController();
+    setSearchingTutors(true);
+    const timer = window.setTimeout(() => {
+      api.get('/petshop/tutors/booking-search', { params: { search: tutorQuery.trim() }, signal: controller.signal })
+        .then(({ data }) => setTutorResults(Array.isArray(data) ? data : []))
+        .catch(() => { if (!controller.signal.aborted) toast.error('Não foi possível buscar tutores.'); })
+        .finally(() => { if (!controller.signal.aborted) setSearchingTutors(false); });
+    }, 250);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [openNew, selectedTutor, tutorQuery]);
+
+  const chooseTutor = async (tutor: Pick<Tutor, 'id' | 'name' | 'phone'>) => {
+    const request = ++petsRequest.current;
+    transportEdited.current = false;
+    setSelectedTutor(tutor);
+    setTutorResults([]);
+    setPets([]);
+    setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: '40', transportCoveredByPackage: false, transportNotes: '' }));
+    try {
+      const { data } = await api.get<Pet[]>('/petshop/pets', { params: { customerId: tutor.id } });
+      if (request === petsRequest.current) setPets(Array.isArray(data) ? data : []);
+    } catch {
+      if (request === petsRequest.current) toast.error('Não foi possível carregar os pets deste tutor.');
+    }
+  };
+
   // Carregar atendimentos do período
   const loadAppointments = (showLoading = true) => {
+    const request = ++appointmentsRequest.current;
     if (showLoading) setLoading(true);
 
     let from: Date;
@@ -417,10 +470,10 @@ export default function PetshopAgendaPage() {
         params: { from: from.toISOString(), to: to.toISOString() },
       })
       .then(response => {
-        setItems(Array.isArray(response.data) ? response.data : []);
+        if (request === appointmentsRequest.current) setItems(Array.isArray(response.data) ? response.data : []);
       })
-      .catch(() => toast.error('Erro ao carregar agendamentos.'))
-      .finally(() => setLoading(false));
+      .catch(() => { if (request === appointmentsRequest.current) toast.error('Erro ao carregar agendamentos.'); })
+      .finally(() => { if (request === appointmentsRequest.current) setLoading(false); });
   };
 
   useEffect(() => {
@@ -435,7 +488,24 @@ export default function PetshopAgendaPage() {
 
   useEffect(() => {
     if (searchParams.get('new') === '1') {
+      transportEdited.current = false;
       const pid = searchParams.get('petId') || '';
+      if (pid) {
+        const request = ++petsRequest.current;
+        api.get<Pet>(`/petshop/pets/${pid}`).then(({ data: pet }) => {
+          if (request !== petsRequest.current) return;
+          setPets([pet]);
+          setSelectedTutor({ id: pet.customer.id, name: pet.customer.name, phone: pet.customer.phone });
+          const address = parseAddressParts(pet.customer.address);
+          setForm(current => current.petId === pid ? {
+            ...current,
+            customerStreet: address.street,
+            customerNeighborhood: address.neighborhood,
+            customerReference: pet.customer.reference || '',
+            saveAddressToCustomer: !pet.customer.address?.trim(),
+          } : current);
+        }).catch(() => { if (request === petsRequest.current) toast.error('Não foi possível carregar o pet do agendamento.'); });
+      }
       const petObj = pets.find(p => p.id === pid);
       const parsedAddr = parseAddressParts(petObj?.customer?.address);
       const hasAddr = Boolean(petObj?.customer?.address && petObj.customer.address.trim().length > 0);
@@ -591,6 +661,11 @@ export default function PetshopAgendaPage() {
 
   // Abertura do modal de criação pré-preenchendo data e horário
   const handleOpenNewForDay = (day: Date, timeStrPrefill = '09:00') => {
+    ++petsRequest.current;
+    transportEdited.current = false;
+    setSelectedTutor(null);
+    setTutorQuery('');
+    setPets([]);
     const dStr = formatISOYMD(day);
     setForm({
       petId: '',
@@ -672,6 +747,7 @@ export default function PetshopAgendaPage() {
       }
       toast.success('Agendamento criado com sucesso!');
       setOpenNew(false);
+      transportEdited.current = false;
       setForm({
         petId: '',
         startsAt: '',
@@ -855,7 +931,7 @@ export default function PetshopAgendaPage() {
           duration: 5000,
         });
       } else {
-        toast.success(`Etapa de ${item.pet.name} atualizada para "${statusLabelMap[newStatus] || newStatus}".`);
+        toast.success(`Etapa de ${item.pet.name} atualizada para "${newStatus === 'ready' && hasTaxiDogReturn(item) ? 'Pronto p/ levar' : statusLabelMap[newStatus] || newStatus}".`);
       }
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Erro ao atualizar etapa.');
@@ -933,12 +1009,12 @@ export default function PetshopAgendaPage() {
   };
 
   // Badge visual de status dos cards
-  const renderStatusBadge = (status: string) => {
+  const renderStatusBadge = (status: string, appointment?: Appointment) => {
     switch (status) {
       case 'ready':
         return (
           <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 shadow-2xs">
-            <Sparkles size={10} /> Pronto p/ buscar
+            <Sparkles size={10} /> {appointment && hasTaxiDogReturn(appointment) ? 'Pronto p/ levar' : 'Pronto p/ buscar'}
           </span>
         );
       case 'checked_in':
@@ -1202,7 +1278,7 @@ export default function PetshopAgendaPage() {
               <option value="all">Status</option>
               <option value="scheduled">Agendado</option>
               <option value="in_progress">Em atendimento</option>
-              <option value="ready">Pronto p/ buscar</option>
+              <option value="ready">Pronto</option>
               <option value="requested">Pendente</option>
               <option value="delivered">Concluído</option>
               <option value="cancelled">Cancelado</option>
@@ -1410,7 +1486,7 @@ export default function PetshopAgendaPage() {
               <option value="all">Status</option>
               <option value="scheduled">Agendado</option>
               <option value="in_progress">Em atendimento</option>
-              <option value="ready">Pronto p/ buscar</option>
+              <option value="ready">Pronto</option>
               <option value="requested">Pendente</option>
               <option value="delivered">Concluído</option>
               <option value="cancelled">Cancelado</option>
@@ -1498,7 +1574,7 @@ export default function PetshopAgendaPage() {
           </div>
           <div className="min-w-0">
             <strong className="text-xl sm:text-2xl font-black text-zinc-900 tabular-nums">{metrics.ready}</strong>
-            <p className="text-[11px] sm:text-xs text-zinc-500 font-medium truncate">Prontos para retirada</p>
+            <p className="text-[11px] sm:text-xs text-zinc-500 font-medium truncate">Pets prontos</p>
           </div>
         </div>
       </section>
@@ -1598,7 +1674,7 @@ export default function PetshopAgendaPage() {
                     </div>
 
                     {/* Lista de Atendimentos do Dia */}
-                    <div className="p-2.5 flex-1 space-y-2 min-h-[260px] xl:min-h-[820px] max-h-[1200px] overflow-y-auto overscroll-contain pr-1.5 focus:outline-none custom-scrollbar">
+                    <div className="p-2.5 flex-1 space-y-2 pr-1.5 xl:min-h-[820px] xl:max-h-[1200px] xl:overflow-y-auto xl:overscroll-contain focus:outline-none custom-scrollbar">
                       {loading ? (
                         <div className="space-y-2 py-4">
                           <div className="h-20 bg-zinc-200/60 rounded-xl animate-pulse" />
@@ -1680,7 +1756,7 @@ export default function PetshopAgendaPage() {
                                 {/* Rodapé: Badge de Status + Pacote + Transporte + Ações Rápidas */}
                                 <div className="flex items-center justify-between pt-1 border-t border-zinc-100 gap-1">
                                   <div className="flex items-center gap-1 flex-wrap">
-                                    {renderStatusBadge(item.status)}
+                                    {renderStatusBadge(item.status, item)}
                                     {item.services?.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && (
                                       <span
                                         title="Serviço coberto por pacote de cliente"
@@ -1825,7 +1901,7 @@ export default function PetshopAgendaPage() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-zinc-800 truncate">
-                      {metrics.ready} pets prontos para buscar
+                      {metrics.ready} pets prontos
                     </p>
                     <p className="text-[11px] text-zinc-500">{items.filter(i => i.status === 'ready').map(i => i.pet.name).join(', ') || 'Nenhum pet aguardando retirada'}</p>
                   </div>
@@ -1934,7 +2010,7 @@ export default function PetshopAgendaPage() {
                             </span>
                           )}
                           <span className="text-xs text-zinc-500">Tutor: {item.customer?.name}</span>
-                          {renderStatusBadge(item.status)}
+                          {renderStatusBadge(item.status, item)}
                         </div>
 
                         <p className="mt-1 text-xs text-zinc-600 truncate">
@@ -2049,7 +2125,7 @@ export default function PetshopAgendaPage() {
                       >
                         {statuses.map(([val, label]) => (
                           <option key={val} value={val}>
-                            {label}
+                            {val === 'ready' && hasTaxiDogReturn(item) ? 'Pronto p/ levar' : label}
                           </option>
                         ))}
                       </select>
@@ -2113,7 +2189,7 @@ export default function PetshopAgendaPage() {
                           <span className="text-[11px] text-zinc-500 truncate max-w-[120px]">
                             {item.services[0]?.nameSnapshot}
                           </span>
-                          {renderStatusBadge(item.status)}
+                          {renderStatusBadge(item.status, item)}
                         </button>
                       ))}
                     </div>
@@ -2168,7 +2244,7 @@ export default function PetshopAgendaPage() {
                           <p className="text-[11px] text-zinc-500 truncate mb-1">
                             {item.services.map(s => s.nameSnapshot).join(', ')}
                           </p>
-                          {renderStatusBadge(item.status)}
+                          {renderStatusBadge(item.status, item)}
                         </div>
                       ))
                     )}
@@ -2193,7 +2269,7 @@ export default function PetshopAgendaPage() {
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <h3 className="text-base font-bold text-zinc-900">{selectedAppointment.pet?.name}</h3>
-                  {renderStatusBadge(selectedAppointment.status)}
+                  {renderStatusBadge(selectedAppointment.status, selectedAppointment)}
                 </div>
                 <p className="text-xs text-zinc-600 mt-0.5">
                   Tutor(a): <strong>{selectedAppointment.customer?.name}</strong> ·{' '}
@@ -2932,7 +3008,7 @@ export default function PetshopAgendaPage() {
               >
                 {statuses.map(([val, label]) => (
                   <option key={val} value={val}>
-                    {label}
+                    {val === 'ready' && hasTaxiDogReturn(stageModalItem) ? 'Pronto p/ levar' : label}
                   </option>
                 ))}
               </select>
@@ -2984,29 +3060,54 @@ export default function PetshopAgendaPage() {
       {/* 10. MODAL DE NOVO AGENDAMENTO */}
       {openReception && <ReceptionRegistrationModal includePet onClose={() => setOpenReception(false)} onSaved={({ pet }) => {
         if (pet) {
+          ++petsRequest.current;
+          transportEdited.current = false;
           setPets(current => [...current.filter(item => item.id !== pet.id), pet]);
+          setSelectedTutor({ id: pet.customer.id, name: pet.customer.name, phone: pet.customer.phone });
           setAvailablePackages([]);
           setPackageSelections({});
-          setForm(current => ({ ...current, petId: pet.id, serviceIds: [] }));
+          setForm(current => ({ ...current, petId: pet.id, serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: '40', transportCoveredByPackage: false, transportNotes: '' }));
         }
         setOpenReception(false);
       }} />}
-      {openNew && !openReception && (
-        <Modal title="Novo agendamento" onClose={() => setOpenNew(false)}>
-          <form onSubmit={submitNew} className="grid gap-4 sm:grid-cols-2">
-            <div className="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-100 bg-teal-50/50 px-3 py-2">
-              <span className="text-xs text-slate-600">Cliente ou pet novo?</span>
-              <button type="button" className="min-h-11 text-sm font-semibold text-teal-700 underline underline-offset-4" onClick={() => setOpenReception(true)}>+ Cadastrar tutor e pet</button>
+      {openNew && (
+        <Modal title="Novo agendamento" onClose={() => setOpenNew(false)} suspended={openReception}>
+          <div className="mx-auto -mt-2 mb-3 h-1 w-12 rounded-full bg-zinc-300 sm:hidden" />
+
+          <form onSubmit={submitNew} className="space-y-4">
+            {/* 1. TOPO: CLIENTE OU PET NOVO? */}
+            <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-100 bg-emerald-50/70 p-3">
+              <div className="flex items-center gap-2 text-xs font-medium text-zinc-700">
+                <UserRound size={15} className="text-[#0d6e5a]" />
+                <span>Cliente ou pet novo?</span>
+              </div>
+              <button
+                type="button"
+                className="text-xs font-bold text-[#0d6e5a] hover:underline cursor-pointer"
+                onClick={() => setOpenReception(true)}
+              >
+                + Cadastrar tutor e pet
+              </button>
             </div>
-            <label className="sm:col-span-2">
-              <span className={labelClass}>Pet *</span>
+
+            {/* 2. SELETOR DE PET */}
+            <div>
+              <label className="block text-xs font-bold text-zinc-700 mb-1 flex items-center gap-1.5">
+                <PawPrint size={13} className="text-teal-700" />
+                <span>Pet *</span>
+              </label>
+
               <select
                 required
                 className={inputClass}
                 value={form.petId}
                 onChange={e => {
                   const pid = e.target.value;
+                  transportEdited.current = false;
                   const petObj = pets.find(p => p.id === pid);
+                  if (petObj?.customer) {
+                    setSelectedTutor(petObj.customer);
+                  }
                   const parsedAddr = parseAddressParts(petObj?.customer?.address);
                   const hasAddr = Boolean(petObj?.customer?.address && petObj.customer.address.trim().length > 0);
                   setAvailablePackages([]);
@@ -3015,6 +3116,10 @@ export default function PetshopAgendaPage() {
                     ...form,
                     petId: pid,
                     serviceIds: [],
+                    transportEnabled: false,
+                    transportMode: 'both',
+                    transportFee: '40',
+                    transportCoveredByPackage: false,
                     customerStreet: parsedAddr.street,
                     customerNeighborhood: parsedAddr.neighborhood,
                     customerReference: petObj?.customer?.reference || '',
@@ -3026,43 +3131,44 @@ export default function PetshopAgendaPage() {
                 <option value="">Selecione o pet</option>
                 {pets.map(pet => (
                   <option key={pet.id} value={pet.id}>
-                    {pet.name} · {pet.customer?.name}
+                    {pet.name} · {pet.customer?.name || 'Tutor não informado'}
                   </option>
                 ))}
               </select>
-            </label>
+            </div>
 
+            {/* 3. CARD DE DETALHES DO PET SELECIONADO (Fiel ao Mockup Image 3) */}
             {form.petId && (() => {
               const selectedPetObj = pets.find(p => p.id === form.petId);
               if (!selectedPetObj) return null;
               return (
-                <div className="sm:col-span-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl border border-teal-200 bg-teal-50/70 p-3 text-xs">
-                  <div className="flex items-center gap-2.5">
-                    <PetAvatar pet={selectedPetObj} size="sm" />
-                    <div>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-3 shadow-2xs">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <PetAvatar pet={selectedPetObj} size="md" />
+                    <div className="min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <strong className="text-zinc-900 font-bold">{selectedPetObj.name}</strong>
+                        <strong className="text-zinc-900 font-bold text-sm truncate">{selectedPetObj.name}</strong>
                         {selectedPetObj.sex === 'male' && (
-                          <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300" title="Macho (gravata)">
+                          <span className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold bg-sky-50 text-sky-800 border border-sky-200">
                             ♂ Macho
                           </span>
                         )}
                         {selectedPetObj.sex === 'female' && (
-                          <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.2 text-[10px] font-bold bg-pink-100 text-pink-800 border border-pink-300" title="Fêmea (laço)">
+                          <span className="inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-bold bg-pink-50 text-pink-800 border border-pink-200">
                             ♀ Fêmea
                           </span>
                         )}
                       </div>
-                      <span className="text-[11px] text-zinc-500">
-                        {selectedPetObj.breed || 'SRD'} · Tutor: {selectedPetObj.customer?.name}
-                      </span>
+                      <p className="text-[11px] text-zinc-500 truncate mt-0.5">
+                        {selectedPetObj.breed || 'SRD'} · Tutor: {selectedPetObj.customer?.name || 'Tutor não informado'}
+                      </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-zinc-700">Porte para cobrança:</span>
+                  <div className="text-left sm:text-right shrink-0">
+                    <span className="block text-[11px] font-medium text-zinc-500 mb-1">Porte para cobrança:</span>
                     {selectedPetObj.size ? (
-                      <span className="inline-flex items-center gap-1 rounded-lg bg-teal-700 text-white font-bold text-xs px-2.5 py-1">
+                      <span className="inline-flex items-center gap-1 rounded-xl bg-[#0d6e5a] text-white font-bold text-xs px-3 py-1 shadow-2xs">
                         <PawPrint size={12} />
                         {sizeLabel(selectedPetObj.size)}
                       </span>
@@ -3099,52 +3205,100 @@ export default function PetshopAgendaPage() {
               );
             })()}
 
-            <label>
-              <span className={labelClass}>Data e hora *</span>
-              <input
-                required
-                type="datetime-local"
-                className={inputClass}
-                value={form.startsAt}
-                onChange={e => setForm({ ...form, startsAt: e.target.value })}
-              />
-            </label>
+            {/* 4. DATA/HORA & PROFISSIONAL (2 colunas) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label>
+                <span className="block text-xs font-bold text-zinc-700 mb-1 flex items-center gap-1.5">
+                  <CalendarDays size={13} className="text-teal-700" />
+                  <span>Data e hora *</span>
+                </span>
+                <input
+                  required
+                  type="datetime-local"
+                  className={inputClass}
+                  value={form.startsAt}
+                  onChange={e => setForm({ ...form, startsAt: e.target.value })}
+                />
+              </label>
 
-            <label>
-              <span className={labelClass}>Profissional</span>
-              <select
-                className={inputClass}
-                value={form.professionalId}
-                onChange={e => setForm({ ...form, professionalId: e.target.value })}
-              >
-                <option value="">Definir depois</option>
-                {operators.map(op => (
-                  <option key={op.id} value={op.id}>
-                    {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                  </option>
-                ))}
-              </select>
-            </label>
+              <label>
+                <span className="block text-xs font-bold text-zinc-700 mb-1 flex items-center gap-1.5">
+                  <UserRound size={13} className="text-teal-700" />
+                  <span>Profissional</span>
+                </span>
+                <select
+                  className={inputClass}
+                  value={form.professionalId}
+                  onChange={e => setForm({ ...form, professionalId: e.target.value })}
+                >
+                  <option value="">Definir depois</option>
+                  {operators.map(op => (
+                    <option key={op.id} value={op.id}>
+                      {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
 
-            {form.petId && <section className="sm:col-span-2 rounded-xl border border-teal-200 bg-teal-50/50 p-3 sm:p-4" aria-label="Pacotes pagos disponíveis">
-              <div className="flex items-center gap-2 text-sm font-semibold text-teal-900"><PackageCheck size={17} aria-hidden="true" /> Pacotes pagos deste pet</div>
-              {loadingPackages ? <p className="mt-2 flex items-center gap-2 text-sm text-teal-800" role="status"><Loader2 size={15} className="animate-spin" /> Consultando saldo e validade…</p>
-                : packagesError ? <div className="mt-2 text-sm text-rose-700" role="alert">Não foi possível consultar os pacotes. <button type="button" className="min-h-11 font-semibold underline" onClick={() => retryPackages(n => n + 1)}>Tentar novamente</button></div>
-                : availablePackages.length ? <>
-                  <p className="mt-1 text-xs leading-5 text-teal-800">Confira os saldos abaixo e marque os serviços desejados. Nenhum serviço é selecionado automaticamente.</p>
-                  <div className="mt-3 grid gap-2">
-                    {availablePackages.map(pkg => <article key={pkg.id} className="min-w-0 rounded-lg border border-teal-200 bg-white p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="break-words text-sm font-semibold text-slate-900">{pkg.planNameSnapshot}</h3><span className="rounded-full bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800">Pago</span></div>
-                      <p className="mt-1 text-xs text-slate-500">Válido até {new Date(pkg.expiresAt).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}{pkg.isShared ? ' · Compartilhado entre pets do tutor' : ''}</p>
-                      <ul className="mt-2 space-y-1.5">{pkg.items.filter(item => Number(item.availableQuantity) > 0).map(item => <li key={item.id} className="flex flex-wrap items-center justify-between gap-1 text-xs"><span className="min-w-0 break-words font-medium text-slate-700">{item.serviceNameSnapshot || item.service?.name || 'Serviço do pacote'}</span><span className="font-semibold tabular-nums text-teal-800">{item.availableQuantity} de {item.totalQuantity} sessões disponíveis</span></li>)}</ul>
-                    </article>)}
+            {/* 5. PACOTES PAGOS DESTE PET */}
+            {form.petId && (
+              <section className="rounded-xl border border-emerald-200/80 bg-emerald-50/40 p-3" aria-label="Pacotes pagos disponíveis">
+                <div className="flex items-center gap-2 text-xs font-bold text-teal-950">
+                  <PackageCheck size={16} className="text-teal-700" aria-hidden="true" />
+                  <span>Pacotes pagos deste pet</span>
+                </div>
+                {loadingPackages ? (
+                  <p className="mt-1 flex items-center gap-2 text-xs text-teal-800" role="status">
+                    <Loader2 size={13} className="animate-spin" /> Consultando saldo e validade…
+                  </p>
+                ) : packagesError ? (
+                  <div className="mt-1 text-xs text-rose-700" role="alert">
+                    Não foi possível consultar os pacotes.{' '}
+                    <button type="button" className="font-semibold underline" onClick={() => retryPackages(n => n + 1)}>
+                      Tentar novamente
+                    </button>
                   </div>
-                </> : <p className="mt-2 text-sm text-slate-600">Nenhum pacote pago com saldo disponível para este pet na data escolhida.</p>}
-            </section>}
+                ) : availablePackages.length ? (
+                  <div className="mt-2.5 grid gap-2">
+                    {availablePackages.map(pkg => (
+                      <article key={pkg.id} className="min-w-0 rounded-lg border border-teal-200 bg-white p-2.5 shadow-2xs">
+                        <div className="flex flex-wrap items-center justify-between gap-1.5">
+                          <h3 className="text-xs font-bold text-slate-900">{pkg.planNameSnapshot}</h3>
+                          <span className="rounded-full bg-emerald-50 border border-emerald-200 px-2 py-0.2 text-[10px] font-bold text-emerald-800">
+                            Pago
+                          </span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 mt-0.5">
+                          Válido até {new Date(pkg.expiresAt).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })}
+                          {pkg.isShared ? ' · Compartilhado entre pets do tutor' : ''}
+                        </p>
+                        <ul className="mt-1.5 space-y-1">
+                          {pkg.items.filter(item => Number(item.availableQuantity) > 0).map(item => (
+                            <li key={item.id} className="flex items-center justify-between text-[11px]">
+                              <span className="text-slate-700">{item.serviceNameSnapshot || item.service?.name || 'Serviço do pacote'}</span>
+                              <span className="font-bold tabular-nums text-teal-800">{item.availableQuantity} de {item.totalQuantity} sessões disponíveis</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-1 text-xs text-slate-500">
+                    Nenhum pacote pago com saldo disponível para esta data escolhida.
+                  </p>
+                )}
+              </section>
+            )}
 
-            <fieldset className="sm:col-span-2">
-              <legend className={labelClass}>Serviços *</legend>
-              <div className="grid gap-2 sm:grid-cols-2 max-h-48 overflow-y-auto pr-1">
+            {/* 6. LISTA DE SERVIÇOS (Fiel ao Mockup Image 3) */}
+            <fieldset className="space-y-2">
+              <legend className="block text-xs font-bold text-zinc-700 mb-1 flex items-center gap-1.5">
+                <Scissors size={13} className="text-teal-700" />
+                <span>Serviços *</span>
+              </legend>
+              <div className="grid gap-2 sm:grid-cols-2 max-h-52 overflow-y-auto pr-1">
                 {[...services].sort((a, b) => Number(coveredServiceIds.has(b.id)) - Number(coveredServiceIds.has(a.id))).map(svc => {
                   const isSelected = form.serviceIds.includes(svc.id);
                   const selectedPetObj = pets.find(p => p.id === form.petId);
@@ -3161,17 +3315,16 @@ export default function PetshopAgendaPage() {
                       className={`rounded-xl border p-2.5 transition ${
                         isSelected
                           ? isCombo
-                            ? 'border-purple-600 bg-purple-50/70'
-                            : 'border-teal-600 bg-teal-50/70'
-                          : 'border-zinc-200 hover:bg-zinc-50'
+                            ? 'border-purple-500 bg-purple-50/70 ring-1 ring-purple-500'
+                            : 'border-teal-500 bg-teal-50/70 ring-1 ring-teal-500'
+                          : 'border-zinc-200 bg-white hover:border-zinc-300'
                       }`}
                     >
-                      <label className="flex cursor-pointer items-start gap-3">
+                      <label className="flex items-center gap-2.5 cursor-pointer">
                         <input
                           type="checkbox"
-                          className="mt-1"
                           checked={isSelected}
-                          disabled={!form.petId || loadingPackages || packagesError}
+                          className="h-4 w-4 rounded accent-[#0d6e5a]"
                           onChange={e => {
                             const checked = e.target.checked;
                             setForm({
@@ -3194,30 +3347,24 @@ export default function PetshopAgendaPage() {
                             }
                           }}
                         />
-                        <span className="flex-1 text-xs font-semibold text-zinc-900">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-<span>{svc.name}</span>
-                            {eligiblePackages.length > 0 && <span className="rounded-md border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">Pacote pago disponível</span>}
-                            {isCombo && (
-                              <span className="rounded bg-purple-100 text-purple-800 text-[10px] font-bold px-1.5 py-0.2">
-                                COMBO
-                              </span>
-                            )}
-                          </div>
-                          <small className="mt-0.5 block font-normal text-zinc-500">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-bold text-zinc-900 block truncate">
+                            {svc.name}
+                          </span>
+                          <span className="text-[11px] text-zinc-500">
                             {eff.duration} min ·{' '}
                             {isSelected && selectedPkgId ? (
                               <span className="font-bold text-teal-700">Coberto por pacote (R$ 0,00)</span>
                             ) : (
                               <>
-                                <span className="font-semibold text-zinc-800">{money(eff.price)}</span>
+                                <strong className="font-bold text-zinc-800">{money(eff.price)}</strong>
                                 {eff.variantLabel && (
-                                  <span className="ml-1 text-[10px] text-teal-700 font-medium">({eff.variantLabel})</span>
+                                  <span className="ml-1 text-[10px] text-teal-700 font-semibold">({eff.variantLabel})</span>
                                 )}
                               </>
                             )}
-                          </small>
-                        </span>
+                          </span>
+                        </div>
                       </label>
 
                       {isSelected && eligiblePackages.length > 0 && (
@@ -3226,7 +3373,8 @@ export default function PetshopAgendaPage() {
                             Cobertura de Pacote Disponível
                           </label>
                           <select
-                            aria-label={`Cobertura de ${svc.name}`} className="min-h-11 w-full min-w-0 rounded-lg border border-teal-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-800 outline-none"
+                            aria-label={`Cobertura de ${svc.name}`}
+                            className="min-h-10 w-full min-w-0 rounded-lg border border-teal-300 bg-white px-2 py-1 text-xs font-semibold text-zinc-800 outline-none"
                             value={selectedPkgId}
                             onChange={e =>
                               setPackageSelections(prev => ({
@@ -3253,26 +3401,27 @@ export default function PetshopAgendaPage() {
               </div>
             </fieldset>
 
-            {/* Transporte do Animal (Táxi Dog) & Endereço do Tutor no Avulso */}
+            {/* 7. TRANSPORTE DO ANIMAL (TÁXI DOG - Fiel ao Mockup Image 3) */}
             {form.petId && (
-              <div className="sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50/40 p-3.5 space-y-3">
+              <div className="rounded-2xl border border-amber-200 bg-amber-50/30 p-3.5 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="flex items-center gap-2 cursor-pointer text-xs font-bold text-zinc-800">
                     <input
                       type="checkbox"
                       checked={form.transportEnabled}
-                      onChange={e =>
+                      onChange={e => {
+                        transportEdited.current = true;
                         setForm(prev => ({
                           ...prev,
                           transportEnabled: e.target.checked,
-                        }))
-                      }
-                      className="h-4 w-4 rounded border-zinc-300 text-teal-600 focus:ring-teal-500"
+                        }));
+                      }}
+                      className="h-4 w-4 rounded accent-[#0d6e5a]"
                     />
                     <span>🚐 Incluir Transporte do Animal (Táxi Dog) neste agendamento</span>
                   </label>
                   {form.transportEnabled && (
-                    <span className="rounded-full bg-amber-100 border border-amber-300 px-2.5 py-0.5 text-[11px] font-bold text-amber-900">
+                    <span className="rounded-full bg-amber-100 border border-amber-200 px-2.5 py-0.5 text-xs font-bold text-amber-900">
                       {form.transportCoveredByPackage ? 'Incluso no Pacote' : `+ ${money(Number(form.transportFee || 0))}`}
                     </span>
                   )}
@@ -3284,13 +3433,12 @@ export default function PetshopAgendaPage() {
 
                   return (
                     <div className="space-y-3 pt-2.5 border-t border-amber-200/70">
-                      {/* Linha 1: Modalidade + Valor */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <label>
-                          <span className={labelClass}>Modalidade do Transporte *</span>
+                          <span className="block text-xs font-medium text-zinc-600 mb-1">Modalidade do Transporte *</span>
                           <select
                             value={form.transportMode}
-                            onChange={e => setForm(prev => ({ ...prev, transportMode: e.target.value as any }))}
+                            onChange={e => { transportEdited.current = true; setForm(prev => ({ ...prev, transportMode: e.target.value as any })); }}
                             className={inputClass}
                           >
                             <option value="both">Buscar e Levar (Ida e Volta)</option>
@@ -3300,38 +3448,37 @@ export default function PetshopAgendaPage() {
                         </label>
 
                         <label>
-                          <span className={labelClass}>Valor do Transporte (R$) — Fixo ou por Distância</span>
+                          <span className="block text-xs font-medium text-zinc-600 mb-1">Valor do Transporte (R$) – Fixo ou por Distância</span>
                           <input
                             type="number"
                             min="0"
                             step="0.01"
                             disabled={form.transportCoveredByPackage}
                             value={form.transportCoveredByPackage ? '0' : form.transportFee}
-                            onChange={e => setForm(prev => ({ ...prev, transportFee: e.target.value }))}
+                            onChange={e => { transportEdited.current = true; setForm(prev => ({ ...prev, transportFee: e.target.value })); }}
                             className={inputClass}
                           />
                         </label>
                       </div>
 
-                      {/* Linha 2: Rua e Número + Bairro */}
                       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                         <label className="sm:col-span-2">
-                          <span className={labelClass}>Endereço (Rua, Av. e Número) *</span>
+                          <span className="block text-xs font-medium text-zinc-600 mb-1">Endereço (Rua, Av. e Número) *</span>
                           <input
                             type="text"
                             required={form.transportEnabled}
-                            placeholder="Ex: R. Hipólito Lopes, 103"
+                            placeholder="Ex: Heitor de Andrada campos, 274"
                             value={form.customerStreet}
                             onChange={e => setForm(prev => ({ ...prev, customerStreet: e.target.value }))}
                             className={inputClass}
                           />
                         </label>
                         <label>
-                          <span className={labelClass}>Bairro *</span>
+                          <span className="block text-xs font-medium text-zinc-600 mb-1">Bairro *</span>
                           <input
                             type="text"
                             required={form.transportEnabled}
-                            placeholder="Ex: Vila Leozina"
+                            placeholder="Ex: Jd prudencia"
                             value={form.customerNeighborhood}
                             onChange={e => setForm(prev => ({ ...prev, customerNeighborhood: e.target.value }))}
                             className={inputClass}
@@ -3339,10 +3486,9 @@ export default function PetshopAgendaPage() {
                         </label>
                       </div>
 
-                      {/* Linha 3: Ponto de Referência + Observação do Transporte */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <label>
-                          <span className={labelClass}>Ponto de Referência / Compl.</span>
+                          <span className="block text-xs font-medium text-zinc-600 mb-1">Ponto de Referência / Compl.</span>
                           <input
                             type="text"
                             placeholder="Ex: Próximo ao Campo Orlandão, Ap 12"
@@ -3352,7 +3498,7 @@ export default function PetshopAgendaPage() {
                           />
                         </label>
                         <label>
-                          <span className={labelClass}>Observação do Transporte</span>
+                          <span className="block text-xs font-medium text-zinc-600 mb-1">Observação do Transporte</span>
                           <input
                             type="text"
                             placeholder="Ex: Interfone estragado, chamar no portão..."
@@ -3363,7 +3509,6 @@ export default function PetshopAgendaPage() {
                         </label>
                       </div>
 
-                      {/* Opção condicional: apenas se o cliente NÃO possuir endereço cadastrado */}
                       {!customerHasSavedAddress && (
                         <div className="pt-2 border-t border-amber-200/60">
                           <label className="flex items-start gap-2.5 p-2.5 rounded-lg bg-amber-50/90 border border-amber-300 cursor-pointer text-xs text-amber-950 font-medium hover:bg-amber-100/70 transition">
@@ -3390,23 +3535,31 @@ export default function PetshopAgendaPage() {
               </div>
             )}
 
-            {form.petId && !loadingPackages && !packagesError && (
-              <div className="sm:col-span-2 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-sm" aria-live="polite">
-                {form.serviceIds.length ? <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="font-medium text-zinc-600">Valor adicional a receber:</span>
-                  <strong className="font-bold tabular-nums text-teal-800">{money(
+            {/* 8. VALOR ADICIONAL A RECEBER (Fiel ao Mockup Image 3) */}
+            {form.petId && (
+              <div className="rounded-xl border border-emerald-200/80 bg-emerald-50/70 p-3 shadow-2xs flex items-center justify-between" aria-live="polite">
+                <div className="flex items-center gap-2">
+                  <Coins size={16} className="text-[#0d6e5a] shrink-0" />
+                  <span className="font-bold text-xs text-zinc-800">Valor adicional a receber:</span>
+                </div>
+                <strong className="text-base font-black tabular-nums text-teal-900">
+                  {money(
                     form.serviceIds.reduce((sum, serviceId) => {
                       if (packageSelections[serviceId]) return sum;
                       const service = services.find(s => s.id === serviceId);
                       return sum + (service ? getEffectiveServicePrice(service, pets.find(p => p.id === form.petId)).price : 0);
                     }, 0) + (form.transportEnabled && !form.transportCoveredByPackage ? Math.max(0, Number(form.transportFee || 0)) : 0)
-                  )}</strong>
-                </div> : <p className="text-xs text-zinc-500">Selecione os serviços para conferir a cobertura e o valor adicional.</p>}
+                  )}
+                </strong>
               </div>
             )}
 
-            <label className="sm:col-span-2">
-              <span className={labelClass}>Observações</span>
+            {/* 9. OBSERVAÇÕES */}
+            <label className="block">
+              <span className="block text-xs font-bold text-zinc-700 mb-1 flex items-center gap-1.5">
+                <MessageSquare size={13} className="text-teal-700" />
+                <span>Observações</span>
+              </span>
               <textarea
                 className={inputClass}
                 rows={2}
@@ -3416,11 +3569,13 @@ export default function PetshopAgendaPage() {
               />
             </label>
 
+            {/* 10. BOTÃO DE CONFIRMAR AGENDAMENTO */}
             <button
               disabled={saving || loadingPackages || packagesError || !form.petId || !form.startsAt || form.serviceIds.length === 0}
-              className={`${primaryButton} sm:col-span-2`}
+              className="w-full rounded-xl bg-[#0d6e5a] hover:bg-[#0a5747] text-white font-bold py-3.5 text-sm shadow-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {saving ? 'Agendando…' : 'Confirmar agendamento'}
+              <CalendarDays size={16} />
+              <span>{saving ? 'Agendando…' : 'Confirmar agendamento'}</span>
             </button>
           </form>
         </Modal>
