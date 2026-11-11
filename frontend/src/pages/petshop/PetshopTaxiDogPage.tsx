@@ -28,6 +28,7 @@ import {
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
 import type { Appointment } from './types';
@@ -74,6 +75,7 @@ function getPetSpeciesSize(pet: any): string {
 }
 
 export default function PetshopTaxiDogPage() {
+  const navigate = useNavigate();
   const { tenant } = usePetshopContext();
 
   // Seletor de data
@@ -823,7 +825,7 @@ export default function PetshopTaxiDogPage() {
                     {isReady && (
                       <button
                         type="button"
-                        onClick={() => handleUpdateStatus(item, 'delivered')}
+                        onClick={() => navigate(`/petshop/agenda?date=${localDateKey(new Date(item.startsAt))}&appointment=${encodeURIComponent(item.id)}`)}
                         disabled={isUpdating}
                         className="w-full flex h-10 items-center justify-center gap-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-extrabold shadow-xs transition disabled:opacity-50 cursor-pointer"
                       >
@@ -832,7 +834,7 @@ export default function PetshopTaxiDogPage() {
                         ) : (
                           <CheckCircle2 size={16} />
                         )}
-                        <span>Confirmar Entrega Realizada</span>
+                        <span>Entrega realizada · Abrir cobrança</span>
                       </button>
                     )}
 

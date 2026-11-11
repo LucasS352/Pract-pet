@@ -28,4 +28,18 @@ describe('Pet Shop checkout integrity', () => {
     db.petAppointment.update.mockRejectedValue(new Error('database unavailable'));
     await expect(completePetshopCheckout(db, 'apt', 'cashier', 'tenant')).rejects.toThrow('database unavailable');
   });
+  it('records advance payment without completing the scheduled appointment', async () => {
+    const db = tx('scheduled');
+    expect(await claimPetshopCheckout(db, { petshopAppointmentId: 'apt', petshopPrepayment: true }, comanda)).toBe('apt');
+    await completePetshopCheckout(db, 'apt', 'cashier', 'tenant', true);
+    expect(db.petAppointment.update).toHaveBeenCalledWith(expect.objectContaining({ data: {
+      stageHistory: [expect.objectContaining({ kind: 'prepayment', status: 'scheduled' })],
+    } }));
+  });
+  it('blocks another charge when advance payment is still completed', async () => {
+    const db = tx('ready') as any;
+    db.petAppointment.findUnique.mockResolvedValue({ status: 'ready', stageHistory: [{ kind: 'prepayment' }] });
+    db.comanda = { findFirst: jest.fn().mockResolvedValue({ id: 'paid' }) };
+    await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, comanda)).rejects.toThrow('já pago antecipadamente');
+  });
 });

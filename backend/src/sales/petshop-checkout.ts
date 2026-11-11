@@ -49,14 +49,28 @@ export async function claimPetshopCheckout(tx: any, data: any, comanda: any) {
   if (appointment.status === 'delivered' || appointment.completedAt) {
     throw new ConflictException('Atendimento já cobrado e concluído. Cobrança em duplicidade bloqueada.');
   }
-  if (appointment.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes de cobrar o atendimento.');
+  if (Array.isArray(appointment.stageHistory) && appointment.stageHistory.some((event: any) => event?.kind === 'prepayment')) {
+    const activePayment = await tx.comanda.findFirst({ where: { notes: { contains: linkedId }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } });
+    if (activePayment) throw new ConflictException('Agendamento já pago antecipadamente. Cobrança em duplicidade bloqueada.');
+  }
+  if (data.petshopPrepayment) {
+    if (!['requested', 'scheduled'].includes(appointment.status)) throw new BadRequestException('Pagamento antecipado permitido somente antes do início do atendimento.');
+  } else if (appointment.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes de cobrar o atendimento.');
   return linkedId;
 }
 
-export async function completePetshopCheckout(tx: any, appointmentId: string | null, actorId: string | null, tenantId: string) {
+export async function completePetshopCheckout(tx: any, appointmentId: string | null, actorId: string | null, tenantId: string, prepayment = false) {
   if (!appointmentId) return;
   const appointment = await tx.petAppointment.findUnique({ where: { id: appointmentId } });
   const now = new Date();
+  if (prepayment) {
+    await tx.petAppointment.update({ where: { id: appointmentId }, data: {
+      stageHistory: [...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []), {
+        kind: 'prepayment', status: appointment.status, label: 'Pagamento antecipado no agendamento', at: now.toISOString(), userId: actorId,
+      }],
+    } });
+    return;
+  }
   await recordAddedServiceCommissions(tx, appointment, tenantId, now);
   await tx.petAppointment.update({ where: { id: appointmentId }, data: {
     status: 'delivered', completedAt: now,

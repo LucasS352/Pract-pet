@@ -1640,6 +1640,10 @@ export class PetshopService {
     if (!current) throw new NotFoundException('Agendamento não encontrado.');
 
     let startsAt = current.startsAt;
+    if ((data.addServices?.length || data.removeAppointmentServiceId || data.transport !== undefined) &&
+        await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })) {
+      throw new BadRequestException('Atendimento pago antecipadamente. Estorne o pagamento antes de alterar serviços ou transporte.');
+    }
     let endsAt = current.endsAt;
     let rescheduled = false;
 
@@ -1845,13 +1849,14 @@ export class PetshopService {
     if (req.user.role === 'operator' && !actor) throw new ForbiddenException('Identifique o colaborador com PIN.');
     const payments = Array.isArray(body.payments) ? body.payments : [{ method: body.method }];
     if (!payments.length || payments.some(p => !['dinheiro', 'pix', 'credito', 'debito'].includes(p.method))) throw new BadRequestException('Forma de pagamento inválida.');
-    const comanda = await this.prepareCheckout(id);
-    if (!comanda) throw new BadRequestException('Atendimento sem valor avulso. Utilize Concluir (Pacote).');
+    const prepay = body?.prepay === true;
+    const comanda = await this.prepareCheckout(id, prepay);
+    if (!comanda || 'prepaid' in comanda) throw new BadRequestException('Atendimento sem valor avulso ou já pago.');
     const resolvedPayments = payments.map(p => ({ method: p.method, value: body.payments ? Number(p.value) : Number(comanda.total) }));
     if (resolvedPayments.some(p => !Number.isFinite(p.value) || p.value <= 0) || !new Prisma.Decimal(comanda.total).eq(resolvedPayments.reduce((sum, p) => sum.plus(p.value), new Prisma.Decimal(0)))) throw new BadRequestException('A soma dos pagamentos deve ser igual ao total.');
     return this.sales.checkout({
-      idempotencyKey: `petshop-receipt:${id}`, source: 'petshop', comandaId: comanda.id,
-      petshopAppointmentId: id, operatorId: actor?.id, items: [], extraItems: [],
+      idempotencyKey: `petshop-receipt:${id}:${comanda.id}`, source: 'petshop', comandaId: comanda.id,
+      petshopAppointmentId: id, petshopPrepayment: prepay, operatorId: actor?.id, items: [], extraItems: [],
       payments: resolvedPayments, emitirNfce: false,
     }, true);
   }
@@ -1863,16 +1868,43 @@ export class PetshopService {
     }, orderBy: { startsAt: 'asc' } });
   }
 
-  async prepareCheckout(id: string) {
+  async prepareCheckout(id: string, prepay = false) {
     const prisma = await this.prisma();
     return prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${id} FOR UPDATE`;
       const appointment = await tx.petAppointment.findUnique({ where: { id } });
       if (!appointment) throw new NotFoundException('Atendimento não encontrado.');
       if (appointment.status === 'delivered' || appointment.completedAt) throw new ConflictException('Atendimento já cobrado e concluído.');
-      if (appointment.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes de cobrar.');
+      const paid = await tx.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } });
+      if (paid) {
+        if (prepay) throw new ConflictException('Agendamento já pago. Cobrança em duplicidade bloqueada.');
+        return { prepaid: true, total: 0 };
+      }
+      if (prepay) {
+        if (!['requested', 'scheduled'].includes(appointment.status)) throw new BadRequestException('Pagamento antecipado permitido somente antes do atendimento.');
+      } else if (appointment.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes de cobrar.');
       return this.ensureComandaForAppointment(tx, id);
     });
+  }
+
+  async appointmentPayment(id: string) {
+    const prisma = await this.prisma();
+    const appointment = await prisma.petAppointment.findUnique({ where: { id }, select: { id: true } });
+    if (!appointment) throw new NotFoundException('Atendimento não encontrado.');
+    const comanda = await prisma.comanda.findFirst({
+      where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } },
+      select: { sale: { select: { id: true, total: true, createdAt: true, nfceStatus: true } } },
+    });
+    return comanda?.sale ? { saleId: comanda.sale.id, total: comanda.sale.total, paidAt: comanda.sale.createdAt, nfceStatus: comanda.sale.nfceStatus } : null;
+  }
+
+  async reverseAppointmentPayment(id: string, reasonInput: unknown) {
+    const reason = requiredText(reasonInput, 'Motivo do estorno');
+    if (reason.length < 15) throw new BadRequestException('Informe um motivo com pelo menos 15 caracteres.');
+    const payment = await this.appointmentPayment(id);
+    if (!payment) throw new NotFoundException('Pagamento ativo não encontrado para este atendimento.');
+    if (payment.nfceStatus === 'autorizada') throw new BadRequestException('A NFC-e autorizada precisa ser cancelada na Gestão Fiscal antes do estorno da venda.');
+    return this.sales.cancel(payment.saleId, reason);
   }
 
   async updateAppointmentStatus(id: string, data: any, req?: any) {
@@ -1909,10 +1941,15 @@ export class PetshopService {
     }
     if (status === 'delivered') {
       if (current.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes da retirada.');
+      const prepaid = await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } });
       const payable = current.services.some(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus) && Number(s.priceSnapshot) > Number(s.coveredAmount || 0));
       const transport = parseAppointmentTransport(current.checkInNotes);
       const taxiPayable = transport && !transport.coveredByPackage && transport.fee > 0;
-      if (payable || taxiPayable) throw new BadRequestException('Há serviços ou Táxi Dog a cobrar. Finalize o pagamento na Agenda.');
+      if (!prepaid && (payable || taxiPayable)) throw new BadRequestException('Há serviços ou Táxi Dog a cobrar. Finalize o pagamento na Agenda.');
+    }
+    if (['cancelled', 'no_show'].includes(status) &&
+        await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })) {
+      throw new BadRequestException('Atendimento pago antecipadamente. Estorne a venda antes de cancelar ou registrar falta.');
     }
 
     const getStageLabel = (stKey: string) => {

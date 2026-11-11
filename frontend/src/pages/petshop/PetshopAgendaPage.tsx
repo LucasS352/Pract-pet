@@ -218,7 +218,7 @@ const timeStr = (value: string) => {
 
 export default function PetshopAgendaPage() {
   const navigate = useNavigate();
-  const { tenant } = usePetshopContext();
+  const { tenant, isRestrictedStaff } = usePetshopContext();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Estados principais
@@ -289,9 +289,23 @@ export default function PetshopAgendaPage() {
   }, [openNew]);
 
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [appointmentPayment, setAppointmentPayment] = useState<{ saleId: string; total: number; paidAt: string; nfceStatus?: string | null } | null>(null);
+  const [reversePaymentOpen, setReversePaymentOpen] = useState(false);
+  const [reverseReason, setReverseReason] = useState('');
+  const [reversingPayment, setReversingPayment] = useState(false);
+  useEffect(() => {
+    setAppointmentPayment(null);
+    if (!selectedAppointment?.id || isRestrictedStaff) return;
+    const controller = new AbortController();
+    api.get(`/petshop/appointments/${selectedAppointment.id}/payment`, { signal: controller.signal })
+      .then(({ data }) => { if (!controller.signal.aborted) setAppointmentPayment(data?.saleId ? data : null); })
+      .catch(() => { if (!controller.signal.aborted) setAppointmentPayment(null); });
+    return () => controller.abort();
+  }, [selectedAppointment?.id, isRestrictedStaff]);
   const [updatingId, setUpdatingId] = useState('');
   const [notifyingId, setNotifyingId] = useState('');
-  const [paymentItem, setPaymentItem] = useState<{ appointment: Appointment; total: number } | null>(null);
+  const [paymentItem, setPaymentItem] = useState<{ appointment: Appointment; total: number; prepay?: boolean } | null>(null);
+  const [chargeNow, setChargeNow] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [receiving, setReceiving] = useState(false);
   const [chargingId, setChargingId] = useState('');
@@ -785,6 +799,7 @@ export default function PetshopAgendaPage() {
     bookingPetsController.current?.abort();
     transportEdited.current = false;
     setSelectedTutor(null);
+    setChargeNow(false);
     setTutorQuery('');
     setPets([]);
     setLoadingBookingPets(false);
@@ -835,7 +850,7 @@ export default function PetshopAgendaPage() {
           activeSelections[svcId] = packageSelections[svcId];
         }
       }
-      await api.post('/petshop/appointments', {
+      const { data: created } = await api.post<Appointment>('/petshop/appointments', {
         petId: form.petId,
         startsAt: new Date(form.startsAt).toISOString(),
         professionalId: form.professionalId || undefined,
@@ -870,6 +885,8 @@ export default function PetshopAgendaPage() {
       }
       toast.success('Agendamento criado com sucesso!');
       setOpenNew(false);
+      if (chargeNow && created) void handleChargeAppointment(created, true);
+      setChargeNow(false);
       transportEdited.current = false;
       setForm({
         petId: '',
@@ -990,7 +1007,7 @@ export default function PetshopAgendaPage() {
   };
 
   // Cobrar Atendimento (Valida caixa aberto e carrega no PDV)
-  const handleChargeAppointment = async (item: Appointment) => {
+  const handleChargeAppointment = async (item: Appointment, prepay = false) => {
     if (item.status === 'delivered') {
       toast.info('Atendimento já foi cobrado e concluído!', {
         description: `O atendimento de ${item.pet?.name} já foi finalizado. Não é permitida cobrança em duplicidade.`,
@@ -1014,6 +1031,7 @@ export default function PetshopAgendaPage() {
 
       // Se TODOS os serviços do agendamento são cobertos por pacote e não há taxa avulsa de transporte:
       if (billableServices.length === 0 && hasCoveredServices && transportExtra === 0) {
+        if (prepay) { toast.info('Este agendamento já está coberto pelo pacote; não há valor avulso para cobrar agora.'); return; }
         const { data: completed } = await api.patch(`/petshop/appointments/${item.id}/status`, { status: 'delivered' });
         setItems(curr => curr.map(row => row.id === item.id ? completed : row));
         setSelectedAppointment(completed);
@@ -1023,13 +1041,22 @@ export default function PetshopAgendaPage() {
         return;
       }
 
-      const { data: comanda } = await api.post(`/petshop/appointments/${item.id}/checkout`);
+      const { data: comanda } = await api.post(`/petshop/appointments/${item.id}/checkout`, { prepay });
+      if (comanda?.prepaid) {
+        if (!prepay) {
+          await api.patch(`/petshop/appointments/${item.id}/status`, { status: 'delivered' });
+          setSelectedAppointment(null);
+          loadAppointments(false);
+          toast.success('Entrega concluída. Pagamento antecipado já registrado.');
+        }
+        return;
+      }
       if (!comanda || Number(comanda.total) <= 0) {
         toast.error('Não foi encontrado valor avulso para este atendimento.');
         return;
       }
       setSelectedAppointment(null);
-      setPaymentItem({ appointment: item, total: Number(comanda.total) });
+      setPaymentItem({ appointment: item, total: Number(comanda.total), prepay });
       setPaymentMethod('pix');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao preparar cobrança no caixa.');
@@ -2386,6 +2413,10 @@ export default function PetshopAgendaPage() {
                 </p>
               </div>
             </div>
+            {appointmentPayment && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm">
+              <div><strong className="text-emerald-900">Pagamento registrado: {money(appointmentPayment.total)}</strong><p className="text-xs text-emerald-800">PIX e cartão exigem devolução pelo meio de pagamento.</p></div>
+              <button type="button" className="min-h-11 rounded-lg border border-emerald-300 bg-white px-3 font-semibold text-emerald-900 hover:bg-emerald-100" onClick={() => setReversePaymentOpen(true)}>Estornar pagamento</button>
+            </div>}
 
             {/* Barra de Etapas Dinâmicas Configuradas para este Atendimento */}
             {(() => {
@@ -3047,10 +3078,10 @@ export default function PetshopAgendaPage() {
                 ) : (
                   <button
                     type="button"
-                    disabled={chargingId === selectedAppointment.id || selectedAppointment.status !== 'ready'}
-                    onClick={() => handleChargeAppointment(selectedAppointment)}
+                    disabled={chargingId === selectedAppointment.id || !['requested', 'scheduled', 'ready'].includes(selectedAppointment.status)}
+                    onClick={() => handleChargeAppointment(selectedAppointment, ['requested', 'scheduled'].includes(selectedAppointment.status))}
                     className={`order-3 flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm cursor-pointer active:scale-95 ${
-                      selectedAppointment.status === 'ready'
+                      ['requested', 'scheduled', 'ready'].includes(selectedAppointment.status)
                         ? 'bg-teal-600 text-white hover:bg-teal-700 ring-2 ring-teal-400/40'
                         : 'bg-zinc-800 text-white hover:bg-zinc-900'
                     }`}
@@ -3058,15 +3089,15 @@ export default function PetshopAgendaPage() {
                   >
                     {chargingId === selectedAppointment.id ? (
                       <Loader2 size={15} className="animate-spin" />
-                    ) : selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0) ? (
+                    ) : selectedAppointment.status === 'ready' && selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0) ? (
                       <PackageCheck size={15} />
                     ) : (
                       <CreditCard size={15} />
                     )}
                     <span>
-                      {selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0)
+                      {selectedAppointment.status === 'ready' && selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0)
                         ? 'Concluir (Pacote)'
-                        : 'Cobrar'}
+                        : ['requested', 'scheduled'].includes(selectedAppointment.status) ? 'Cobrar agora' : 'Cobrar'}
                     </span>
                   </button>
                 )}
@@ -3084,8 +3115,38 @@ export default function PetshopAgendaPage() {
         </Modal>
       )}
 
+      {reversePaymentOpen && selectedAppointment && appointmentPayment && (
+        <Modal title={`Estornar pagamento · ${selectedAppointment.pet?.name || 'Atendimento'}`} onClose={() => { if (!reversingPayment) { setReversePaymentOpen(false); setReverseReason(''); } }} maxWidth="sm:max-w-lg">
+          <form className="grid gap-4" onSubmit={async event => {
+            event.preventDefault();
+            if (reverseReason.trim().length < 15 || reversingPayment) return;
+            setReversingPayment(true);
+            try {
+              await api.post(`/petshop/appointments/${selectedAppointment.id}/reverse-payment`, { reason: reverseReason.trim() });
+              setAppointmentPayment(null);
+              setReversePaymentOpen(false);
+              setReverseReason('');
+              await loadAppointments(false);
+              toast.success('Venda cancelada no sistema. Confirme separadamente a devolução de PIX ou cartão ao cliente.');
+            } catch (error: any) {
+              toast.error(error.response?.data?.message || 'Não foi possível estornar o pagamento.');
+            } finally { setReversingPayment(false); }
+          }}>
+            <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm font-medium text-amber-950">Venda de <strong>{money(appointmentPayment.total)}</strong>. Cancelar a venda aqui não devolve PIX ou cartão automaticamente. Após confirmar, faça e confira a devolução ao cliente no meio de pagamento.</p>
+            {appointmentPayment.nfceStatus === 'autorizada' && <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">Cancele primeiro a NFC-e autorizada na Gestão Fiscal.</p>}
+            <label className="grid gap-1 text-sm font-semibold text-zinc-800">Motivo do estorno
+              <textarea value={reverseReason} onChange={event => setReverseReason(event.target.value)} minLength={15} required rows={3} className="w-full rounded-lg border border-zinc-300 p-3 font-normal" placeholder="Descreva o motivo (mínimo de 15 caracteres)" />
+            </label>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" className={secondaryButton} onClick={() => { setReversePaymentOpen(false); setReverseReason(''); }} disabled={reversingPayment}>Voltar</button>
+              <button type="submit" className="min-h-11 rounded-lg bg-rose-700 px-4 font-semibold text-white disabled:opacity-50" disabled={reversingPayment || reverseReason.trim().length < 15 || appointmentPayment.nfceStatus === 'autorizada'}>{reversingPayment ? 'Processando...' : 'Confirmar estorno'}</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       {paymentItem && <PaymentModal isOpen onClose={() => setPaymentItem(null)} isOnline={navigator.onLine} tenantConfig={tenant}
-        petshopReceipt={{ customer: paymentItem.appointment.customer.name, total: paymentItem.total, submit: async payments => { const { data } = await api.post(`/petshop/appointments/${paymentItem.appointment.id}/receive`, { payments }); return data; } }}
+        petshopReceipt={{ customer: paymentItem.appointment.customer.name, total: paymentItem.total, submit: async payments => { const { data } = await api.post(`/petshop/appointments/${paymentItem.appointment.id}/receive`, { payments, prepay: paymentItem.prepay }); return data; } }}
         onSuccess={() => { setSelectedAppointment(null); loadAppointments(false); toast.success('Pagamento registrado.'); }} />}
 
       {/* 9. MODAL DE FOTO E RECADO DA ETAPA */}
@@ -3740,6 +3801,10 @@ export default function PetshopAgendaPage() {
             </label>
 
             {/* 10. BOTÃO DE CONFIRMAR AGENDAMENTO */}
+            <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
+              <input type="checkbox" checked={chargeNow} onChange={event => setChargeNow(event.target.checked)} className="h-5 w-5 accent-[#0d6e5a]" />
+              Cobrar agora após criar o agendamento
+            </label>
             <button
               disabled={saving || loadingPackages || packagesError || !form.petId || !form.startsAt || form.serviceIds.length === 0}
               className="w-full rounded-xl bg-[#0d6e5a] hover:bg-[#0a5747] text-white font-bold py-3.5 text-sm shadow-xs transition flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"

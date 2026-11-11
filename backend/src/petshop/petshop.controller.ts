@@ -65,7 +65,9 @@ export class PetshopController {
   @Get('appointments') listAppointments(@Query('from') from?: string, @Query('to') to?: string) { return this.petshop.listAppointments(from, to); }
   @Get('appointments/overdue-pickups') overduePickups(@Query('before') before?: string) { return this.petshop.listOverduePickups(before); }
   @Post('appointments') createAppointment(@Body() body: any) { return this.petshop.createAppointment(body); }
-  @Post('appointments/:id/checkout') prepareCheckout(@Param('id') id: string) { return this.petshop.prepareCheckout(id); }
+  @Post('appointments/:id/checkout') prepareCheckout(@Param('id') id: string, @Body() body: any) { return this.petshop.prepareCheckout(id, body?.prepay === true); }
+  @Get('appointments/:id/payment') appointmentPayment(@Param('id') id: string) { return this.petshop.appointmentPayment(id); }
+  @Post('appointments/:id/reverse-payment') reverseAppointmentPayment(@Param('id') id: string, @Body('reason') reason: string) { return this.petshop.reverseAppointmentPayment(id, reason); }
   @Patch('appointments/:id') updateAppointment(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointment(id, body, req); }
   @Patch('appointments/:id/status') updateAppointmentStatus(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointmentStatus(id, body, req); }
   @Post('appointments/:id/taxi-departure') taxiDeparture(@Param('id') id: string, @Body() body: any) { return this.whatsapp.sendTaxiDogDeparture(id, body?.direction); }

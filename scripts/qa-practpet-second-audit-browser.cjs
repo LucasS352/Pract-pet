@@ -38,9 +38,11 @@ const browser = async () => {
   try {
     for (const width of [390, 412, 768, 1280]) {
       let submittedBooking = null;
+      let prepayRequests = 0;
       let unfilteredPetRequests = 0;
       let scopedPetRequests = 0;
       let tutorSearchRequests = 0;
+      let reversedPayment = null;
       const context = await instance.newContext({
         viewport: { width, height: 844 }, isMobile: width < 768, hasTouch: width < 768,
         userAgent: width < 768 ? 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36' : undefined,
@@ -57,7 +59,10 @@ const browser = async () => {
         let data = [];
         if (path === '/tenants/me') data = { id: 'audit-tenant', nomeFantasia: 'Pract Pet Audit', modulos: { petshop: true } };
         else if (path === '/petshop/overview') data = { metrics: { pets: 1, tutors: 1, products: 1, services: 1, today: 1, inProgress: 0, vaccinesDue: 0 }, nextAppointments: [current] };
-        else if (path === '/petshop/appointments') data = [current];
+        else if (path === '/petshop/appointments') data = route.request().method() === 'POST' ? appointment('appointment-created', local, 'scheduled') : [current];
+        else if (path === '/petshop/appointments/appointment-created/checkout') { prepayRequests++; assert.equal(route.request().postDataJSON().prepay, true); data = { id: 'comanda-created', total: 50 }; }
+        else if (path === '/petshop/appointments/appointment-today/payment') data = reversedPayment ? null : { saleId: 'sale-audit', total: 40, paidAt: local, nfceStatus: null };
+        else if (path === '/petshop/appointments/appointment-today/reverse-payment') { reversedPayment = route.request().postDataJSON(); data = { id: 'sale-audit', status: 'cancelled' }; }
         else if (path === '/petshop/appointments/overdue-pickups') data = [overdue];
         else if (path === '/petshop/pending-reservations') data = [];
         else if (path === '/petshop/services') data = [service];
@@ -83,8 +88,11 @@ const browser = async () => {
         try {
           await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
         } catch (error) {
-          console.error('navigation diagnostic', { width, path, currentUrl: page.url(), errors });
-          throw error;
+          if (!String(error).includes('ERR_ABORTED')) {
+            console.error('navigation diagnostic', { width, path, currentUrl: page.url(), errors });
+            throw error;
+          }
+          await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
         }
         await page.locator('#petcare-main').waitFor({ timeout: 20000 });
         await page.waitForTimeout(300);
@@ -135,6 +143,20 @@ const browser = async () => {
           await page.getByRole('dialog').first().waitFor({ state: 'detached' });
           assert.equal(new URL(page.url()).pathname, '/petshop/agenda');
           results.push({ width, path, modal: 'novo agendamento', escape: true, historyBack: true });
+          if (width === 412) {
+            await open.click();
+            const booking = page.getByRole('dialog').first();
+            await booking.getByRole('button', { name: /Tutor Audit.*Pet Audit/ }).click();
+            await booking.getByRole('button', { name: /Pet Audit/ }).click();
+            await booking.getByText('Pacote Audit').waitFor();
+            await booking.locator('fieldset').first().locator('input[type="checkbox"]').first().check();
+            await booking.getByLabel('Cobrar agora após criar o agendamento').check();
+            await booking.getByRole('button', { name: 'Confirmar agendamento' }).click();
+            await page.waitForTimeout(400);
+            assert.equal(prepayRequests, 1);
+            await page.getByRole('heading', { name: 'Finalizar Pagamento' }).waitFor();
+            results.push({ width, bookingFlow: 'criação → cobrança antecipada', passed: true });
+          }
           if (width === 390) {
             await open.click();
             const booking = page.getByRole('dialog').first();
@@ -177,6 +199,18 @@ const browser = async () => {
           await page.getByRole('dialog').first().waitFor({ state: 'detached' });
           await page.waitForTimeout(350);
           results.push({ width, path, modal: 'manifesto', escape: true });
+          if (width === 390) {
+            await page.getByRole('button', { name: /Levar para Casa|Levar/i }).first().click();
+            await page.getByRole('button', { name: /Entrega realizada · Abrir cobrança/i }).click();
+            await page.getByRole('dialog', { name: /Atendimento · Pet Audit/i }).waitFor();
+            assert.equal(new URL(page.url()).pathname, '/petshop/agenda');
+            await page.getByRole('button', { name: 'Estornar pagamento' }).click();
+            await page.getByRole('dialog', { name: /Estornar pagamento/i }).getByRole('textbox', { name: 'Motivo do estorno' }).fill('Cancelamento solicitado pelo tutor');
+            await page.getByRole('button', { name: 'Confirmar estorno' }).click();
+            assert.equal(reversedPayment?.reason, 'Cancelamento solicitado pelo tutor');
+            assert.equal(new URL(page.url()).pathname, '/petshop/agenda');
+            results.push({ width, handoff: 'Táxi Dog → atendimento selecionado', passed: true });
+          }
         }
         if (width < 768 && path === '/petshop/produtos') {
           const open = page.getByRole('button', { name: /Novo produto/i }).first();

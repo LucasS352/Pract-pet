@@ -103,3 +103,64 @@ describe('clientes frequentes e diretório do agendamento', () => {
     await expect(service.listBookingTutorDirectory('0')).rejects.toThrow('Página inválida');
   });
 });
+
+describe('cobrança antecipada de agendamento', () => {
+  const setup = (status: string, paid: boolean) => {
+    const tx = {
+      $queryRaw: jest.fn(),
+      petAppointment: { findUnique: jest.fn().mockResolvedValue({ id: 'apt', status, completedAt: null }) },
+      comanda: { findFirst: jest.fn().mockResolvedValue(paid ? { id: 'paid' } : null) },
+    };
+    const tenantClient = { $transaction: (callback: any) => callback(tx) };
+    const tenantManager = { getTenantClient: jest.fn().mockResolvedValue(tenantClient) };
+    const service = new PetshopService(tenantManager as any, { get: () => ({ tenantId: 'tenant-a', databaseUrl: 'isolated-db' }) } as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    return { service, tx, tenantManager };
+  };
+
+  it('prepara pagamento no agendamento sem concluir os cuidados', async () => {
+    const { service, tx, tenantManager } = setup('scheduled', false);
+    jest.spyOn(service as any, 'ensureComandaForAppointment').mockResolvedValue({ id: 'cmd', total: 40 });
+    expect(await service.prepareCheckout('apt', true)).toEqual({ id: 'cmd', total: 40 });
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(tenantManager.getTenantClient).toHaveBeenCalledWith('tenant-a', 'isolated-db');
+  });
+
+  it('impede segunda cobrança e permite concluir entrega já paga', async () => {
+    const { service } = setup('ready', true);
+    expect(await service.prepareCheckout('apt')).toEqual({ prepaid: true, total: 0 });
+    await expect(service.prepareCheckout('apt', true)).rejects.toThrow('já pago');
+  });
+
+  it('usa a comanda na identidade da venda para permitir nova cobrança após estorno', async () => {
+    const checkout = jest.fn().mockResolvedValue({ id: 'sale-new' });
+    const service = new PetshopService({} as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any, { checkout } as any);
+    jest.spyOn(service, 'prepareCheckout').mockResolvedValue({ id: 'cmd-new', total: 40 } as any);
+    await service.receivePayment('apt', { prepay: true, payments: [{ method: 'pix', value: 40 }] }, { headers: {}, user: { role: 'admin' } });
+    expect(checkout).toHaveBeenCalledWith(expect.objectContaining({
+      idempotencyKey: 'petshop-receipt:apt:cmd-new', petshopPrepayment: true, comandaId: 'cmd-new',
+    }), true);
+  });
+  it('localiza a venda ativa somente no banco do tenant do atendimento', async () => {
+    const tenantClient = {
+      petAppointment: { findUnique: jest.fn().mockResolvedValue({ id: 'apt' }) },
+      comanda: { findFirst: jest.fn().mockResolvedValue({ sale: { id: 'sale-1', total: 40, createdAt: new Date('2026-11-11T12:00:00Z'), nfceStatus: null } }) },
+    };
+    const manager = { getTenantClient: jest.fn().mockResolvedValue(tenantClient) };
+    const service = new PetshopService(manager as any, { get: () => ({ tenantId: 'tenant-a', databaseUrl: 'isolated-db' }) } as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any);
+    expect((await service.appointmentPayment('apt'))?.saleId).toBe('sale-1');
+    expect(manager.getTenantClient).toHaveBeenCalledWith('tenant-a', 'isolated-db');
+    expect(tenantClient.comanda.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ notes: { contains: 'apt' }, status: 'closed' }) }));
+  });
+  it('estorna a venda ativa com motivo e bloqueia NFC-e autorizada', async () => {
+    const sale = { id: 'sale-1', total: 40, createdAt: new Date(), nfceStatus: null };
+    const tenantClient = { petAppointment: { findUnique: jest.fn().mockResolvedValue({ id: 'apt' }) }, comanda: { findFirst: jest.fn().mockResolvedValue({ sale }) } };
+    const cancel = jest.fn().mockResolvedValue({ id: sale.id, status: 'cancelled' });
+    const service = new PetshopService({ getTenantClient: () => tenantClient } as any, { get: () => ({ tenantId: 'tenant-a', databaseUrl: 'isolated-db' }) } as any, {} as any, {} as any, {} as any, {} as any, {} as any, { cancel } as any);
+    await expect(service.reverseAppointmentPayment('apt', 'Cancelamento solicitado pelo tutor')).resolves.toEqual({ id: sale.id, status: 'cancelled' });
+    expect(cancel).toHaveBeenCalledWith('sale-1', 'Cancelamento solicitado pelo tutor');
+    await expect(service.reverseAppointmentPayment('apt', 'Curto')).rejects.toThrow('pelo menos 15 caracteres');
+    sale.nfceStatus = 'autorizada' as any;
+    await expect(service.reverseAppointmentPayment('apt', 'Cancelamento solicitado pelo tutor')).rejects.toThrow('NFC-e autorizada');
+    expect(cancel).toHaveBeenCalledTimes(1);
+  });
+});
