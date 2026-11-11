@@ -64,3 +64,42 @@ describe('busca de tutor para agendamento', () => {
     ]);
   });
 });
+
+describe('clientes frequentes e diretório do agendamento', () => {
+  const makeService = (tenantClient: any) => {
+    const tenantManager = { getTenantClient: jest.fn().mockResolvedValue(tenantClient) };
+    const tenantContext = { get: jest.fn().mockReturnValue({ tenantId: 'tenant-a', databaseUrl: 'isolated-db' }) };
+    return {
+      service: new PetshopService(tenantManager as any, tenantContext as any, {} as any, {} as any, {} as any, {} as any, {} as any, {} as any),
+      tenantManager,
+    };
+  };
+
+  it('exibe somente visitas reais do tenant, ordenadas pela movimentação e com o pet da última visita', async () => {
+    const lastVisit = new Date('2026-11-10T15:00:00.000Z');
+    const groupBy = jest.fn().mockResolvedValue([{ customerId: 'tutor-1', _count: { id: 12 }, _max: { startsAt: lastVisit } }]);
+    const findFirst = jest.fn().mockResolvedValue({ pet: { id: 'pet-1', name: 'Leo', species: 'dog', photoUrl: null } });
+    const findMany = jest.fn().mockResolvedValue([{ id: 'tutor-1', name: 'Lucas', phone: '14999990000', photoUrl: null }]);
+    const { service, tenantManager } = makeService({ petAppointment: { groupBy, findFirst }, customer: { findMany } });
+
+    expect(await service.listFrequentTutorsForBooking()).toEqual([{ id: 'tutor-1', name: 'Lucas', phone: '14999990000', photoUrl: null, pet: { id: 'pet-1', name: 'Leo', species: 'dog', photoUrl: null }, appointmentsCount: 12, lastVisitAt: lastVisit }]);
+    expect(tenantManager.getTenantClient).toHaveBeenCalledWith('tenant-a', 'isolated-db');
+    expect(groupBy).toHaveBeenCalledWith(expect.objectContaining({
+      by: ['customerId'], take: 8,
+      where: expect.objectContaining({ status: { in: ['checked_in', 'bathing', 'grooming', 'finishing', 'ready', 'delivered'] }, startsAt: { lte: expect.any(Date) }, pet: { is: { active: true } } }),
+      orderBy: [{ _count: { id: 'desc' } }, { _max: { startsAt: 'desc' } }],
+    }));
+    expect(findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ customerId: 'tutor-1' }) }));
+  });
+
+  it('pagina o diretório sem carregar todos os clientes', async () => {
+    const findMany = jest.fn().mockResolvedValue(Array.from({ length: 21 }, (_, index) => ({ id: `tutor-${index}`, name: `Tutor ${index}`, phone: '14999990000' })));
+    const { service } = makeService({ customer: { findMany } });
+    const result = await service.listBookingTutorDirectory('2');
+    expect(result.items).toHaveLength(20);
+    expect(result.hasMore).toBe(true);
+    expect(result.page).toBe(2);
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 20, take: 21, select: { id: true, name: true, phone: true } }));
+    await expect(service.listBookingTutorDirectory('0')).rejects.toThrow('Página inválida');
+  });
+});

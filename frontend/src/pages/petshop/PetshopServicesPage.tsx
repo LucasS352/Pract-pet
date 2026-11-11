@@ -629,53 +629,53 @@ export default function PetshopServicesPage() {
         />
       </div>
 
-      {/* 2. KPIs - Mobile (4 colunas compactas com ícones e valores idênticos ao mockup) */}
-      <section aria-label="Indicadores mobile" className="md:hidden mb-4 grid grid-cols-4 gap-2">
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs flex flex-col justify-between">
-          <div className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+      {/* 2. KPIs - Mobile (4 colunas compactas com ícones e valores rigorosamente alinhados) */}
+      <section aria-label="Indicadores mobile" className="md:hidden mb-4 grid grid-cols-4 gap-1.5">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white px-2 py-2.5 shadow-2xs flex flex-col items-start">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
             <ClipboardList size={16} />
           </div>
-          <div className="mt-2">
-            <strong className="block text-lg font-black tracking-tight text-zinc-900 tabular-nums">
+          <div className="mt-2.5 w-full min-w-0">
+            <strong className="flex h-5 items-center text-[13.5px] font-black tracking-tight text-zinc-900 tabular-nums leading-none whitespace-nowrap">
               {kpis.total}
             </strong>
-            <p className="text-[10px] text-zinc-500 leading-tight">serviços cadastrados</p>
+            <p className="mt-1 text-[10px] text-zinc-500 leading-tight">serviços cadastrados</p>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs flex flex-col justify-between">
-          <div className="grid h-8 w-8 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white px-2 py-2.5 shadow-2xs flex flex-col items-start">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-emerald-50 text-emerald-700">
             <CheckCircle2 size={16} />
           </div>
-          <div className="mt-2">
-            <strong className="block text-lg font-black tracking-tight text-zinc-900 tabular-nums">
+          <div className="mt-2.5 w-full min-w-0">
+            <strong className="flex h-5 items-center text-[13.5px] font-black tracking-tight text-zinc-900 tabular-nums leading-none whitespace-nowrap">
               {kpis.active}
             </strong>
-            <p className="text-[10px] text-zinc-500 leading-tight">ativos</p>
+            <p className="mt-1 text-[10px] text-zinc-500 leading-tight">ativos</p>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs flex flex-col justify-between">
-          <div className="grid h-8 w-8 place-items-center rounded-xl bg-amber-50 text-amber-700">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white px-2 py-2.5 shadow-2xs flex flex-col items-start">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-amber-50 text-amber-700">
             <Clock size={16} />
           </div>
-          <div className="mt-2">
-            <strong className="block text-sm font-black tracking-tight text-zinc-900 tabular-nums truncate">
+          <div className="mt-2.5 w-full min-w-0">
+            <strong className="flex h-5 items-center text-[13.5px] font-black tracking-tight text-zinc-900 tabular-nums leading-none whitespace-nowrap">
               {kpis.avgMinutes} min
             </strong>
-            <p className="text-[10px] text-zinc-500 leading-tight">Tempo médio</p>
+            <p className="mt-1 text-[10px] text-zinc-500 leading-tight">Tempo médio</p>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs flex flex-col justify-between">
-          <div className="grid h-8 w-8 place-items-center rounded-xl bg-purple-50 text-purple-700">
+        <div className="rounded-2xl border border-zinc-200/90 bg-white px-2 py-2.5 shadow-2xs flex flex-col items-start">
+          <div className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-purple-50 text-purple-700">
             <Tag size={16} />
           </div>
-          <div className="mt-2">
-            <strong className="block text-xs sm:text-sm font-black tracking-tight text-zinc-900 tabular-nums truncate">
+          <div className="mt-2.5 w-full min-w-0">
+            <strong className="flex h-5 items-center text-[13.5px] font-black tracking-tight text-zinc-900 tabular-nums leading-none whitespace-nowrap">
               {money(kpis.avgTicket)}
             </strong>
-            <p className="text-[10px] text-zinc-500 leading-tight">Ticket médio</p>
+            <p className="mt-1 text-[10px] text-zinc-500 leading-tight">Ticket médio</p>
           </div>
         </div>
       </section>

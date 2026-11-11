@@ -7,6 +7,14 @@ const now = new Date();
 const local = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9).toISOString();
 const old = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2, 9).toISOString();
 const customer = { id: 'tutor-audit', name: 'Tutor Audit', phone: '11999990000', address: 'Rua Audit, 10 - Centro' };
+const frequentTutors = Array.from({ length: 8 }, (_, index) => ({
+  id: index === 0 ? customer.id : `tutor-frequent-${index}`,
+  name: index === 0 ? customer.name : `Cliente Frequente ${index}`,
+  phone: customer.phone,
+  pet: { id: index === 0 ? 'pet-audit' : `pet-frequent-${index}`, name: index === 0 ? 'Pet Audit' : `Pet ${index}`, species: 'dog', photoUrl: null },
+  appointmentsCount: 12 - index,
+  lastVisitAt: new Date().toISOString(),
+}));
 const pet = { id: 'pet-audit', name: 'Pet Audit', customerId: customer.id, customer, species: 'dog', size: 'small', active: true };
 const service = { id: 'service-audit', name: 'Banho Audit', durationMinutes: 60, price: 50, active: true, serviceType: 'INDIVIDUAL', pricingRules: [] };
 const appointment = (id, startsAt, status) => ({
@@ -28,7 +36,7 @@ const browser = async () => {
   const instance = await chromium.launch({ executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true });
   const results = [];
   try {
-    for (const width of [390, 412, 768]) {
+    for (const width of [390, 412, 768, 1280]) {
       let submittedBooking = null;
       let unfilteredPetRequests = 0;
       let scopedPetRequests = 0;
@@ -60,6 +68,8 @@ const browser = async () => {
         }
         else if (path === `/petshop/pets/${pet.id}`) data = pet;
         else if (path === '/petshop/tutors/booking-search') { tutorSearchRequests++; data = [customer]; }
+        else if (path === '/petshop/tutors/booking-frequent') data = frequentTutors;
+        else if (path === '/petshop/tutors/booking-directory') data = { items: url.searchParams.get('page') === '2' ? [customer] : Array.from({ length: 20 }, (_, index) => ({ id: `directory-${index}`, name: `Cliente Diretório ${index}`, phone: customer.phone })), page: Number(url.searchParams.get('page') || 1), hasMore: url.searchParams.get('page') !== '2' };
         else if (path === `/petshop/packages/available/${pet.id}`) data = [packagePlan];
         else if (path === '/products') data = { data: [], total: 0 };
         else if (path === '/categories') data = [{ id: 'category-audit', name: 'Audit' }];
@@ -88,10 +98,14 @@ const browser = async () => {
         assert.ok(layout.contentLength > 150, `conteúdo vazio em ${path} (${width}px)`);
         assert.ok(layout.scrollWidth <= layout.clientWidth + 1, `overflow horizontal em ${path} (${width}px)`);
         assert.deepEqual(errors, [], `erro JavaScript em ${path} (${width}px)`);
-        if (width === 768 && path === '/petshop/agenda' && screenshotDir) {
+        if (width >= 768 && path === '/petshop/agenda') {
           await page.getByRole('button', { name: /Novo agendamento/i }).first().click();
           await page.getByRole('dialog').first().waitFor();
-          await page.screenshot({ path: `${screenshotDir}/booking-tablet.png` });
+          await page.getByRole('region', { name: 'Clientes com mais movimentação' }).getByRole('button', { name: /Cliente Frequente 7/ }).waitFor();
+          assert.equal(await page.getByRole('region', { name: 'Clientes com mais movimentação' }).getByRole('button', { name: /atendimento/ }).count(), 8);
+          const columns = await page.getByRole('region', { name: 'Clientes com mais movimentação' }).locator('div.grid').first().evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+          assert.equal(columns, width >= 640 ? 2 : 1, 'grade responsiva de clientes frequentes');
+          if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/booking-${width}.png` });
           await page.keyboard.press('Escape');
           await page.getByRole('dialog').first().waitFor({ state: 'detached' });
         }
@@ -100,6 +114,10 @@ const browser = async () => {
           const open = page.getByRole('button', { name: /Novo agendamento/i }).first();
           await open.click();
           await page.getByRole('dialog').first().waitFor();
+          await page.getByRole('region', { name: 'Clientes com mais movimentação' }).getByRole('button', { name: /Cliente Frequente 7/ }).waitFor();
+          assert.equal(await page.getByRole('region', { name: 'Clientes com mais movimentação' }).getByRole('button', { name: /atendimento/ }).count(), 8);
+          const columns = await page.getByRole('region', { name: 'Clientes com mais movimentação' }).locator('div.grid').first().evaluate(element => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+          assert.equal(columns, 1, 'grade de clientes no celular');
           if (screenshotDir && width === 390) await page.screenshot({ path: `${screenshotDir}/booking-tutor.png` });
           assert.equal(await page.evaluate(() => document.body.style.overflow), 'hidden');
           await page.getByRole('button', { name: /Cadastrar tutor e pet/i }).click();
@@ -120,6 +138,17 @@ const browser = async () => {
           if (width === 390) {
             await open.click();
             const booking = page.getByRole('dialog').first();
+            await booking.getByRole('button', { name: /Ver todos os clientes/ }).click();
+            await booking.getByRole('button', { name: /Carregar mais/ }).click();
+            await booking.getByRole('button', { name: /Voltar/ }).click();
+            await booking.getByRole('button', { name: /Ver todos os clientes/ }).click();
+            await page.keyboard.press('Escape');
+            await booking.waitFor({ state: 'detached' });
+            await open.click();
+            await booking.getByRole('button', { name: /Ver todos os clientes/ }).waitFor();
+            await booking.getByRole('button', { name: /Tutor Audit.*Pet Audit/ }).click();
+            await booking.getByRole('button', { name: /Pet Audit/ }).waitFor();
+            await booking.getByRole('button', { name: 'Trocar' }).click();
             const tutorSearch = booking.getByPlaceholder('Ex.: Ana Souza ou (11) 99999-9999');
             await tutorSearch.fill('T');
             await page.waitForTimeout(350);
@@ -137,7 +166,7 @@ const browser = async () => {
             assert.deepEqual(submittedBooking?.packageSelections, { [service.id]: packagePlan.id });
             assert.equal(submittedBooking?.transport?.coveredByPackage, true);
             assert.equal(unfilteredPetRequests, unfilteredBeforeBooking, 'o agendamento não deve buscar todos os pets');
-            assert.equal(scopedPetRequests, 1, 'os pets devem ser buscados somente após selecionar o tutor');
+            assert.equal(scopedPetRequests, 2, 'cada seleção de tutor deve buscar somente seus pets');
             results.push({ width, path, bookingFlow: 'tutor→pet→serviço/pacote→POST', passed: true });
           }
         }

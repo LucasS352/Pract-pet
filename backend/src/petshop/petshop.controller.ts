@@ -36,6 +36,8 @@ export class PetshopController {
 
   @Get('tutors') listTutors(@Query('search') search?: string) { return this.petshop.listTutors(search); }
   @Get('tutors/booking-search') searchTutorsForBooking(@Query('search') search?: string) { return this.petshop.searchTutorsForBooking(search); }
+  @Get('tutors/booking-frequent') listFrequentTutorsForBooking() { return this.petshop.listFrequentTutorsForBooking(); }
+  @Get('tutors/booking-directory') listBookingTutorDirectory(@Query('page') page?: string) { return this.petshop.listBookingTutorDirectory(page); }
   @Post('tutors') createTutor(@Body() body: any) { return this.petshop.createTutor(body); }
   @Patch('tutors/:id') updateTutor(@Param('id') id: string, @Body() body: any) { return this.petshop.updateTutor(id, body); }
   @Post('tutors/:id/portal-link') createPortalLink(@Param('id') id: string, @Body() body?: any) { return this.petshop.createPortalLink(id, Boolean(body?.rotate)); }

@@ -3,13 +3,20 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
   ArrowRight,
+  Box,
   Calendar,
   CheckCircle2,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Clock,
   CreditCard,
   DollarSign,
   History,
   Layers,
+  LayoutGrid,
+  List,
+  MoreHorizontal,
   PackageCheck,
   PawPrint,
   Pencil,
@@ -17,12 +24,14 @@ import {
   RefreshCw,
   RotateCcw,
   Scissors,
+  Search,
   ShieldCheck,
   Sparkles,
   Tag,
   Trash2,
   TrendingUp,
   Users,
+  Wallet,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -48,7 +57,6 @@ import {
   PageHeader,
   PetAvatar,
   primaryButton,
-  SearchField,
   secondaryButton,
 } from './ui';
 
@@ -100,9 +108,15 @@ export default function PetshopPackagesPage() {
   const [pets, setPets] = useState<Pet[]>([]);
   const [financialOverview, setFinancialOverview] = useState<any>(null);
 
-  // Filtros de contratos
+  // Filtros de contratos e controles de visualização/paginação
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('active');
+  const [statusFilter, setStatusFilter] = useState('all');
+  const [serviceFilter, setServiceFilter] = useState('all');
+  const [sizeFilter, setSizeFilter] = useState('all');
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
 
   // Modal de Criação / Edição de Plano do Catálogo
   const [openPlanModal, setOpenPlanModal] = useState(false);
@@ -379,9 +393,63 @@ export default function PetshopPackagesPage() {
     regenerateRecurringSchedule,
   ]);
 
+  const isContractExpired = useCallback((c: CustomerPetPackage) => {
+    return c.status === 'expired' || (c.status === 'active' && Boolean(c.expiresAt) && new Date(c.expiresAt) < new Date());
+  }, []);
+
+  const contractCounts = useMemo(() => {
+    let active = 0;
+    let pending = 0;
+    let expired = 0;
+    contracts.forEach(c => {
+      if (isContractExpired(c)) {
+        expired += 1;
+      } else if (c.status === 'active') {
+        active += 1;
+        if (c.paymentStatus === 'pending') pending += 1;
+      } else if (c.paymentStatus === 'pending' && c.status !== 'cancelled') {
+        pending += 1;
+      }
+    });
+    return { all: contracts.length, active, pending, expired };
+  }, [contracts, isContractExpired]);
+
+  const contractServiceOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    services.forEach(s => map.set(s.id, s.name));
+    contracts.forEach(c => {
+      c.items?.forEach(it => {
+        if (it.serviceId && it.serviceNameSnapshot) {
+          map.set(it.serviceId, it.serviceNameSnapshot);
+        }
+      });
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [services, contracts]);
+
   const filteredContracts = useMemo(() => {
     return contracts.filter(c => {
-      if (statusFilter !== 'all' && c.status !== statusFilter) return false;
+      const expired = isContractExpired(c);
+      if (statusFilter === 'active') {
+        if (c.status !== 'active' || expired) return false;
+      } else if (statusFilter === 'pending_payment') {
+        if (c.paymentStatus !== 'pending' || c.status === 'cancelled') return false;
+      } else if (statusFilter === 'expired') {
+        if (!expired) return false;
+      } else if (statusFilter !== 'all' && c.status !== statusFilter) {
+        return false;
+      }
+
+      if (serviceFilter !== 'all') {
+        const hasService = c.items?.some(it => it.serviceId === serviceFilter || it.serviceNameSnapshot === serviceFilter);
+        if (!hasService) return false;
+      }
+
+      if (sizeFilter !== 'all') {
+        const petSize = (c.sizeSnapshot || c.pet?.size || '').toLowerCase();
+        if (petSize !== sizeFilter) return false;
+      }
+
       if (search.trim()) {
         const q = search.toLowerCase();
         const matchTutor = c.customer?.name?.toLowerCase().includes(q);
@@ -391,7 +459,25 @@ export default function PetshopPackagesPage() {
       }
       return true;
     });
-  }, [contracts, statusFilter, search]);
+  }, [contracts, statusFilter, serviceFilter, sizeFilter, search, isContractExpired]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, statusFilter, serviceFilter, sizeFilter, pageSize]);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const handleOutside = () => setOpenMenuId(null);
+    window.addEventListener('click', handleOutside);
+    return () => window.removeEventListener('click', handleOutside);
+  }, [openMenuId]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredContracts.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedContracts = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return filteredContracts.slice(start, start + pageSize);
+  }, [filteredContracts, safePage, pageSize]);
 
   const handleOpenNewPlan = () => {
     setEditingPlan(null);
@@ -653,7 +739,7 @@ export default function PetshopPackagesPage() {
         paymentMethod: 'pix',
       });
       toast.success('Pagamento do pacote confirmado!');
-      setSelectedContract(data);
+      setSelectedContract(prev => (prev?.id === contractId ? data : prev));
       loadAll(false);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao confirmar pagamento.');
@@ -743,163 +829,251 @@ export default function PetshopPackagesPage() {
         }
       />
 
-      {/* Cards Executivos de Gestão Financeira & Operacional de Pacotes */}
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-xl border border-[var(--pc-border)] bg-white p-5 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--pc-text-muted)]">
-              Faturamento de Pacotes Pagos
-            </span>
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-emerald-50 text-emerald-700">
-              <DollarSign size={18} />
-            </span>
+      {/* Cards Executivos de Gestão Financeira & Operacional de Pacotes (Fiel ao Mockup Web) */}
+      <div className="mb-5 grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="flex items-center gap-3.5 rounded-2xl border border-[#cce6dc] bg-gradient-to-br from-[#ecf8f3] via-[#f6fbf9] to-white p-4 shadow-2xs">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-emerald-200/70 bg-white/90 text-[#0d6e5a] shadow-2xs">
+            <Wallet size={20} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-zinc-600 truncate">
+              Faturamento de pacotes pagos
+            </p>
+            <p className="mt-0.5 text-2xl font-black tracking-tight text-zinc-900 tabular-nums">
+              {money(financialOverview?.totals?.totalSoldPaid || 0)}
+            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500 truncate">
+              {financialOverview?.totals?.activeContractsCount || 0} contratos ativos em andamento
+            </p>
           </div>
-          <p className="mt-2 text-2xl font-bold text-[var(--pc-text)]">
-            {money(financialOverview?.totals?.totalSoldPaid || 0)}
-          </p>
-          <p className="mt-1 text-xs text-[var(--pc-text-secondary)]">
-            {financialOverview?.totals?.activeContractsCount || 0} contratos ativos em andamento
-          </p>
         </div>
 
-        <div className="rounded-xl border border-[var(--pc-border)] bg-white p-5 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--pc-text-muted)]">
-              Saldo de Sessões a Realizar
-            </span>
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-teal-50 text-teal-700">
-              <PackageCheck size={18} />
-            </span>
+        <div className="flex items-center gap-3.5 rounded-2xl border border-[#cde3ec] bg-gradient-to-br from-[#eef7fa] via-[#f7fbfc] to-white p-4 shadow-2xs">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-teal-200/70 bg-white/90 text-teal-700 shadow-2xs">
+            <Box size={20} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-zinc-600 truncate">
+              Saldo de sessões a realizar
+            </p>
+            <p className="mt-0.5 text-2xl font-black tracking-tight text-zinc-900 tabular-nums">
+              {financialOverview?.totals?.totalSessionsAvailable || 0}{' '}
+              <span className="text-sm font-semibold text-zinc-600">
+                disponíveis
+              </span>
+            </p>
+            <p className="mt-0.5 text-[11px] leading-snug text-zinc-500">
+              {financialOverview?.totals?.totalSessionsReserved || 0} reservadas na agenda ·{' '}
+              {financialOverview?.totals?.totalSessionsUsed || 0} já concluídas
+            </p>
           </div>
-          <p className="mt-2 text-2xl font-bold text-[var(--pc-text)]">
-            {financialOverview?.totals?.totalSessionsAvailable || 0}{' '}
-            <span className="text-sm font-medium text-[var(--pc-text-secondary)]">
-              disponíveis
-            </span>
-          </p>
-          <p className="mt-1 text-xs text-[var(--pc-text-secondary)]">
-            {financialOverview?.totals?.totalSessionsReserved || 0} reservadas na agenda ·{' '}
-            {financialOverview?.totals?.totalSessionsUsed || 0} já concluídas
-          </p>
         </div>
 
-        <div className="rounded-xl border border-[var(--pc-border)] bg-white p-5 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-[var(--pc-text-muted)]">
-              Receita Apropriada (Realizada)
-            </span>
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-sky-50 text-sky-700">
-              <TrendingUp size={18} />
-            </span>
+        <div className="flex items-center gap-3.5 rounded-2xl border border-[#dedcf5] bg-gradient-to-br from-[#f3f2fc] via-[#faf9fe] to-white p-4 shadow-2xs">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-indigo-200/70 bg-white/90 text-indigo-600 shadow-2xs">
+            <TrendingUp size={20} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-zinc-600 truncate">
+              Receita apropriada (realizada)
+            </p>
+            <p className="mt-0.5 text-2xl font-black tracking-tight text-zinc-900 tabular-nums">
+              {money(financialOverview?.totals?.recognizedRevenue || 0)}
+            </p>
+            <p className="mt-0.5 text-[11px] text-zinc-500 truncate">
+              A realizar: {money(financialOverview?.totals?.deferredRevenue || 0)}
+            </p>
           </div>
-          <p className="mt-2 text-2xl font-bold text-[var(--pc-text)]">
-            {money(financialOverview?.totals?.recognizedRevenue || 0)}
-          </p>
-          <p className="mt-1 text-xs text-[var(--pc-text-secondary)]">
-            A realizar: {money(financialOverview?.totals?.deferredRevenue || 0)}
-          </p>
         </div>
 
-        <div className="rounded-xl border border-amber-200/80 bg-amber-50/40 p-5 shadow-2xs">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold uppercase tracking-wider text-amber-800">
-              Oportunidades de Renovação
-            </span>
-            <span className="grid h-9 w-9 place-items-center rounded-lg bg-amber-100 text-amber-800">
-              <RefreshCw size={18} />
-            </span>
+        <button
+          type="button"
+          onClick={() => setActiveTab('renewals')}
+          className="flex items-center gap-3.5 rounded-2xl border border-[#f3dfa9] bg-gradient-to-br from-[#fef7e6] via-[#fffbf0] to-white p-4 text-left shadow-2xs transition hover:border-amber-400 cursor-pointer"
+        >
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl border border-amber-200/80 bg-white/90 text-amber-700 shadow-2xs">
+            <RefreshCw size={20} />
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-semibold text-amber-900 truncate">
+              Oportunidades de renovação
+            </p>
+            <p className="mt-0.5 text-2xl font-black tracking-tight text-amber-950 tabular-nums">
+              {financialOverview?.renewalOpportunities?.length || 0}
+            </p>
+            <p className="mt-0.5 text-[11px] leading-snug text-amber-800">
+              Pacotes na última sessão ou vencendo em até 7 dias
+            </p>
           </div>
-          <p className="mt-2 text-2xl font-bold text-amber-950">
-            {financialOverview?.renewalOpportunities?.length || 0}
-          </p>
-          <p className="mt-1 text-xs text-amber-800">
-            Pacotes na última sessão ou vencendo em até 7 dias
-          </p>
-        </div>
+        </button>
       </div>
 
-      {/* Navegação de Abas */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-[var(--pc-border)] pb-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setActiveTab('contracts')}
-            className={`inline-flex min-h-10 items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'contracts'
-                ? 'bg-[var(--pc-text)] text-white shadow-xs'
-                : 'bg-white text-[var(--pc-text-secondary)] hover:bg-[var(--pc-surface-subtle)]'
-            }`}
-          >
-            <PackageCheck size={16} />
-            Contratos & Saldos ({contracts.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('catalog')}
-            className={`inline-flex min-h-10 items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'catalog'
-                ? 'bg-[var(--pc-text)] text-white shadow-xs'
-                : 'bg-white text-[var(--pc-text-secondary)] hover:bg-[var(--pc-surface-subtle)]'
-            }`}
-          >
-            <Layers size={16} />
-            Catálogo de Planos & Preços ({plans.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('renewals')}
-            className={`inline-flex min-h-10 items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold transition ${
-              activeTab === 'renewals'
-                ? 'bg-amber-600 text-white shadow-xs'
-                : 'bg-white text-[var(--pc-text-secondary)] hover:bg-[var(--pc-surface-subtle)]'
-            }`}
-          >
-            <AlertTriangle size={16} />
-            Fila de Renovação ({financialOverview?.renewalOpportunities?.length || 0})
-          </button>
-        </div>
+      {/* Navegação de Abas (Pílulas Institucionais) */}
+      <div className="mb-4 flex flex-wrap items-center gap-2.5">
+        <button
+          type="button"
+          onClick={() => setActiveTab('contracts')}
+          className={`inline-flex h-10 items-center gap-2 rounded-xl px-4 text-xs sm:text-sm font-semibold transition cursor-pointer ${
+            activeTab === 'contracts'
+              ? 'bg-[#0d6e5a] text-white shadow-xs'
+              : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+          }`}
+        >
+          <PackageCheck size={16} />
+          <span>Contratos & Saldos ({contracts.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('catalog')}
+          className={`inline-flex h-10 items-center gap-2 rounded-xl px-4 text-xs sm:text-sm font-semibold transition cursor-pointer ${
+            activeTab === 'catalog'
+              ? 'bg-[#0d6e5a] text-white shadow-xs'
+              : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+          }`}
+        >
+          <Layers size={16} />
+          <span>Catálogo de Planos & Preços ({plans.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab('renewals')}
+          className={`inline-flex h-10 items-center gap-2 rounded-xl px-4 text-xs sm:text-sm font-semibold transition cursor-pointer ${
+            activeTab === 'renewals'
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+          }`}
+        >
+          <AlertTriangle size={16} />
+          <span>Fila de Renovação ({financialOverview?.renewalOpportunities?.length || 0})</span>
+        </button>
       </div>
 
       {loading ? (
-        <div className="rounded-xl border border-[var(--pc-border)] bg-white">
+        <div className="rounded-2xl border border-zinc-200 bg-white">
           <ListSkeleton rows={5} />
         </div>
       ) : activeTab === 'contracts' ? (
         <div className="space-y-4">
-          <div className="flex flex-col gap-3 rounded-xl border border-[var(--pc-border)] bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="w-full sm:max-w-md">
-              <SearchField
+          {/* Barra Unificada de Busca, Dropdowns, Filtros Rápidos e Alternância Grid/Lista */}
+          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-zinc-200/90 bg-white p-2.5 sm:p-3 shadow-2xs">
+            {/* Busca */}
+            <div className="relative min-w-[175px] flex-1">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+              <input
+                type="text"
                 value={search}
-                onChange={setSearch}
+                onChange={e => setSearch(e.target.value)}
                 placeholder="Buscar por tutor, pet ou nome do pacote..."
+                className="h-9 w-full rounded-xl border border-zinc-200 bg-zinc-50/60 pl-8 pr-3 text-xs text-zinc-800 placeholder-zinc-400 outline-none transition focus:border-[#0d6e5a] focus:bg-white"
               />
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+
+            {/* Dropdowns Labeled (Status / Serviço / Porte) */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              <div className="relative w-[88px] rounded-xl border border-zinc-200 bg-zinc-50/60 px-2 py-1">
+                <span className="block text-[9px] font-medium leading-none text-zinc-400">Status</span>
+                <select
+                  value={statusFilter}
+                  onChange={e => setStatusFilter(e.target.value)}
+                  className="mt-0.5 w-full cursor-pointer appearance-none bg-transparent pr-4 text-[11px] font-bold leading-tight text-zinc-800 outline-none"
+                >
+                  <option value="all">Todos</option>
+                  <option value="active">Ativos</option>
+                  <option value="pending_payment">Pendentes</option>
+                  <option value="completed">Concluídos</option>
+                  <option value="expired">Vencidos</option>
+                  <option value="cancelled">Cancelados</option>
+                </select>
+                <ChevronDown size={12} className="pointer-events-none absolute bottom-1.5 right-1.5 text-zinc-500" />
+              </div>
+
+              <div className="relative w-[98px] rounded-xl border border-zinc-200 bg-zinc-50/60 px-2 py-1">
+                <span className="block text-[9px] font-medium leading-none text-zinc-400">Serviço</span>
+                <select
+                  value={serviceFilter}
+                  onChange={e => setServiceFilter(e.target.value)}
+                  className="mt-0.5 w-full cursor-pointer appearance-none bg-transparent pr-4 text-[11px] font-bold leading-tight text-zinc-800 outline-none truncate"
+                >
+                  <option value="all">Todos</option>
+                  {contractServiceOptions.map(s => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <ChevronDown size={12} className="pointer-events-none absolute bottom-1.5 right-1.5 text-zinc-500" />
+              </div>
+
+              <div className="relative w-[88px] rounded-xl border border-zinc-200 bg-zinc-50/60 px-2 py-1">
+                <span className="block text-[9px] font-medium leading-none text-zinc-400">Porte</span>
+                <select
+                  value={sizeFilter}
+                  onChange={e => setSizeFilter(e.target.value)}
+                  className="mt-0.5 w-full cursor-pointer appearance-none bg-transparent pr-4 text-[11px] font-bold leading-tight text-zinc-800 outline-none"
+                >
+                  <option value="all">Todos</option>
+                  <option value="mini">Mini</option>
+                  <option value="small">Pequeno (P)</option>
+                  <option value="medium">Médio (M)</option>
+                  <option value="large">Grande (G)</option>
+                  <option value="giant">Gigante (GG)</option>
+                </select>
+                <ChevronDown size={12} className="pointer-events-none absolute bottom-1.5 right-1.5 text-zinc-500" />
+              </div>
+            </div>
+
+            {/* Pílulas Rápidas de Status */}
+            <div className="flex flex-wrap items-center gap-1">
               {[
-                { key: 'active', label: 'Ativos' },
-                { key: 'completed', label: 'Concluídos' },
-                { key: 'expired', label: 'Vencidos' },
-                { key: 'cancelled', label: 'Cancelados' },
-                { key: 'all', label: 'Todos' },
-              ].map(tab => (
+                { key: 'all', label: `Todos (${contractCounts.all})` },
+                { key: 'active', label: `Ativos (${contractCounts.active})` },
+                { key: 'pending_payment', label: `Pendentes (${contractCounts.pending})` },
+                { key: 'expired', label: `Vencidos (${contractCounts.expired})` },
+              ].map(pill => (
                 <button
-                  key={tab.key}
+                  key={pill.key}
                   type="button"
-                  onClick={() => setStatusFilter(tab.key)}
-                  className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition ${
-                    statusFilter === tab.key
-                      ? 'bg-[var(--pc-action)] text-white'
-                      : 'border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] text-[var(--pc-text-secondary)] hover:bg-white'
+                  onClick={() => setStatusFilter(pill.key)}
+                  className={`rounded-full px-2.5 py-1.5 text-[11px] font-bold transition cursor-pointer whitespace-nowrap ${
+                    statusFilter === pill.key
+                      ? 'bg-[#0d6e5a] text-white shadow-2xs'
+                      : 'border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
                   }`}
                 >
-                  {tab.label}
+                  {pill.label}
                 </button>
               ))}
+            </div>
+
+            {/* Botões de Alternância Grid / Lista */}
+            <div className="ml-auto flex items-center rounded-xl border border-zinc-200 bg-zinc-100/70 p-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode('grid')}
+                title="Visualização em Grade Compacta"
+                className={`grid h-8 w-8 place-items-center rounded-lg transition cursor-pointer ${
+                  viewMode === 'grid'
+                    ? 'bg-[#0d6e5a] text-white shadow-2xs'
+                    : 'text-zinc-500 hover:text-zinc-800'
+                }`}
+              >
+                <LayoutGrid size={15} />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                title="Visualização Detalhada"
+                className={`grid h-8 w-8 place-items-center rounded-lg transition cursor-pointer ${
+                  viewMode === 'list'
+                    ? 'bg-[#0d6e5a] text-white shadow-2xs'
+                    : 'text-zinc-500 hover:text-zinc-800'
+                }`}
+              >
+                <List size={15} />
+              </button>
             </div>
           </div>
 
           {filteredContracts.length === 0 ? (
-            <div className="rounded-xl border border-[var(--pc-border)] bg-white">
+            <div className="rounded-2xl border border-zinc-200 bg-white">
               <EmptyState
                 icon={PackageCheck}
                 title="Nenhum pacote encontrado neste filtro"
@@ -916,174 +1090,453 @@ export default function PetshopPackagesPage() {
               />
             </div>
           ) : (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-              {filteredContracts.map(contract => {
-                const totalSessions = contract.items.reduce((s, i) => s + i.totalQuantity, 0);
-                const usedSessions = contract.items.reduce((s, i) => s + i.usedQuantity, 0);
-                const reservedSessions = contract.items.reduce((s, i) => s + i.reservedQuantity, 0);
-                const availableSessions = contract.items.reduce((s, i) => s + i.availableQuantity, 0);
-                const progressPct =
-                  totalSessions > 0
-                    ? Math.min(100, Math.round(((usedSessions + reservedSessions) / totalSessions) * 100))
-                    : 0;
-                const isLowBalance = contract.status === 'active' && availableSessions <= 1;
+            <>
+              <div className={viewMode === 'grid' ? 'grid grid-cols-1 gap-3 xl:grid-cols-2' : 'space-y-3'}>
+                {paginatedContracts.map(contract => {
+                  const totalSessions = contract.items.reduce((s, i) => s + i.totalQuantity, 0);
+                  const usedSessions = contract.items.reduce((s, i) => s + i.usedQuantity, 0);
+                  const reservedSessions = contract.items.reduce((s, i) => s + i.reservedQuantity, 0);
+                  const availableSessions = contract.items.reduce((s, i) => s + i.availableQuantity, 0);
+                  const usedPct =
+                    totalSessions > 0
+                      ? Math.min(100, Math.round((usedSessions / totalSessions) * 100))
+                      : 0;
+                  const expired = isContractExpired(contract);
+                  const isPendingPayment = contract.paymentStatus === 'pending' && contract.status !== 'cancelled' && !expired;
+                  const isLowBalance = contract.status === 'active' && !expired && availableSessions <= 1;
 
-                return (
-                  <div
-                    key={contract.id}
-                    className="flex flex-col justify-between rounded-xl border border-[var(--pc-border)] bg-white p-5 shadow-2xs transition hover:border-[var(--pc-border-strong)]"
-                  >
-                    <div>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-3">
-                          {contract.pet ? (
-                            <PetAvatar pet={contract.pet} size="md" />
-                          ) : (
-                            <div className="grid h-11 w-11 place-items-center rounded-full bg-teal-50 text-teal-700">
-                              <Users size={18} />
-                            </div>
-                          )}
-                          <div>
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="text-base font-bold text-[var(--pc-text)]">
+                  const accentBarColor = isPendingPayment
+                    ? 'bg-amber-400'
+                    : expired
+                      ? 'bg-rose-500'
+                      : contract.status === 'completed'
+                        ? 'bg-sky-500'
+                        : contract.status === 'cancelled'
+                          ? 'bg-zinc-400'
+                          : 'bg-[#0d6e5a]';
+
+                  const statusBadge = expired
+                    ? { label: 'Vencido', cls: 'bg-rose-50 text-rose-700 border border-rose-200/70' }
+                    : contract.status === 'cancelled'
+                      ? { label: 'Cancelado', cls: 'bg-zinc-100 text-zinc-600 border border-zinc-200' }
+                      : contract.status === 'completed'
+                        ? { label: 'Concluído', cls: 'bg-sky-50 text-sky-700 border border-sky-200/70' }
+                        : isPendingPayment
+                          ? { label: 'Pendente', cls: 'bg-amber-50 text-amber-800 border border-amber-200/70' }
+                          : { label: 'Ativo', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200/70' };
+
+                  if (viewMode === 'grid') {
+                    return (
+                      <div
+                        key={contract.id}
+                        className="group relative rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-2xs transition hover:border-[#0d6e5a]/40 hover:shadow-sm"
+                      >
+                        {/* Barra lateral de status */}
+                        <span className={`absolute bottom-3 left-0 top-3 w-1 rounded-r-full ${accentBarColor}`} />
+
+                        <div className="flex flex-col gap-3 pl-1 sm:flex-row sm:items-center sm:justify-between">
+                          {/* Bloco Esquerdo: Avatar + Nome do Pacote + Badge Táxi + Tutor/Pet */}
+                          <div
+                            onClick={() => setSelectedContract(contract)}
+                            className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
+                          >
+                            {contract.pet ? (
+                              <PetAvatar pet={contract.pet} size="md" />
+                            ) : (
+                              <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-teal-50 text-teal-700 ring-2 ring-white shadow-xs">
+                                <Users size={18} />
+                              </div>
+                            )}
+
+                            <div className="min-w-0 flex-1">
+                              <h3 className="truncate text-sm font-bold text-zinc-900 group-hover:text-[#0d6e5a] transition-colors">
                                 {contract.planNameSnapshot}
                               </h3>
-                              {contract.isShared && (
-                                <span className="rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
-                                  Compartilhado
-                                </span>
-                              )}
-                              {contract.transport?.enabled && (
-                                <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-                                  🚐 Táxi Dog (+{money(contract.transport.fee || 0)})
-                                </span>
+
+                              <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                                {contract.transport?.enabled && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">
+                                    🚐 Táxi Dog (+{money(contract.transport.fee || 0)})
+                                  </span>
+                                )}
+                                {contract.isShared && (
+                                  <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+                                    Compartilhado
+                                  </span>
+                                )}
+                              </div>
+
+                              <p className="mt-0.5 truncate text-xs text-zinc-500">
+                                Tutor: <strong className="font-semibold text-zinc-800">{contract.customer?.name}</strong>
+                                {contract.pet ? ` · Pet: ${contract.pet.name}` : ' · Todos os pets'}
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Bloco Central: Progresso de Sessões + Reservadas */}
+                          <div
+                            onClick={() => setSelectedContract(contract)}
+                            className="w-full shrink-0 cursor-pointer sm:w-[138px]"
+                          >
+                            <div className="mb-1 flex items-center justify-between text-[11px]">
+                              <span className="font-semibold text-zinc-700">
+                                {usedSessions} de {totalSessions} sessões
+                              </span>
+                              <span className="font-bold tabular-nums text-zinc-900">
+                                {usedPct}%
+                              </span>
+                            </div>
+                            <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-100">
+                              <div
+                                className={`h-full rounded-full transition-all ${
+                                  usedPct >= 100
+                                    ? 'bg-emerald-500'
+                                    : isLowBalance
+                                      ? 'bg-amber-500'
+                                      : 'bg-[#0d6e5a]'
+                                }`}
+                                style={{ width: `${usedPct}%` }}
+                              />
+                            </div>
+                            <div className="mt-1 flex items-center gap-1 text-[11px] text-zinc-500">
+                              <Calendar size={11} className="shrink-0 text-zinc-400" />
+                              <span>{reservedSessions} reservadas</span>
+                            </div>
+                          </div>
+
+                          {/* Bloco Direito: Pílula Status + Pagamento/Data + Valor + Menu (...) */}
+                          <div className="flex items-center justify-between gap-2.5 border-t border-zinc-100 pt-2 sm:justify-end sm:border-t-0 sm:pt-0 shrink-0">
+                            <div
+                              onClick={() => setSelectedContract(contract)}
+                              className="cursor-pointer text-left sm:min-w-[82px] sm:text-right"
+                            >
+                              <span className={`inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold ${statusBadge.cls}`}>
+                                {statusBadge.label}
+                              </span>
+
+                              {expired ? (
+                                <>
+                                  <p className="mt-1 text-[10px] font-bold leading-tight text-rose-600">
+                                    Vencido em
+                                  </p>
+                                  <p className="text-xs font-black tabular-nums leading-tight text-rose-700">
+                                    {new Date(contract.expiresAt).toLocaleDateString('pt-BR')}
+                                  </p>
+                                </>
+                              ) : contract.status === 'cancelled' ? (
+                                <>
+                                  <p className="mt-1 text-[10px] font-bold leading-tight text-zinc-500">
+                                    Cancelado
+                                  </p>
+                                  <p className="text-xs font-bold tabular-nums leading-tight text-zinc-500 line-through">
+                                    {money(contract.finalPrice)}
+                                  </p>
+                                </>
+                              ) : isPendingPayment ? (
+                                <>
+                                  <p className="mt-1 text-[10px] font-bold leading-tight text-amber-700">
+                                    Pendente Caixa
+                                  </p>
+                                  <p className="text-xs font-black tabular-nums leading-tight text-amber-800">
+                                    {money(contract.finalPrice)}
+                                  </p>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="mt-1 text-[10px] font-bold leading-tight text-emerald-700">
+                                    Pago
+                                  </p>
+                                  <p className="text-xs font-black tabular-nums leading-tight text-emerald-800">
+                                    {money(contract.finalPrice)}
+                                  </p>
+                                </>
                               )}
                             </div>
-                            <p className="text-xs text-[var(--pc-text-secondary)]">
-                              Tutor: <strong className="text-[var(--pc-text)]">{contract.customer?.name}</strong>
-                              {contract.pet ? ` · Pet: ${contract.pet.name}` : ' · Todos os pets do tutor'}
-                            </p>
+
+                            {/* Botão de Ações (...) */}
+                            <div className="relative" onClick={e => e.stopPropagation()}>
+                              <button
+                                type="button"
+                                aria-label="Ações do contrato"
+                                onClick={() => setOpenMenuId(prev => (prev === contract.id ? null : contract.id))}
+                                className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 cursor-pointer"
+                              >
+                                <MoreHorizontal size={17} />
+                              </button>
+
+                              {openMenuId === contract.id && (
+                                <div className="absolute bottom-9 right-0 z-30 w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl sm:bottom-auto sm:top-9">
+                                  {contract.status === 'active' && !expired && availableSessions > 0 && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenMenuId(null);
+                                        navigate(`/petshop/agenda?new=1${contract.petId ? `&petId=${encodeURIComponent(contract.petId)}` : ''}`);
+                                      }}
+                                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-teal-800 hover:bg-teal-50 cursor-pointer"
+                                    >
+                                      <Calendar size={14} />
+                                      <span>Agendar Sessão</span>
+                                    </button>
+                                  )}
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setOpenMenuId(null);
+                                      setSelectedContract(contract);
+                                    }}
+                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+                                  >
+                                    <History size={14} />
+                                    <span>Extrato, Detalhes & Estorno</span>
+                                  </button>
+                                  {isPendingPayment && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenMenuId(null);
+                                        handleConfirmPayment(contract.id);
+                                      }}
+                                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer"
+                                    >
+                                      <CheckCircle2 size={14} />
+                                      <span>Confirmar Recebimento</span>
+                                    </button>
+                                  )}
+                                  {(isLowBalance || expired || contract.status === 'completed') && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenMenuId(null);
+                                        handleRenewContract({
+                                          customer: contract.customer,
+                                          pet: contract.pet,
+                                          packagePlanId: contract.packagePlanId,
+                                          planName: contract.planNameSnapshot,
+                                        });
+                                      }}
+                                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-amber-800 hover:bg-amber-50 cursor-pointer"
+                                    >
+                                      <RefreshCw size={14} />
+                                      <span>Renovar Pacote</span>
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  /* Modo Lista Detalhada (Alternado pelo botão de visualização) */
+                  return (
+                    <div
+                      key={contract.id}
+                      className="flex flex-col justify-between rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-2xs transition hover:border-[#0d6e5a]/40"
+                    >
+                      <div>
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            {contract.pet ? (
+                              <PetAvatar pet={contract.pet} size="md" />
+                            ) : (
+                              <div className="grid h-11 w-11 place-items-center rounded-full bg-teal-50 text-teal-700">
+                                <Users size={18} />
+                              </div>
+                            )}
+                            <div>
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-base font-bold text-zinc-900">
+                                  {contract.planNameSnapshot}
+                                </h3>
+                                {contract.isShared && (
+                                  <span className="rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                                    Compartilhado
+                                  </span>
+                                )}
+                                {contract.transport?.enabled && (
+                                  <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+                                    🚐 Táxi Dog (+{money(contract.transport.fee || 0)})
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-zinc-500">
+                                Tutor: <strong className="text-zinc-800">{contract.customer?.name}</strong>
+                                {contract.pet ? ` · Pet: ${contract.pet.name}` : ' · Todos os pets do tutor'}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end gap-1">
+                            <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${statusBadge.cls}`}>
+                              {statusBadge.label}
+                            </span>
+                            <span
+                              className={`text-[11px] font-bold ${
+                                contract.paymentStatus === 'paid'
+                                  ? 'text-emerald-700'
+                                  : 'text-amber-700'
+                              }`}
+                            >
+                              {contract.paymentStatus === 'paid'
+                                ? `Pago (${money(contract.finalPrice)})`
+                                : `Pendente Caixa (${money(contract.finalPrice)})`}
+                            </span>
                           </div>
                         </div>
 
-                        <div className="flex flex-col items-end gap-1">
-                          <span
-                            className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                              contract.status === 'active'
-                                ? 'bg-emerald-50 text-emerald-700'
-                                : contract.status === 'completed'
-                                  ? 'bg-slate-100 text-slate-700'
-                                  : 'bg-rose-50 text-rose-700'
-                            }`}
-                          >
-                            {contract.status === 'active'
-                              ? 'Ativo'
-                              : contract.status === 'completed'
-                                ? 'Concluído'
-                                : contract.status === 'expired'
-                                  ? 'Expirado'
-                                  : 'Cancelado'}
-                          </span>
-                          <span
-                            className={`text-[11px] font-semibold ${
-                              contract.paymentStatus === 'paid'
-                                ? 'text-emerald-700'
-                                : 'text-amber-700'
-                            }`}
-                          >
-                            {contract.paymentStatus === 'paid'
-                              ? `Pago (${money(contract.finalPrice)})`
-                              : `Pendente Caixa (${money(contract.finalPrice)})`}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Barra Visual de Saldo de Sessões */}
-                      <div className="mt-4 rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-3.5">
-                        <div className="mb-2 flex items-center justify-between text-xs">
-                          <span className="font-semibold text-[var(--pc-text)]">
-                            Saldo Disponível: {availableSessions} de {totalSessions} sessões
-                          </span>
-                          <span className="text-[var(--pc-text-secondary)]">
-                            {usedSessions} usadas · {reservedSessions} agendadas
-                          </span>
-                        </div>
-                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-200">
-                          <div
-                            className={`h-full rounded-full transition-all ${
-                              isLowBalance ? 'bg-amber-500' : 'bg-[var(--pc-action)]'
-                            }`}
-                            style={{ width: `${progressPct}%` }}
-                          />
-                        </div>
-
-                        <div className="mt-3 space-y-1.5">
-                          {contract.items.map(item => (
+                        <div className="mt-4 rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5">
+                          <div className="mb-2 flex items-center justify-between text-xs">
+                            <span className="font-semibold text-zinc-800">
+                              Saldo Disponível: {availableSessions} de {totalSessions} sessões
+                            </span>
+                            <span className="text-zinc-500">
+                              {usedSessions} usadas · {reservedSessions} agendadas
+                            </span>
+                          </div>
+                          <div className="h-2.5 w-full overflow-hidden rounded-full bg-zinc-200">
                             <div
-                              key={item.id}
-                              className="flex items-center justify-between rounded-lg bg-white px-3 py-1.5 text-xs border border-[var(--pc-border)]"
-                            >
-                              <span className="font-medium text-[var(--pc-text)]">
-                                {item.serviceNameSnapshot}
-                              </span>
-                              <div className="flex items-center gap-2">
-                                {item.reservedQuantity > 0 && (
-                                  <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
-                                    {item.reservedQuantity} reservada(s)
-                                  </span>
-                                )}
-                                <span className="font-semibold text-[var(--pc-action)]">
-                                  {item.availableQuantity}/{item.totalQuantity} livres
+                              className={`h-full rounded-full transition-all ${
+                                isLowBalance ? 'bg-amber-500' : 'bg-[#0d6e5a]'
+                              }`}
+                              style={{ width: `${totalSessions > 0 ? Math.min(100, Math.round(((usedSessions + reservedSessions) / totalSessions) * 100)) : 0}%` }}
+                            />
+                          </div>
+
+                          <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
+                            {contract.items.map(item => (
+                              <div
+                                key={item.id}
+                                className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs"
+                              >
+                                <span className="font-medium text-zinc-800">
+                                  {item.serviceNameSnapshot}
                                 </span>
+                                <div className="flex items-center gap-2">
+                                  {item.reservedQuantity > 0 && (
+                                    <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
+                                      {item.reservedQuantity} reservada(s)
+                                    </span>
+                                  )}
+                                  <span className="font-bold text-[#0d6e5a]">
+                                    {item.availableQuantity}/{item.totalQuantity} livres
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                          ))}
+                            ))}
+                          </div>
                         </div>
+
+                        {isLowBalance && (
+                          <div className="mt-3 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                            <span className="inline-flex items-center gap-1.5 font-semibold">
+                              <AlertTriangle size={14} className="text-amber-600" />
+                              {availableSessions === 0
+                                ? 'Saldo livre esgotado — Oferecer renovação ao tutor'
+                                : 'Última sessão disponível — Oferecer renovação ao tutor'}
+                            </span>
+                          </div>
+                        )}
                       </div>
 
-                      {isLowBalance && (
-                        <div className="mt-3 flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
-                          <span className="inline-flex items-center gap-1.5 font-semibold">
-                            <AlertTriangle size={14} className="text-amber-600" />
-                            {availableSessions === 0
-                              ? 'Saldo livre esgotado — Oferecer renovação ao tutor'
-                              : 'Última sessão disponível — Oferecer renovação ao tutor'}
-                          </span>
-                        </div>
-                      )}
-                    </div>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-3 text-xs text-zinc-500">
+                        <span className="inline-flex items-center gap-1.5">
+                          <Calendar size={13} />
+                          Válido até {new Date(contract.expiresAt).toLocaleDateString('pt-BR')}
+                        </span>
 
-                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-[var(--pc-border)] pt-3 text-xs text-[var(--pc-text-secondary)]">
-                      <span className="inline-flex items-center gap-1.5">
-                        <Calendar size={13} />
-                        Válido até {new Date(contract.expiresAt).toLocaleDateString('pt-BR')}
-                      </span>
-
-                      <div className="flex items-center gap-2">
-                        {contract.status === 'active' && availableSessions > 0 && (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {contract.status === 'active' && !expired && availableSessions > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => navigate(`/petshop/agenda?new=1${contract.petId ? `&petId=${encodeURIComponent(contract.petId)}` : ''}`)}
+                              className="inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2.5 py-1.5 text-xs font-semibold text-teal-800 transition hover:bg-teal-100 cursor-pointer"
+                            >
+                              Agendar Sessão
+                              <ArrowRight size={13} />
+                            </button>
+                          )}
                           <button
                             type="button"
-                            onClick={() => navigate(`/petshop/agenda?new=1${contract.petId ? `&petId=${encodeURIComponent(contract.petId)}` : ''}`)}
-                            className="inline-flex items-center gap-1 rounded-lg bg-teal-50 px-2.5 py-1.5 text-xs font-semibold text-teal-800 transition hover:bg-teal-100"
+                            onClick={() => setSelectedContract(contract)}
+                            className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 cursor-pointer"
                           >
-                            Agendar Sessão
-                            <ArrowRight size={13} />
+                            <History size={13} />
+                            Extrato & Estorno
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          onClick={() => setSelectedContract(contract)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-[var(--pc-border-strong)] bg-white px-2.5 py-1.5 text-xs font-semibold text-[var(--pc-text)] transition hover:bg-[var(--pc-surface-subtle)]"
-                        >
-                          <History size={13} />
-                          Extrato & Estorno
-                        </button>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+
+              {/* Barra de Paginação Inferior (Fiel ao Mockup Web) */}
+              <div className="flex flex-col items-center justify-between gap-3 pt-2 text-xs text-zinc-500 sm:flex-row">
+                <p className="font-medium">
+                  Mostrando <strong className="text-zinc-800">{paginatedContracts.length}</strong> de{' '}
+                  <strong className="text-zinc-800">{filteredContracts.length}</strong> pacotes
+                </p>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={safePage <= 1}
+                    onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    className="grid h-8 w-8 place-items-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    <ChevronLeft size={15} />
+                  </button>
+
+                  {Array.from({ length: totalPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
+                    .map((pageNum, idx, arr) => {
+                      const prev = arr[idx - 1];
+                      const showEllipsis = prev && pageNum - prev > 1;
+                      return (
+                        <div key={pageNum} className="flex items-center gap-1.5">
+                          {showEllipsis && <span className="px-1 text-zinc-400">...</span>}
+                          <button
+                            type="button"
+                            onClick={() => setCurrentPage(pageNum)}
+                            className={`grid h-8 w-8 place-items-center rounded-lg text-xs font-bold transition cursor-pointer ${
+                              safePage === pageNum
+                                ? 'bg-[#0d6e5a] text-white shadow-2xs'
+                                : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+                            }`}
+                          >
+                            {pageNum}
+                          </button>
+                        </div>
+                      );
+                    })}
+
+                  <button
+                    type="button"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    className="grid h-8 w-8 place-items-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                  >
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+
+                <div className="relative">
+                  <select
+                    value={pageSize}
+                    onChange={e => setPageSize(Number(e.target.value))}
+                    className="h-8 cursor-pointer appearance-none rounded-xl border border-zinc-200 bg-white pl-3 pr-7 text-xs font-semibold text-zinc-700 outline-none hover:bg-zinc-50"
+                  >
+                    <option value={10}>10 por página</option>
+                    <option value={20}>20 por página</option>
+                    <option value={50}>50 por página</option>
+                  </select>
+                  <ChevronDown size={13} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400" />
+                </div>
+              </div>
+            </>
           )}
         </div>
       ) : activeTab === 'catalog' ? (
@@ -1886,10 +2339,6 @@ export default function PetshopPackagesPage() {
 
                 {contractForm.scheduleRecurring && (
                   <div className="space-y-3 pt-1">
-                    <p className="text-[11px] text-teal-900 leading-relaxed">
-                      Escolha o dia da semana e horário padrão (ex: Sexta-feira às 15:00). O sistema gera todas as semanas do pacote (30, 60 ou 90 dias) e você pode alterar livremente o dia ou horário de qualquer semana específica abaixo:
-                    </p>
-
                     <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
                       <div>
                         <label className="mb-1 block text-[11px] font-semibold text-teal-950">
@@ -1933,7 +2382,7 @@ export default function PetshopPackagesPage() {
                     </div>
 
                     {scheduledSessions.length > 0 && (
-                      <div className="max-h-52 space-y-2 overflow-y-auto rounded-xl border border-teal-200/80 bg-white p-2.5">
+                      <div className="space-y-2 rounded-xl border border-teal-200/80 bg-white p-2.5">
                         {scheduledSessions.map((sess, idx) => {
                           const dObj = sess.date ? new Date(`${sess.date}T12:00:00`) : null;
                           const weekdayLabel =

@@ -399,6 +399,63 @@ export class PetshopService {
     });
   }
 
+  async listFrequentTutorsForBooking() {
+    const prisma = await this.prisma();
+    const visitFilter = {
+      startsAt: { lte: new Date() },
+      status: { in: ['checked_in', 'bathing', 'grooming', 'finishing', 'ready', 'delivered'] },
+      pet: { is: { active: true } },
+    };
+    const ranked = await prisma.petAppointment.groupBy({
+      by: ['customerId'],
+      where: visitFilter,
+      _count: { id: true },
+      _max: { startsAt: true },
+      orderBy: [{ _count: { id: 'desc' } }, { _max: { startsAt: 'desc' } }],
+      take: 8,
+    });
+    if (!ranked.length) return [];
+
+    const customers = await prisma.customer.findMany({
+      where: { id: { in: ranked.map(row => row.customerId) } },
+      select: { id: true, name: true, phone: true, photoUrl: true },
+    });
+    const byId = new Map(customers.map(customer => [customer.id, customer]));
+    return Promise.all(ranked.flatMap(row => {
+      const customer = byId.get(row.customerId);
+      if (!customer || !row._max.startsAt) return [];
+      return [{ customer, row }];
+    }).map(async ({ customer, row }) => {
+      const lastAppointment = await prisma.petAppointment.findFirst({
+        where: { ...visitFilter, customerId: customer.id },
+        orderBy: { startsAt: 'desc' },
+        select: { pet: { select: { id: true, name: true, species: true, photoUrl: true } } },
+      });
+      return {
+        id: customer.id,
+        name: customer.name,
+        phone: customer.phone,
+        photoUrl: customer.photoUrl,
+        pet: lastAppointment?.pet ?? null,
+        appointmentsCount: row._count.id,
+        lastVisitAt: row._max.startsAt,
+      };
+    }));
+  }
+
+  async listBookingTutorDirectory(pageInput?: string) {
+    const page = Number(pageInput ?? '1');
+    if (!Number.isInteger(page) || page < 1 || page > 1000) throw new BadRequestException('Página inválida.');
+    const prisma = await this.prisma();
+    const rows = await prisma.customer.findMany({
+      select: { id: true, name: true, phone: true },
+      orderBy: [{ name: 'asc' }, { id: 'asc' }],
+      skip: (page - 1) * 20,
+      take: 21,
+    });
+    return { items: rows.slice(0, 20), page, hasMore: rows.length > 20 };
+  }
+
   private tutorData(data: any) {
     const phone = requiredText(data?.phone, 'Telefone').replace(/\D/g, '');
     if (phone.length < 10 || phone.length > 15) throw new BadRequestException('Informe um telefone válido com DDD.');

@@ -31,7 +31,7 @@ export class PetshopAccessGuard implements CanActivate {
       const method = request.method;
       if (path.startsWith('/petshop/reception/') && !operator) throw new ForbiddenException('Identifique o colaborador com PIN para cadastrar na recepção.');
       const allowed = method === 'GET'
-        ? path === '/petshop/reception/tutors' || path === '/petshop/tutors/booking-search' || path === '/petshop/appointments/overdue-pickups' || /^\/petshop\/(overview|appointments|pending-reservations|pets|services|stages)$/.test(path) || /^\/petshop\/pets\/[^/]+$/.test(path) || /^\/petshop\/packages\/available\/[^/]+$/.test(path)
+        ? path === '/petshop/reception/tutors' || path === '/petshop/tutors/booking-search' || path === '/petshop/tutors/booking-frequent' || path === '/petshop/tutors/booking-directory' || path === '/petshop/appointments/overdue-pickups' || /^\/petshop\/(overview|appointments|pending-reservations|pets|services|stages)$/.test(path) || /^\/petshop\/pets\/[^/]+$/.test(path) || /^\/petshop\/packages\/available\/[^/]+$/.test(path)
         : method === 'POST'
           ? path === '/petshop/reception/registrations' || path === '/petshop/appointments' || /^\/petshop\/appointments\/[^/]+\/(receive|checkout|taxi-departure)$/.test(path) || path === '/petshop/uploads/photo' || /^\/petshop\/tutors\/[^/]+\/portal-link$/.test(path)
           : method === 'PATCH' && /^\/petshop\/appointments\/[^/]+(?:\/status)?$/.test(path);

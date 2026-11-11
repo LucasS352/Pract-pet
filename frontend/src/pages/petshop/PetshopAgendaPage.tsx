@@ -64,6 +64,12 @@ import { TaxiDogWidget } from './TaxiDogWidget';
 import { packageTransportCovers, packageTransportUiMode } from './taxi-operations';
 
 type ViewMode = 'day' | 'week' | 'timeline' | 'professionals';
+type FrequentBookingTutor = Pick<Tutor, 'id' | 'name' | 'phone'> & {
+  pet: Pick<Pet, 'id' | 'name' | 'species' | 'photoUrl'> | null;
+  appointmentsCount: number;
+  lastVisitAt: string;
+};
+type BookingTutorDirectory = { items: Array<Pick<Tutor, 'id' | 'name' | 'phone'>>; page: number; hasMore: boolean };
 
 const statuses = [
   ['requested', 'Solicitado'],
@@ -234,10 +240,22 @@ export default function PetshopAgendaPage() {
   const [searchingTutors, setSearchingTutors] = useState(false);
   const [searchedTutorQuery, setSearchedTutorQuery] = useState('');
   const [tutorSearchError, setTutorSearchError] = useState(false);
+  const [frequentTutors, setFrequentTutors] = useState<FrequentBookingTutor[]>([]);
+  const [loadingFrequentTutors, setLoadingFrequentTutors] = useState(false);
+  const [frequentTutorsError, setFrequentTutorsError] = useState(false);
+  const [frequentRetry, setFrequentRetry] = useState(0);
+  const [showTutorDirectory, setShowTutorDirectory] = useState(false);
+  const [directoryTutors, setDirectoryTutors] = useState<BookingTutorDirectory['items']>([]);
+  const [directoryPage, setDirectoryPage] = useState(0);
+  const [directoryHasMore, setDirectoryHasMore] = useState(false);
+  const [loadingDirectory, setLoadingDirectory] = useState(false);
+  const [directoryError, setDirectoryError] = useState(false);
   const [loadingBookingPets, setLoadingBookingPets] = useState(false);
   const [bookingPetsError, setBookingPetsError] = useState(false);
   const petsRequest = useRef(0);
   const bookingPetsController = useRef<AbortController | null>(null);
+  const directoryController = useRef<AbortController | null>(null);
+  const directoryRequest = useRef(0);
   const transportEdited = useRef(false);
   const [services, setServices] = useState<PetService[]>([]);
   const [operators, setOperators] = useState<any[]>([]);
@@ -246,7 +264,6 @@ export default function PetshopAgendaPage() {
 
   // Filtros
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedBranch, setSelectedBranch] = useState('all');
   const [selectedProfessional, setSelectedProfessional] = useState('all');
   const [selectedService, setSelectedService] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
@@ -261,7 +278,14 @@ export default function PetshopAgendaPage() {
     if (openNew) return;
     ++petsRequest.current;
     bookingPetsController.current?.abort();
+    ++directoryRequest.current;
+    directoryController.current?.abort();
     setLoadingBookingPets(false);
+    setLoadingDirectory(false);
+    setShowTutorDirectory(false);
+    setDirectoryTutors([]);
+    setDirectoryPage(0);
+    setDirectoryHasMore(false);
   }, [openNew]);
 
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
@@ -426,6 +450,44 @@ export default function PetshopAgendaPage() {
   }, []);
 
   useEffect(() => {
+    if (!openNew) return;
+    const controller = new AbortController();
+    setLoadingFrequentTutors(true);
+    setFrequentTutorsError(false);
+    api.get<FrequentBookingTutor[]>('/petshop/tutors/booking-frequent', { signal: controller.signal })
+      .then(({ data }) => { if (!controller.signal.aborted) setFrequentTutors(Array.isArray(data) ? data.slice(0, 8) : []); })
+      .catch(() => { if (!controller.signal.aborted) setFrequentTutorsError(true); })
+      .finally(() => { if (!controller.signal.aborted) setLoadingFrequentTutors(false); });
+    return () => controller.abort();
+  }, [openNew, frequentRetry]);
+
+  const loadBookingTutorDirectory = async (page: number) => {
+    const request = ++directoryRequest.current;
+    directoryController.current?.abort();
+    const controller = new AbortController();
+    directoryController.current = controller;
+    setLoadingDirectory(true);
+    setDirectoryError(false);
+    if (page === 1) {
+      setDirectoryTutors([]);
+      setDirectoryPage(0);
+      setDirectoryHasMore(false);
+    }
+    try {
+      const { data } = await api.get<BookingTutorDirectory>('/petshop/tutors/booking-directory', { params: { page }, signal: controller.signal });
+      if (request !== directoryRequest.current || controller.signal.aborted) return;
+      const items = Array.isArray(data.items) ? data.items : [];
+      setDirectoryTutors(current => page === 1 ? items : [...current, ...items.filter(item => !current.some(existing => existing.id === item.id))]);
+      setDirectoryPage(page);
+      setDirectoryHasMore(Boolean(data.hasMore));
+    } catch {
+      if (request === directoryRequest.current && !controller.signal.aborted) setDirectoryError(true);
+    } finally {
+      if (request === directoryRequest.current) setLoadingDirectory(false);
+    }
+  };
+
+  useEffect(() => {
     if (!openNew || selectedTutor || tutorQuery.trim().length < 2) {
       setTutorResults([]);
       setSearchingTutors(false);
@@ -455,6 +517,7 @@ export default function PetshopAgendaPage() {
     bookingPetsController.current = controller;
     transportEdited.current = false;
     setSelectedTutor(tutor);
+    setShowTutorDirectory(false);
     setTutorResults([]);
     setPets([]);
     setLoadingBookingPets(true);
@@ -1283,20 +1346,8 @@ export default function PetshopAgendaPage() {
           )}
         </div>
 
-        {/* Dropdowns em Grid 2x2 */}
+        {/* Dropdowns em Grid 2x2 (Profissional, Serviço, Status e Ocultar Concluídos) */}
         <div className="grid grid-cols-2 gap-2">
-          <div className="relative">
-            <select
-              value={selectedBranch}
-              onChange={e => setSelectedBranch(e.target.value)}
-              className="h-10 w-full cursor-pointer appearance-none rounded-xl border border-zinc-200 bg-white px-3 pr-8 text-xs font-medium text-zinc-700 outline-none shadow-2xs"
-            >
-              <option value="all">Unidade</option>
-              <option value="main">Unidade Principal</option>
-            </select>
-            <ChevronRight size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-zinc-400 pointer-events-none" />
-          </div>
-
           <div className="relative">
             <select
               value={selectedProfessional}
@@ -1345,95 +1396,172 @@ export default function PetshopAgendaPage() {
             </select>
             <ChevronRight size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 rotate-90 text-zinc-400 pointer-events-none" />
           </div>
-        </div>
 
-        {/* Linha com Ocultar Concluídos e Limpar Filtros */}
-        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => setHideCompleted(prev => !prev)}
-            className={`h-10 flex-1 rounded-xl border px-3 text-xs font-semibold flex items-center justify-center gap-2 transition cursor-pointer select-none shadow-2xs ${
+            className={`h-10 w-full rounded-xl border px-2.5 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer select-none shadow-2xs whitespace-nowrap ${
               hideCompleted
                 ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
                 : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
             }`}
           >
-            <CheckCircle2 size={15} className={hideCompleted ? 'text-emerald-600' : 'text-zinc-400'} />
-            <span>Ocultar concluídos</span>
+            <CheckCircle2 size={14} className={hideCompleted ? 'text-emerald-600 shrink-0' : 'text-zinc-400 shrink-0'} />
+            <span className="truncate">{hideCompleted ? 'Concluídos ocultos' : 'Ocultar concluídos'}</span>
             {completedCount > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold shrink-0 ${
                 hideCompleted ? 'bg-emerald-200 text-emerald-900' : 'bg-zinc-100 text-zinc-600'
               }`}>
                 {completedCount}
               </span>
             )}
           </button>
+        </div>
 
-          {(searchTerm || selectedProfessional !== 'all' || selectedService !== 'all' || selectedStatus !== 'all' || selectedBranch !== 'all') && (
+        {/* Botão Limpar Filtros (quando algum filtro está ativo) */}
+        {(searchTerm || selectedProfessional !== 'all' || selectedService !== 'all' || selectedStatus !== 'all') && (
+          <div className="flex justify-end">
             <button
               type="button"
               onClick={() => {
                 setSearchTerm('');
-                setSelectedBranch('all');
                 setSelectedProfessional('all');
                 setSelectedService('all');
                 setSelectedStatus('all');
               }}
               title="Limpar todos os filtros"
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 transition cursor-pointer shadow-2xs"
+              className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition cursor-pointer shadow-2xs"
             >
-              <RotateCcw size={15} />
+              <RotateCcw size={13} />
+              <span>Limpar filtros</span>
             </button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
-      {/* 4. Barra de Navegação Desktop (mantida no desktop com navegador de data e tabs) */}
+      {/* 4. Barra de Navegação Desktop (2 linhas alinhadas: Data/Filtros em cima, Visualização/Ocultar concluídos embaixo) */}
       <section
-        className="mb-5 hidden md:flex rounded-2xl border border-zinc-200/90 bg-white p-3 shadow-xs flex-col xl:flex-row xl:items-center justify-between gap-3"
+        className="mb-5 hidden md:flex flex-col gap-2.5 rounded-2xl border border-zinc-200/90 bg-white p-3.5 shadow-xs"
         aria-label="Controles da agenda desktop"
       >
-        {/* Bloco Esquerdo: Navegação de Data + Modos de Visualização */}
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          {/* Navegador de Data */}
-          <div className="flex items-center rounded-xl border border-zinc-200 bg-white p-1">
+        {/* Linha 1: Data + Hoje à esquerda | Busca + Dropdowns de Filtro à direita */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 shrink-0">
+            {/* Navegador de Data */}
+            <div className="flex items-center rounded-xl border border-zinc-200 bg-white p-1">
+              <button
+                type="button"
+                onClick={handlePrev}
+                title="Período anterior"
+                className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 cursor-pointer"
+              >
+                <ChevronLeft size={18} />
+              </button>
+              <span className="min-w-[130px] px-2 text-center text-xs sm:text-sm font-bold text-zinc-800 tabular-nums">
+                {viewMode === 'day'
+                  ? anchorDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
+                  : formatWeekRange(monday)}
+              </span>
+              <button
+                type="button"
+                onClick={handleNext}
+                title="Próximo período"
+                className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 cursor-pointer"
+              >
+                <ChevronRight size={18} />
+              </button>
+            </div>
+
             <button
               type="button"
-              onClick={handlePrev}
-              title="Período anterior"
-              className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 cursor-pointer"
+              onClick={handleToday}
+              className="h-10 rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 cursor-pointer"
             >
-              <ChevronLeft size={18} />
-            </button>
-            <span className="min-w-[130px] px-2 text-center text-xs sm:text-sm font-bold text-zinc-800 tabular-nums">
-              {viewMode === 'day'
-                ? anchorDate.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
-                : formatWeekRange(monday)}
-            </span>
-            <button
-              type="button"
-              onClick={handleNext}
-              title="Próximo período"
-              className="grid h-8 w-8 place-items-center rounded-lg text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-800 cursor-pointer"
-            >
-              <ChevronRight size={18} />
+              Hoje
             </button>
           </div>
 
-          <button
-            type="button"
-            onClick={handleToday}
-            className="h-10 rounded-xl border border-zinc-200 bg-zinc-50 px-3.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-100 cursor-pointer"
-          >
-            Hoje
-          </button>
+          <div className="flex flex-wrap items-center gap-2 flex-1 justify-end">
+            {/* Busca por Pet, Tutor ou Serviço */}
+            <div className="relative min-w-[200px] lg:w-64">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Buscar por pet, tutor ou serviço..."
+                value={searchTerm}
+                onChange={e => setSearchTerm(e.target.value)}
+                className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-8 pr-7 text-xs text-zinc-800 placeholder-zinc-400 outline-none transition focus:border-teal-600 focus:bg-white"
+              />
+              {searchTerm && (
+                <button
+                  type="button"
+                  onClick={() => setSearchTerm('')}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"
+                >
+                  <X size={12} />
+                </button>
+              )}
+            </div>
 
+            {/* Profissional */}
+            <div className="relative">
+              <select
+                value={selectedProfessional}
+                onChange={e => setSelectedProfessional(e.target.value)}
+                className="h-10 max-w-[145px] truncate cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+              >
+                <option value="all">Profissional</option>
+                {operators.map(op => (
+                  <option key={op.id} value={op.id}>
+                    {op.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Serviço */}
+            <div className="relative">
+              <select
+                value={selectedService}
+                onChange={e => setSelectedService(e.target.value)}
+                className="h-10 max-w-[145px] truncate cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+              >
+                <option value="all">Serviço</option>
+                {services.map(svc => (
+                  <option key={svc.id} value={svc.id}>
+                    {svc.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Status */}
+            <div className="relative">
+              <select
+                value={selectedStatus}
+                onChange={e => setSelectedStatus(e.target.value)}
+                className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
+              >
+                <option value="all">Status</option>
+                <option value="scheduled">Agendado</option>
+                <option value="in_progress">Em atendimento</option>
+                <option value="ready">Pronto</option>
+                <option value="requested">Pendente</option>
+                <option value="delivered">Concluído</option>
+                <option value="cancelled">Cancelado</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Linha 2: Modos de Visualização à esquerda | Ocultar Concluídos + Limpar Filtros alinhados à direita */}
+        <div className="flex flex-wrap items-center justify-between gap-2.5 pt-2 border-t border-zinc-100">
           {/* Seletor Segmentado de Visualização (Dia, Semana, Timeline, Profissionais) */}
           <div className="flex items-center overflow-x-auto no-scrollbar max-w-full rounded-xl border border-zinc-200 bg-zinc-100/80 p-1">
             <button
               type="button"
               onClick={() => setViewMode('day')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
                 viewMode === 'day' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
@@ -1442,7 +1570,7 @@ export default function PetshopAgendaPage() {
             <button
               type="button"
               onClick={() => setViewMode('week')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
                 viewMode === 'week' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
@@ -1451,7 +1579,7 @@ export default function PetshopAgendaPage() {
             <button
               type="button"
               onClick={() => setViewMode('timeline')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
                 viewMode === 'timeline' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
@@ -1460,139 +1588,57 @@ export default function PetshopAgendaPage() {
             <button
               type="button"
               onClick={() => setViewMode('professionals')}
-              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition cursor-pointer ${
+              className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition cursor-pointer ${
                 viewMode === 'professionals' ? 'bg-teal-700 text-white shadow-xs' : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
               Profissionais
             </button>
           </div>
-        </div>
 
-        {/* Bloco Direito: Campo de Busca e Dropdowns de Filtro */}
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Busca por Pet, Tutor ou Serviço */}
-          <div className="relative min-w-[200px] sm:min-w-[240px] flex-1 sm:flex-none">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none" />
-            <input
-              type="text"
-              placeholder="Buscar por pet, tutor ou serviço..."
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="h-10 w-full rounded-xl border border-zinc-200 bg-zinc-50/70 pl-8 pr-3 text-xs text-zinc-800 placeholder-zinc-400 outline-none transition focus:border-teal-600 focus:bg-white"
-            />
-            {searchTerm && (
+          <div className="flex items-center gap-2 ml-auto">
+            {/* Alternar Ocultar Concluídos */}
+            <button
+              type="button"
+              onClick={() => setHideCompleted(prev => !prev)}
+              className={`h-9 px-3.5 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer select-none ${
+                hideCompleted
+                  ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
+                  : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
+              }`}
+              title="Ocultar atendimentos já entregues/concluídos para despoluir a agenda"
+            >
+              <CheckCircle2 size={14} className={hideCompleted ? 'text-emerald-600' : 'text-zinc-400'} />
+              <span>{hideCompleted ? 'Concluídos ocultos' : 'Ocultar concluídos'}</span>
+              {completedCount > 0 && (
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
+                  hideCompleted ? 'bg-emerald-200/80 text-emerald-900' : 'bg-zinc-100 text-zinc-600'
+                }`}>
+                  {completedCount}
+                </span>
+              )}
+            </button>
+
+            {/* Botão de Limpar Filtros */}
+            {(searchTerm || selectedProfessional !== 'all' || selectedService !== 'all' || selectedStatus !== 'all' || selectedSex !== 'all' || selectedSize !== 'all') && (
               <button
                 type="button"
-                onClick={() => setSearchTerm('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700"
+                onClick={() => {
+                  setSearchTerm('');
+                  setSelectedProfessional('all');
+                  setSelectedService('all');
+                  setSelectedStatus('all');
+                  setSelectedSex('all');
+                  setSelectedSize('all');
+                }}
+                title="Limpar todos os filtros"
+                className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-teal-200 bg-teal-50 px-3 text-xs font-semibold text-teal-700 hover:bg-teal-100 transition cursor-pointer"
               >
-                <X size={12} />
+                <RotateCcw size={14} />
+                <span>Limpar filtros</span>
               </button>
             )}
           </div>
-
-          {/* Unidade */}
-          <div className="relative">
-            <select
-              value={selectedBranch}
-              onChange={e => setSelectedBranch(e.target.value)}
-              className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
-            >
-              <option value="all">Unidade</option>
-              <option value="main">Unidade Principal</option>
-            </select>
-          </div>
-
-          {/* Profissional */}
-          <div className="relative">
-            <select
-              value={selectedProfessional}
-              onChange={e => setSelectedProfessional(e.target.value)}
-              className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
-            >
-              <option value="all">Profissional</option>
-              {operators.map(op => (
-                <option key={op.id} value={op.id}>
-                  {op.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Serviço */}
-          <div className="relative">
-            <select
-              value={selectedService}
-              onChange={e => setSelectedService(e.target.value)}
-              className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
-            >
-              <option value="all">Serviço</option>
-              {services.map(svc => (
-                <option key={svc.id} value={svc.id}>
-                  {svc.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          {/* Status */}
-          <div className="relative">
-            <select
-              value={selectedStatus}
-              onChange={e => setSelectedStatus(e.target.value)}
-              className="h-10 cursor-pointer rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-700 outline-none hover:bg-zinc-50"
-            >
-              <option value="all">Status</option>
-              <option value="scheduled">Agendado</option>
-              <option value="in_progress">Em atendimento</option>
-              <option value="ready">Pronto</option>
-              <option value="requested">Pendente</option>
-              <option value="delivered">Concluído</option>
-              <option value="cancelled">Cancelado</option>
-            </select>
-          </div>
-
-          {/* Alternar Ocultar Concluídos */}
-          <button
-            type="button"
-            onClick={() => setHideCompleted(prev => !prev)}
-            className={`h-10 px-3 rounded-xl border text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer select-none ${
-              hideCompleted
-                ? 'border-emerald-300 bg-emerald-50 text-emerald-800'
-                : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'
-            }`}
-            title="Ocultar atendimentos já entregues/concluídos para despoluir a agenda"
-          >
-            <CheckCircle2 size={14} className={hideCompleted ? 'text-emerald-600' : 'text-zinc-400'} />
-            <span>{hideCompleted ? 'Concluídos ocultos' : 'Ocultar concluídos'}</span>
-            {completedCount > 0 && (
-              <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-bold ${
-                hideCompleted ? 'bg-emerald-200/80 text-emerald-900' : 'bg-zinc-100 text-zinc-600'
-              }`}>
-                {completedCount}
-              </span>
-            )}
-          </button>
-
-          {/* Botão de Ajustes / Limpar Filtros */}
-          {(searchTerm || selectedProfessional !== 'all' || selectedService !== 'all' || selectedStatus !== 'all' || selectedSex !== 'all' || selectedSize !== 'all') && (
-            <button
-              type="button"
-              onClick={() => {
-                setSearchTerm('');
-                setSelectedProfessional('all');
-                setSelectedService('all');
-                setSelectedStatus('all');
-                setSelectedSex('all');
-                setSelectedSize('all');
-              }}
-              title="Limpar todos os filtros"
-              className="grid h-10 w-10 place-items-center rounded-xl border border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100 transition cursor-pointer"
-            >
-              <RotateCcw size={15} />
-            </button>
-          )}
         </div>
       </section>
 
@@ -3131,7 +3177,7 @@ export default function PetshopAgendaPage() {
         setOpenReception(false);
       }} />}
       {openNew && (
-        <Modal title="Novo agendamento" onClose={() => setOpenNew(false)} suspended={openReception}>
+        <Modal title="Novo agendamento" onClose={() => setOpenNew(false)} suspended={openReception} maxWidth="sm:max-w-5xl">
           <div className="mx-auto -mt-2 mb-3 h-1 w-12 rounded-full bg-zinc-300 sm:hidden" />
 
           <form onSubmit={submitNew} className="space-y-4">
@@ -3207,6 +3253,42 @@ export default function PetshopAgendaPage() {
                 </>
               )}
             </section>
+
+            {!selectedTutor && tutorQuery.trim().length < 2 && <section aria-label="Clientes com mais movimentação" className="space-y-3">
+              {!showTutorDirectory ? <>
+                <div className="flex items-center gap-3 text-[#0d6e5a]">
+                  <span className="h-px min-w-4 flex-1 bg-zinc-200" />
+                  <PawPrint size={19} aria-hidden="true" className="shrink-0" />
+                  <h3 className="text-center text-sm font-bold text-zinc-800 sm:text-base">Clientes com mais movimentação</h3>
+                  <span className="h-px min-w-4 flex-1 bg-zinc-200" />
+                </div>
+                {loadingFrequentTutors && <div role="status" className="grid gap-3 sm:grid-cols-2">{Array.from({ length: 4 }, (_, index) => <div key={index} className="h-24 animate-pulse rounded-2xl border border-zinc-200 bg-zinc-50" />)}</div>}
+                {!loadingFrequentTutors && frequentTutorsError && <div className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">Não foi possível carregar os clientes frequentes. <button type="button" className="font-semibold underline" onClick={() => setFrequentRetry(current => current + 1)}>Tentar novamente</button></div>}
+                {!loadingFrequentTutors && !frequentTutorsError && frequentTutors.length === 0 && <p className="rounded-xl bg-zinc-50 p-3 text-sm text-zinc-600">Ainda não há atendimentos registrados para sugerir clientes.</p>}
+                {!loadingFrequentTutors && !frequentTutorsError && frequentTutors.length > 0 && <div className="grid gap-3 sm:grid-cols-2">
+                  {frequentTutors.map(tutor => <button key={tutor.id} type="button" onClick={() => void chooseTutor(tutor)} className="flex min-h-24 min-w-0 items-center gap-3 rounded-2xl border border-zinc-200 bg-white p-3 text-left shadow-xs transition hover:border-emerald-300 hover:bg-emerald-50/40 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6e5a]">
+                    <div className="relative shrink-0">
+                      {tutor.pet ? <PetAvatar pet={tutor.pet} size="lg" /> : <div aria-hidden="true" className="grid h-12 w-12 place-items-center rounded-full bg-emerald-50 text-[#0d6e5a]"><UserRound size={22} /></div>}
+                      <span aria-hidden="true" className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-[#0d6e5a] text-[9px] font-bold text-white">{tutor.name.slice(0, 2).toUpperCase()}</span>
+                    </div>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm font-bold text-zinc-900">{tutor.name}</span>
+                      <span className="flex items-center gap-1 truncate text-sm font-semibold text-[#0d6e5a]"><PawPrint size={14} aria-hidden="true" className="shrink-0" />{tutor.pet?.name || 'Pet não informado'}</span>
+                      <span className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-600"><span className="rounded-full bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-900">{tutor.appointmentsCount} {tutor.appointmentsCount === 1 ? 'atendimento' : 'atendimentos'}</span><span>Última visita: {new Date(tutor.lastVisitAt).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', timeZone: 'America/Sao_Paulo' }).replace('.', '')}</span></span>
+                    </span>
+                    <ChevronRight size={19} aria-hidden="true" className="shrink-0 text-[#0d6e5a]" />
+                  </button>)}
+                </div>}
+                <button type="button" onClick={() => { setShowTutorDirectory(true); void loadBookingTutorDirectory(1); }} className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-emerald-50 px-3 text-sm font-bold text-[#0d6e5a] hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6e5a]"><UserRound size={17} aria-hidden="true" />Ver todos os clientes<ChevronRight size={17} aria-hidden="true" /></button>
+              </> : <>
+                <div className="flex items-center justify-between gap-3"><h3 className="text-sm font-bold text-zinc-900">Todos os clientes</h3><button type="button" className="min-h-11 px-2 text-sm font-semibold text-[#0d6e5a]" onClick={() => { directoryController.current?.abort(); setShowTutorDirectory(false); }}>Voltar</button></div>
+                {directoryTutors.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{directoryTutors.map(tutor => <button key={tutor.id} type="button" onClick={() => void chooseTutor(tutor)} className="flex min-h-14 min-w-0 items-center gap-3 rounded-xl border border-zinc-200 bg-white p-3 text-left hover:border-emerald-300 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6e5a]"><span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-50 text-xs font-bold text-[#0d6e5a]">{tutor.name.slice(0, 2).toUpperCase()}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-zinc-900">{tutor.name}</span><span className="block text-xs text-zinc-600">{tutor.phone}</span></span><ChevronRight size={18} aria-hidden="true" className="shrink-0 text-zinc-400" /></button>)}</div>}
+                {loadingDirectory && <p role="status" className="flex items-center gap-2 text-sm text-zinc-600"><Loader2 size={16} className="animate-spin" />Carregando clientes…</p>}
+                {directoryError && <div className="text-sm text-rose-800">Não foi possível carregar os clientes. <button type="button" className="font-semibold underline" onClick={() => void loadBookingTutorDirectory(directoryPage || 1)}>Tentar novamente</button></div>}
+                {!loadingDirectory && !directoryError && directoryTutors.length === 0 && <p className="text-sm text-zinc-600">Nenhum cliente cadastrado.</p>}
+                {!loadingDirectory && !directoryError && directoryHasMore && <button type="button" onClick={() => void loadBookingTutorDirectory(directoryPage + 1)} className="min-h-11 w-full rounded-xl border border-zinc-200 text-sm font-semibold text-[#0d6e5a] hover:bg-emerald-50">Carregar mais</button>}
+              </>}
+            </section>}
 
             {selectedTutor && <section aria-label="Seleção de pet" className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-xs">
               <div className="mb-3 flex items-center gap-2.5">
