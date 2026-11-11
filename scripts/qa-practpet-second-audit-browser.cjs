@@ -1,5 +1,7 @@
 const assert = require('node:assert/strict');
 const { chromium } = require('C:/Users/Lucas Souza/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
+const sharp = require('../backend/node_modules/sharp');
+const { randomBytes } = require('node:crypto');
 
 const origin = process.env.PRACTPET_BROWSER_ORIGIN || 'http://127.0.0.1:5174';
 const screenshotDir = process.env.PRACTPET_SCREENSHOT_DIR;
@@ -24,6 +26,8 @@ const appointment = (id, startsAt, status) => ({
   transport: { enabled: true, mode: 'round_trip', address: customer.address, fee: 40, coveredByPackage: false },
 });
 const current = appointment('appointment-today', local, 'ready');
+const secondStop = appointment('appointment-second', new Date(new Date(local).getTime() + 3600000).toISOString(), 'ready');
+secondStop.transport.address = 'Duque de Caxias, 21 - Jd Estoril';
 const overdue = appointment('appointment-old', old, 'scheduled');
 const packagePlan = {
   id: 'package-audit', planNameSnapshot: 'Pacote Audit', status: 'active', paymentStatus: 'paid',
@@ -33,6 +37,7 @@ const packagePlan = {
 };
 
 const browser = async () => {
+  const largeCameraPhoto = await sharp(randomBytes(4000 * 3000 * 3), { raw: { width: 4000, height: 3000, channels: 3 } }).jpeg({ quality: 85 }).toBuffer();
   const instance = await chromium.launch({ executablePath: 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe', headless: true });
   const results = [];
   try {
@@ -43,6 +48,8 @@ const browser = async () => {
       let scopedPetRequests = 0;
       let tutorSearchRequests = 0;
       let reversedPayment = null;
+      let editedProduct = null;
+      let uploadedPhotoBytes = null;
       const context = await instance.newContext({
         viewport: { width, height: 844 }, isMobile: width < 768, hasTouch: width < 768,
         userAgent: width < 768 ? 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36' : undefined,
@@ -59,10 +66,11 @@ const browser = async () => {
         let data = [];
         if (path === '/tenants/me') data = { id: 'audit-tenant', nomeFantasia: 'Pract Pet Audit', modulos: { petshop: true } };
         else if (path === '/petshop/overview') data = { metrics: { pets: 1, tutors: 1, products: 1, services: 1, today: 1, inProgress: 0, vaccinesDue: 0 }, nextAppointments: [current] };
-        else if (path === '/petshop/appointments') data = route.request().method() === 'POST' ? appointment('appointment-created', local, 'scheduled') : [current];
+        else if (path === '/petshop/appointments') data = route.request().method() === 'POST' ? appointment('appointment-created', local, 'scheduled') : [current, secondStop];
         else if (path === '/petshop/appointments/appointment-created/checkout') { prepayRequests++; assert.equal(route.request().postDataJSON().prepay, true); data = { id: 'comanda-created', total: 50 }; }
         else if (path === '/petshop/appointments/appointment-today/payment') data = reversedPayment ? null : { saleId: 'sale-audit', total: 40, paidAt: local, nfceStatus: null };
         else if (path === '/petshop/appointments/appointment-today/reverse-payment') { reversedPayment = route.request().postDataJSON(); data = { id: 'sale-audit', status: 'cancelled' }; }
+        else if (path === '/petshop/uploads/photo') { uploadedPhotoBytes = route.request().postDataBuffer()?.length; data = { imageUrl: '/api/products/uploads/images/audit-image' }; }
         else if (path === '/petshop/appointments/overdue-pickups') data = [overdue];
         else if (path === '/petshop/pending-reservations') data = [];
         else if (path === '/petshop/services') data = [service];
@@ -76,8 +84,12 @@ const browser = async () => {
         else if (path === '/petshop/tutors/booking-frequent') data = frequentTutors;
         else if (path === '/petshop/tutors/booking-directory') data = { items: url.searchParams.get('page') === '2' ? [customer] : Array.from({ length: 20 }, (_, index) => ({ id: `directory-${index}`, name: `Cliente Diretório ${index}`, phone: customer.phone })), page: Number(url.searchParams.get('page') || 1), hasMore: url.searchParams.get('page') !== '2' };
         else if (path === `/petshop/packages/available/${pet.id}`) data = [packagePlan];
-        else if (path === '/products') data = { data: [], total: 0 };
-        else if (path === '/categories') data = [{ id: 'category-audit', name: 'Audit' }];
+        else if (path === '/products') data = { data: [
+          { id: 'product-shampoo', name: 'Shampoo de venda', categoryId: 'category-audit', category: { id: 'category-audit', name: 'Higiene' }, active: true, unit: 'UN', priceCost: 10, priceSell: 25, stock: 5 },
+          { id: 'service-legacy', name: 'Banho legado', categoryId: 'category-service', category: { id: 'category-service', name: 'Serviços' }, active: true, unit: 'SV', priceCost: 0, priceSell: 60, stock: 99999 },
+        ], total: 2 };
+        else if (path === '/products/product-shampoo' && route.request().method() === 'PATCH') { editedProduct = route.request().postDataJSON(); data = { id: 'product-shampoo' }; }
+        else if (path === '/categories') data = [{ id: 'category-audit', name: 'Higiene' }, { id: 'category-service', name: 'Serviços' }];
         else if (path === '/tributacao') data = [];
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(data) });
       });
@@ -195,15 +207,37 @@ const browser = async () => {
         if (width < 768 && path === '/petshop/taxidog') {
           await page.getByRole('button', { name: 'Rota', exact: true }).first().click();
           await page.getByRole('dialog').first().waitFor();
+          if (width === 390) {
+            await page.evaluate(() => { window.open = url => { window.__auditRouteUrl = url; return null; }; });
+            await page.getByRole('checkbox', { name: 'Incluir na rota' }).nth(1).check();
+            await page.getByRole('checkbox', { name: 'Incluir na rota' }).nth(2).check();
+            assert.equal(await page.getByRole('checkbox', { name: 'Incluir na rota' }).count(), 3);
+            assert.equal(await page.getByRole('checkbox', { name: 'Incluir na rota' }).nth(1).isChecked(), true);
+            assert.equal(await page.getByRole('checkbox', { name: 'Incluir na rota' }).nth(2).isChecked(), true);
+            await page.getByRole('textbox', { name: 'Cidade e UF dos endereços' }).fill('Bauru, SP');
+            await page.getByRole('button', { name: 'Abrir Rota no Maps' }).click();
+            const routeUrl = await page.evaluate(() => window.__auditRouteUrl);
+            assert.equal(new URL(routeUrl).searchParams.get('waypoints'), `${customer.address}, Bauru, SP`, routeUrl);
+            assert.equal(new URL(routeUrl).searchParams.get('destination'), `${secondStop.transport.address}, Bauru, SP`);
+            results.push({ width, path, route: 'duas paradas selecionadas com cidade/UF', passed: true });
+          }
           await page.keyboard.press('Escape');
           await page.getByRole('dialog').first().waitFor({ state: 'detached' });
           await page.waitForTimeout(350);
           results.push({ width, path, modal: 'manifesto', escape: true });
           if (width === 390) {
             await page.getByRole('button', { name: /Levar para Casa|Levar/i }).first().click();
-            await page.getByRole('button', { name: /Entrega realizada · Abrir cobrança/i }).click();
+            await page.getByRole('button', { name: /Entrega realizada · Abrir cobrança/i }).first().click();
             await page.getByRole('dialog', { name: /Atendimento · Pet Audit/i }).waitFor();
             assert.equal(new URL(page.url()).pathname, '/petshop/agenda');
+            await page.getByRole('button', { name: 'Enviar Foto' }).click();
+            const photoDialog = page.getByRole('dialog', { name: /Foto e Recado/i });
+            const photoStartedAt = Date.now();
+            await photoDialog.locator('input[aria-label="Tirar foto com a câmera"]').setInputFiles({ name: 'camera.jpg', mimeType: 'image/jpeg', buffer: largeCameraPhoto });
+            await photoDialog.getByText('Foto pronta para salvar').waitFor();
+            assert.ok(uploadedPhotoBytes < 300 * 1024, `upload otimizado excedeu 300 KB: ${uploadedPhotoBytes}`);
+            results.push({ width, photo: 'JPEG sintético 12 MP → WebP e upload simulado', uploadedPhotoBytes, elapsedMs: Date.now() - photoStartedAt, passed: true });
+            await photoDialog.getByRole('button', { name: /Fechar/i }).first().click();
             await page.getByRole('button', { name: 'Estornar pagamento' }).click();
             await page.getByRole('dialog', { name: /Estornar pagamento/i }).getByRole('textbox', { name: 'Motivo do estorno' }).fill('Cancelamento solicitado pelo tutor');
             await page.getByRole('button', { name: 'Confirmar estorno' }).click();
@@ -213,6 +247,8 @@ const browser = async () => {
           }
         }
         if (width < 768 && path === '/petshop/produtos') {
+          await page.getByText('Shampoo de venda').waitFor();
+          assert.equal(await page.getByText('Banho legado').count(), 0, 'serviço legado não deve aparecer como mercadoria');
           const open = page.getByRole('button', { name: /Novo produto/i }).first();
           await open.click();
           await page.getByRole('dialog').first().waitFor();
@@ -225,6 +261,16 @@ const browser = async () => {
           await page.getByRole('dialog').first().waitFor({ state: 'detached' });
           assert.equal(new URL(page.url()).pathname, '/petshop/produtos');
           results.push({ width, path, modal: 'novo produto', escape: true, historyBack: true });
+          if (width === 390) {
+            await page.getByRole('button', { name: 'Editar', exact: true }).click();
+            const edit = page.getByRole('dialog', { name: 'Editar produto' });
+            await edit.waitFor();
+            await edit.locator('[data-product-section="main"] input[required]').fill('Shampoo de venda atualizado');
+            await edit.getByRole('button', { name: 'Salvar Alterações' }).click();
+            assert.equal(editedProduct?.name, 'Shampoo de venda atualizado');
+            assert.equal(editedProduct?.categoryId, 'category-audit');
+            results.push({ width, path, edit: 'PATCH preserva categoria e atualiza nome', passed: true });
+          }
         }
       }
       await context.close();

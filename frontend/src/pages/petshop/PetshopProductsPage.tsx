@@ -10,6 +10,7 @@ import { EditProductModal } from '@/components/EditProductModal';
 import { PetshopProductLotsModal } from './PetshopProductLotsModal';
 import { CatalogTabs, EmptyState, inputClass, ListSkeleton, pageClass, PageHeader, primaryButton, SearchField, secondaryButton } from './ui';
 import { money } from './types';
+import { isPetshopServiceCategory } from './product-catalog';
 
 type Supplier = {
   id: string;
@@ -360,7 +361,8 @@ export default function PetshopProductsPage() {
         api.get('/products', { params: { limit: 5000, includeInactive: true }, signal }),
         api.get('/suppliers', { signal }).catch(() => ({ data: [] })),
       ]);
-      setItems(Array.isArray(prodRes.data) ? prodRes.data : prodRes.data?.data || []);
+      const catalog = Array.isArray(prodRes.data) ? prodRes.data : prodRes.data?.data || [];
+      setItems(catalog.filter((item: Product) => !isPetshopServiceCategory(item.category?.name)));
       setSuppliers(Array.isArray(supRes.data) ? supRes.data : []);
     } catch (error: any) {
       if (error?.code !== 'ERR_CANCELED') toast.error('Não foi possível carregar os produtos.');
@@ -445,7 +447,7 @@ export default function PetshopProductsPage() {
   }, [items, search, stockFilter, statusFilter]);
 
   return <div className={`${pageClass} petcare-product-crud`}>
-    <PageHeader eyebrow="Catálogo compartilhado com o PDV" title="Produtos" description="Cadastre, edite e acompanhe a mesma base de itens, preços e estoque usada no caixa." action={<button type="button" onClick={() => setAddOpen(true)} className={`${primaryButton} flex items-center justify-center gap-2`}><Plus aria-hidden="true" size={17} />Novo produto</button>} />
+    <PageHeader eyebrow="Catálogo compartilhado com o PDV" title="Produtos" description="Mercadorias vendidas no balcão, como shampoo, rações e acessórios. Serviços e pacotes ficam nas suas respectivas áreas." action={<button type="button" onClick={() => setAddOpen(true)} className={`${primaryButton} flex items-center justify-center gap-2`}><Plus aria-hidden="true" size={17} />Novo produto</button>} />
 
     <CatalogTabs />
 
@@ -648,7 +650,7 @@ export default function PetshopProductsPage() {
     </section>
 
     {addOpen && <AddProductModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSuccess={() => void load()} variant="petshop" />}
-    {editingProduct && <EditProductModal isOpen={Boolean(editingProduct)} product={editingProduct as any} onClose={() => setEditingProduct(null)} onSuccess={() => void load()} />}
+    {editingProduct && <EditProductModal isOpen={Boolean(editingProduct)} product={editingProduct as any} onClose={() => setEditingProduct(null)} onSuccess={() => void load()} variant="petshop" />}
     {selectedLotsProduct && <PetshopProductLotsModal isOpen={Boolean(selectedLotsProduct)} product={selectedLotsProduct} onClose={() => setSelectedLotsProduct(null)} onUpdate={() => void load()} />}
   </div>;
 }

@@ -35,7 +35,7 @@ import type { Appointment } from './types';
 import { Modal, pageClass, PageHeader, PetAvatar, primaryButton, secondaryButton } from './ui';
 import { CancelAppointmentModal } from './CancelAppointmentModal';
 import { RescheduleAppointmentModal } from './RescheduleAppointmentModal';
-import { buildGoogleMapsRoutes, isMobileMapsClient, requireRouteAddresses } from './taxi-route';
+import { buildGoogleMapsRoutes, isMobileMapsClient, qualifyRouteAddresses, requireRouteAddresses } from './taxi-route';
 import { isPickupMode, isDropoffMode, isPreCheckinStatus, isInStoreStatus, needsTaxiStop, summarizeTaxiAppointments } from './taxi-operations';
 
 // Helpers de formatação e horários
@@ -95,6 +95,8 @@ export default function PetshopTaxiDogPage() {
   // Modal de Manifesto de Rota
   const [openManifestModal, setOpenManifestModal] = useState(false);
   const [checkedStops, setCheckedStops] = useState<Record<string, boolean>>({});
+  const [routeSelection, setRouteSelection] = useState<Record<string, boolean>>({});
+  const [routeCity, setRouteCity] = useState('');
   const [routeLinks, setRouteLinks] = useState<string[]>([]);
   const [overdueCount, setOverdueCount] = useState(0);
   const loadController = useRef<AbortController | null>(null);
@@ -133,7 +135,7 @@ export default function PetshopTaxiDogPage() {
     return () => loadController.current?.abort();
   }, [loadAppointments]);
 
-  useEffect(() => { setRouteLinks([]); }, [selectedDate, appointments, checkedStops]);
+  useEffect(() => { setRouteLinks([]); }, [selectedDate, appointments, checkedStops, routeSelection, routeCity]);
 
   // Filtra apenas agendamentos com transporte habilitado e não cancelados
   const operation = useMemo(() => summarizeTaxiAppointments(appointments), [appointments]);
@@ -277,11 +279,11 @@ export default function PetshopTaxiDogPage() {
   // Abrir rota completa no Google Maps (com múltiplas paradas / waypoints)
   const handleOpenGoogleMapsRoute = () => {
     try {
-      const stops = taxiAppointments.filter(item => !checkedStops[item.id] && needsTaxiStop(item));
-      if (!stops.length) { toast.error('Nenhuma parada pendente para montar a rota.'); return; }
+      const stops = taxiAppointments.filter(item => routeSelection[item.id] && !checkedStops[item.id] && needsTaxiStop(item));
+      if (!stops.length) { toast.error('Selecione pelo menos uma parada pendente para montar a rota.'); return; }
       const validAddresses = requireRouteAddresses(stops.map(item => item.transport?.address));
       const mobile = isMobileMapsClient(navigator.userAgent, window.matchMedia('(pointer: coarse)').matches, window.innerWidth);
-      const links = buildGoogleMapsRoutes(validAddresses, mobile);
+      const links = buildGoogleMapsRoutes(qualifyRouteAddresses(validAddresses, routeCity), mobile);
       setRouteLinks(links);
       if (links.length === 1) window.open(links[0], '_blank', 'noopener,noreferrer');
       else toast.info(`O roteiro tem ${links.length} trechos. Abra cada um em ordem para visitar todas as paradas.`);
@@ -894,17 +896,18 @@ export default function PetshopTaxiDogPage() {
           maxWidth="max-w-2xl"
         >
           <div className="space-y-4">
-            <p className="text-xs text-zinc-500">
-              Roteiro ordenado com checklist de coletas e entregas do motorista.
-            </p>
+            <p className="text-xs text-zinc-500">Selecione as paradas para a rota. Marque como concluída somente após visitar o endereço.</p>
+            <label className="block text-xs font-semibold text-zinc-700">Cidade e UF dos endereços
+              <input value={routeCity} onChange={event => setRouteCity(event.target.value)} placeholder="Ex.: Bauru, SP" className="mt-1 min-h-11 w-full rounded-lg border border-zinc-300 px-3 text-sm" />
+            </label>
             {overdueCount > 0 && <p className="text-xs font-semibold text-amber-800">Inclui {overdueCount} coleta{overdueCount === 1 ? '' : 's'} pendente{overdueCount === 1 ? '' : 's'} de dias anteriores.</p>}
           <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
             <div>
               <p className="text-xs font-bold text-zinc-900">
-                {taxiAppointments.length} paradas no roteiro
+                {taxiAppointments.length} paradas no manifesto · {taxiAppointments.filter(item => routeSelection[item.id] && !checkedStops[item.id] && needsTaxiStop(item)).length} selecionadas para rota
               </p>
               <p className="text-[11px] text-zinc-400">
-                Marque cada parada conforme for realizando no trajeto
+                Use o checkbox da rota para escolher destinos; conclua cada parada depois da visita.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -975,6 +978,9 @@ export default function PetshopTaxiDogPage() {
                       📍 {address}
                       {reference && <span className="text-zinc-400 ml-1">({reference})</span>}
                     </p>
+                    {needsTaxiStop(item) && !isChecked && <label className="mt-2 inline-flex min-h-11 items-center gap-2 font-semibold text-teal-800" onClick={event => event.stopPropagation()}>
+                      <input type="checkbox" checked={Boolean(routeSelection[item.id])} onChange={event => setRouteSelection(current => ({ ...current, [item.id]: event.target.checked }))} className="h-5 w-5" /> Incluir na rota
+                    </label>}
 
                     <div className="mt-1.5 flex items-center gap-2">
                       {isPickup && (

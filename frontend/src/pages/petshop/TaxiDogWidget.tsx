@@ -17,7 +17,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { Appointment } from './types';
 import { PetAvatar } from './ui';
-import { buildGoogleMapsRoutes, isMobileMapsClient, requireRouteAddresses } from './taxi-route';
+import { buildGoogleMapsRoutes, isMobileMapsClient, qualifyRouteAddresses, requireRouteAddresses } from './taxi-route';
 import { isPickupMode, isDropoffMode, isPreCheckinStatus, isInStoreStatus, needsTaxiStop, summarizeTaxiAppointments } from './taxi-operations';
 
 interface TaxiDogWidgetProps {
@@ -47,6 +47,7 @@ export function TaxiDogWidget({
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [overdueItems, setOverdueItems] = useState<Appointment[]>([]);
   const [routeLinks, setRouteLinks] = useState<string[]>([]);
+  const [routeCity, setRouteCity] = useState('');
   const manifestToken = useRef(`taxi-manifest-${Math.random().toString(36).slice(2)}`);
   const historyCleanup = useRef<number | null>(null);
 
@@ -87,7 +88,7 @@ export function TaxiDogWidget({
   // Filtra apenas agendamentos ativos (não cancelados) com transporte ativo
   const operation = useMemo(() => summarizeTaxiAppointments([...overdueItems, ...appointments]), [appointments, overdueItems]);
   const transportItems = operation.all;
-  useEffect(() => { setRouteLinks([]); }, [appointments, overdueItems, checkedStops]);
+  useEffect(() => { setRouteLinks([]); }, [appointments, overdueItems, checkedStops, routeCity]);
 
   // 1. FALTA BUSCAR: Apenas agendamentos com coleta que AINDA NÃO FIZERAM CHECK-IN
   // Assim que o motorista/recepção dá Check-in, o pet sai imediatamente desta lista!
@@ -197,7 +198,7 @@ export function TaxiDogWidget({
     try {
       const addresses = requireRouteAddresses(selectedRouteItems.map(item => item.transport?.address || item.customer?.address));
       const mobile = isMobileMapsClient(navigator.userAgent, window.matchMedia('(pointer: coarse)').matches, window.innerWidth);
-      const links = buildGoogleMapsRoutes(addresses, mobile);
+      const links = buildGoogleMapsRoutes(qualifyRouteAddresses(addresses, routeCity), mobile);
       setRouteLinks(links);
       if (links.length === 1) window.open(links[0], '_blank', 'noopener,noreferrer');
       else toast.info(`Roteiro dividido em ${links.length} trechos. Abra cada um em ordem.`);
@@ -747,6 +748,9 @@ export function TaxiDogWidget({
             </div>
 
             {/* Filtros por Fase dentro do Manifesto */}
+            <label className="mb-3 block text-xs font-semibold text-zinc-700">Cidade e UF dos endereços
+              <input value={routeCity} onChange={event => setRouteCity(event.target.value)} placeholder="Ex.: Bauru, SP" className="mt-1 min-h-11 w-full rounded-lg border border-zinc-300 px-3 text-sm" />
+            </label>
             {routeLinks.length > 1 && <div className="flex flex-wrap gap-2 mb-3">{routeLinks.map((url, index) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-800">Abrir trecho {index + 1} de {routeLinks.length}</a>)}</div>}
             <div className="flex flex-wrap items-center gap-1.5 mb-3">
               <button

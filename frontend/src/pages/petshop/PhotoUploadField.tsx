@@ -15,30 +15,40 @@ type Props = {
 const acceptedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 async function compressImage(file: File): Promise<File> {
-  return new Promise((resolve, reject) => {
-    const image = new window.Image();
-    const source = URL.createObjectURL(file);
-    image.onload = () => {
-      URL.revokeObjectURL(source);
-      const scale = Math.min(1, 1200 / Math.max(image.width, image.height));
-      const canvas = document.createElement('canvas');
-      canvas.width = Math.max(1, Math.round(image.width * scale));
-      canvas.height = Math.max(1, Math.round(image.height * scale));
-      canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height);
-      canvas.toBlob(blob => blob ? resolve(new File([blob], 'pet-care-photo.webp', { type: 'image/webp' })) : reject(new Error('Falha ao preparar a foto.')), 'image/webp', 0.82);
-    };
-    image.onerror = () => {
-      URL.revokeObjectURL(source);
-      reject(new Error('Não foi possível abrir a imagem.'));
-    };
-    image.src = source;
+  const bitmap = typeof createImageBitmap === 'function' ? await createImageBitmap(file) : null;
+  const fallback = bitmap ? null : await new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
+    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não foi possível abrir a imagem.')); };
+    image.src = url;
   });
+  try {
+    const source = bitmap || fallback!;
+    const scale = Math.min(1, 800 / Math.max(source.width, source.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(source.width * scale));
+    canvas.height = Math.max(1, Math.round(source.height * scale));
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('Não foi possível preparar a foto neste aparelho.');
+    context.drawImage(source, 0, 0, canvas.width, canvas.height);
+    let blob: Blob | null = null;
+    for (const quality of [0.72, 0.58, 0.44]) {
+      blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', quality));
+      if (blob && blob.size <= 200 * 1024) break;
+    }
+    if (!blob || blob.type !== 'image/webp') throw new Error('Não foi possível otimizar a foto neste aparelho.');
+    return new File([blob], 'pet-care-photo.webp', { type: 'image/webp' });
+  } finally {
+    bitmap?.close();
+  }
 }
 
 export function PhotoUploadField({ value, onChange, label, subjectName, circular = true }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadStep, setUploadStep] = useState<'preparing' | 'sending'>('preparing');
 
   const selectPhoto = async (file?: File) => {
     if (!file) return;
@@ -52,8 +62,10 @@ export function PhotoUploadField({ value, onChange, label, subjectName, circular
     }
 
     setUploading(true);
+    setUploadStep('preparing');
     try {
       const prepared = await compressImage(file);
+      setUploadStep('sending');
       const body = new FormData();
       body.append('file', prepared);
       const { data } = await api.post('/petshop/uploads/photo', body, { headers: { 'Content-Type': 'multipart/form-data' } });
@@ -80,7 +92,7 @@ export function PhotoUploadField({ value, onChange, label, subjectName, circular
         <div className="mt-3 flex flex-wrap gap-2">
           <input ref={inputRef} type="file" accept="image/jpeg,image/png,image/webp" className="sr-only" onChange={event => void selectPhoto(event.target.files?.[0])} />
           <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Tirar foto com a câmera" onChange={event => void selectPhoto(event.target.files?.[0])} />
-          <button type="button" disabled={uploading} onClick={() => cameraRef.current?.click()} className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--pc-action)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--pc-action-hover)] disabled:cursor-wait disabled:opacity-60">{uploading ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <Camera aria-hidden="true" size={16} />}{uploading ? 'Enviando…' : 'Tirar foto'}</button>
+          <button type="button" disabled={uploading} onClick={() => cameraRef.current?.click()} className="flex min-h-11 items-center gap-2 rounded-lg bg-[var(--pc-action)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--pc-action-hover)] disabled:cursor-wait disabled:opacity-60">{uploading ? <Loader2 aria-hidden="true" size={16} className="animate-spin" /> : <Camera aria-hidden="true" size={16} />}{uploading ? uploadStep === 'preparing' ? 'Preparando foto…' : 'Enviando foto…' : 'Tirar foto'}</button>
           <button type="button" disabled={uploading} onClick={() => inputRef.current?.click()} className="flex min-h-11 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] bg-white px-4 text-sm font-semibold text-[var(--pc-action)] transition hover:bg-[var(--pc-action-soft)] disabled:cursor-wait disabled:opacity-60"><Upload aria-hidden="true" size={16} />Escolher da galeria</button>
           {value && <button type="button" disabled={uploading} onClick={() => onChange('')} className="flex min-h-11 items-center gap-2 rounded-lg border border-[var(--pc-border-strong)] bg-white px-3 text-sm font-semibold text-[var(--pc-danger)] transition hover:bg-[var(--pc-danger-soft)]"><Trash2 aria-hidden="true" size={16} />Remover</button>}
         </div>

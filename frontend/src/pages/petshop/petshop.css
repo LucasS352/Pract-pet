@@ -170,6 +170,11 @@
   border-color: var(--pc-border) !important;
   font-size: .75rem;
 }
+.petshop-product-modal [data-product-section] > h3 {
+  color: var(--pc-action) !important;
+  border-bottom: 1px solid var(--pc-border);
+  padding-bottom: .65rem;
+}
 .petshop-product-modal [data-product-section] label,
 .petshop-product-modal [data-product-section] [class*="text-zinc-"] {
   color: var(--pc-text-secondary) !important;

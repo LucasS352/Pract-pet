@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import { api } from '@/lib/api';
+import { isPetshopServiceCategory } from '@/pages/petshop/product-catalog';
 import { toast } from 'sonner';
 import { Edit3, X, Loader2, Save, DollarSign, FileText, Tag, PackageOpen, Upload, Trash2 } from 'lucide-react';
 import { ProductSearchSelect } from './ProductSearchSelect';
@@ -47,12 +48,13 @@ interface ProductData {
 }
 
 export function EditProductModal({
-  product, isOpen, onClose, onSuccess,
+  product, isOpen, onClose, onSuccess, variant = 'default',
 }: {
   product: ProductData | null;
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  variant?: 'default' | 'petshop';
 }) {
   const { user } = useAuthStore();
   const { enabled: kdsEnabled, carvoariaEnabled } = useKdsConfig();
@@ -135,7 +137,7 @@ export function EditProductModal({
         api.get('/tributacao'),
         api.get('/products?limit=10000'),
       ]).then(([catRes, grupRes, prodRes]) => {
-        setCategories(catRes.data);
+        setCategories(variant === 'petshop' ? catRes.data.filter((category: { name: string }) => !isPetshopServiceCategory(category.name)) : catRes.data);
         setGrupos(grupRes.data);
         setAllProducts(prodRes.data.data || []);
       }).catch(() => toast.error('Falha ao carregar dados auxiliares'));
@@ -362,8 +364,8 @@ export function EditProductModal({
   const sect = 'bg-zinc-950/60 border border-zinc-800 rounded-2xl p-4 space-y-4';
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-end bg-black/60 backdrop-blur-sm">
-      <div className="bg-zinc-900 border-l border-zinc-800 w-full max-w-lg h-full shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
+    <div className={`fixed inset-0 z-[100] flex items-center justify-end bg-black/60 backdrop-blur-sm ${variant === 'petshop' ? 'petshop-product-modal' : ''}`}>
+      <div role="dialog" aria-modal="true" aria-label="Editar produto" className="bg-zinc-900 border-l border-zinc-800 w-full max-w-lg h-dvh shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
 
         {/* Header */}
         <div className="flex justify-between items-center px-6 py-5 border-b border-zinc-800 bg-zinc-950/50 shrink-0">
@@ -376,7 +378,7 @@ export function EditProductModal({
               {' '}— gerado pelo sistema, não editável.
             </p>
           </div>
-          <button onClick={onClose} className="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors text-zinc-400 hover:text-white">
+          <button type="button" onClick={onClose} aria-label="Fechar edição de produto" className="grid h-11 w-11 place-items-center bg-zinc-800 hover:bg-zinc-700 rounded-full transition-colors text-zinc-400 hover:text-white">
             <X size={18} />
           </button>
         </div>
@@ -385,7 +387,7 @@ export function EditProductModal({
         <form onSubmit={handleSubmit} className="flex-1 overflow-y-auto p-5 space-y-5 custom-scrollbar">
 
           {/* ── FOTO DO PRODUTO ──────────────────────────────── */}
-          <div className={sect}>
+          <div className={sect} data-product-section="image">
             <h3 className="text-sm font-bold text-zinc-300 flex items-center gap-2">
               <Upload size={16} className="text-blue-400" /> Foto do Produto
             </h3>
@@ -452,7 +454,7 @@ export function EditProductModal({
           </div>
 
           {/* ── Dados Principais ──────────────────────────────── */}
-          <div className={sect}>
+          <div className={sect} data-product-section="main">
             <h3 className="text-sm font-bold text-zinc-300 flex items-center gap-2">
               <Tag size={16} className="text-blue-400" /> Dados Principais
             </h3>
@@ -502,7 +504,7 @@ export function EditProductModal({
           </div>
 
           {/* ── Preços & Estoque ──────────────────────────────── */}
-          <div className={sect}>
+          <div className={sect} data-product-section="commercial">
             <h3 className="text-sm font-bold text-zinc-300 flex items-center gap-2">
               <DollarSign size={16} className="text-emerald-400" /> Preços &amp; Estoque
             </h3>
@@ -562,7 +564,7 @@ export function EditProductModal({
           </div>
 
           {/* ── Fracionamento & Composição ───────────────────── */}
-          <div className={sect}>
+          <div className={sect} data-product-section="composition">
             <h3 className="text-sm font-bold text-zinc-300 flex items-center gap-2">
               Fracionamento &amp; Composição
             </h3>
@@ -726,7 +728,7 @@ export function EditProductModal({
           )}
 
           {/* ── Fiscal / NFC-e ────────────────────────────────── */}
-          <div className={sect}>
+          <div className={sect} data-product-section="tax">
             <h3 className="text-sm font-bold text-zinc-300 flex items-center gap-2">
               <FileText size={16} className="text-indigo-400" /> Fiscal / NFC-e
               <span className="text-zinc-600 font-normal text-xs">(opcional)</span>

@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { api } from '@/lib/api';
+import { isPetshopServiceCategory } from '@/pages/petshop/product-catalog';
 import { useDemoMissionsStore } from '@/store/demoMissions';
 import { toast } from 'sonner';
 import { PackagePlus, X, Loader2, Save, DollarSign, Barcode, CheckCircle2, HelpCircle, Upload, Image, Trash2 } from 'lucide-react';
@@ -26,6 +27,7 @@ export function AddProductModal({ isOpen, onClose, onSuccess, variant = 'default
   const { enabled: kdsEnabled, carvoariaEnabled } = useKdsConfig();
   const isStockist = user?.role === 'stockist';
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [creatingPetCategory, setCreatingPetCategory] = useState(false);
   const [grupos, setGrupos] = useState<GrupoTributacao[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -186,10 +188,11 @@ export function AddProductModal({ isOpen, onClose, onSuccess, variant = 'default
       api.get('/tributacao'),
       api.get('/products?limit=10000'),
     ]).then(([catRes, grupRes, prodRes]) => {
-      setCategories(catRes.data);
+      const availableCategories = variant === 'petshop' ? catRes.data.filter((category: { name: string }) => !isPetshopServiceCategory(category.name)) : catRes.data;
+      setCategories(availableCategories);
       setGrupos(grupRes.data);
       setAllProducts(prodRes.data.data);
-      if (catRes.data.length > 0) setFormData(f => ({ ...f, categoryId: catRes.data[0].id }));
+      if (availableCategories.length > 0) setFormData(f => ({ ...f, categoryId: availableCategories[0].id }));
     }).catch(() => toast.error('Erro ao carregar dados auxiliares'));
   }, [isOpen]);
 
@@ -544,6 +547,18 @@ export function AddProductModal({ isOpen, onClose, onSuccess, variant = 'default
                   <option value="" disabled>Selecione...</option>
                   {categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                 </select>
+                {variant === 'petshop' && categories.length === 0 && <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                  Nenhuma categoria de mercadoria cadastrada. Crie uma categoria para separar produtos dos serviços.
+                  <button type="button" disabled={creatingPetCategory} onClick={async () => {
+                    setCreatingPetCategory(true);
+                    try {
+                      const { data } = await api.post('/categories', { name: 'Produtos Pet' });
+                      setCategories([data]);
+                      setFormData(current => ({ ...current, categoryId: data.id }));
+                    } catch { toast.error('Não foi possível criar a categoria Produtos Pet.'); }
+                    finally { setCreatingPetCategory(false); }
+                  }} className="mt-2 block min-h-11 rounded-lg border border-amber-400 bg-white px-3 font-semibold">{creatingPetCategory ? 'Criando…' : 'Criar categoria Produtos Pet'}</button>
+                </div>}
               </div>
             </div>
 

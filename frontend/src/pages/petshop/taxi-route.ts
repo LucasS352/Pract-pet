@@ -23,6 +23,12 @@ export function requireRouteAddresses(addresses: Array<string | null | undefined
   return orderedRouteAddresses(addresses);
 }
 
+export function qualifyRouteAddresses(addresses: string[], cityState: string): string[] {
+  const location = cityState.trim();
+  if (!/^.+,\s*[A-Za-z]{2}$/.test(location)) throw new Error('Informe cidade e UF da rota (ex.: Bauru, SP) para localizar os endereços no Maps.');
+  return addresses.map(address => `${address.trim()}, ${location}`);
+}
+
 export function buildGoogleMapsRoutes(addresses: string[], mobile: boolean): string[] {
   const stops = orderedRouteAddresses(addresses);
   const maxStops = mobile ? 4 : 10; // Maps URLs: 3 mobile or 9 desktop waypoints, plus destination.

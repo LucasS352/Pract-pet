@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildGoogleMapsRoutes, isMobileMapsClient, requireRouteAddresses, orderedRouteAddresses } from '../src/pages/petshop/taxi-route.ts';
+import { buildGoogleMapsRoutes, isMobileMapsClient, qualifyRouteAddresses, requireRouteAddresses, orderedRouteAddresses } from '../src/pages/petshop/taxi-route.ts';
 
 test('Android horizontal continua no limite de três paradas intermediárias', () => {
   assert.equal(isMobileMapsClient('Mozilla/5.0 (Linux; Android 14)', true, 915), true);
@@ -37,4 +37,12 @@ test('preserva retorno posterior ao mesmo endereço na ordem do manifesto', () =
 test('uma parada sem endereço interrompe a rota em vez de ser omitida', () => {
   assert.throws(() => requireRouteAddresses(['Rua A, 10', '', 'Rua C, 30']), /1 parada\(s\) sem endereço/);
   assert.deepEqual(requireRouteAddresses(['Rua A, 10', ' rua a, 10 ', 'Rua C, 30']), ['Rua A, 10', 'Rua C, 30']);
+});
+
+test('endereços abreviados recebem cidade e UF antes de abrir no Maps', () => {
+  assert.throws(() => qualifyRouteAddresses(['Rua A, 10'], ''), /Informe cidade e UF/);
+  const addresses = qualifyRouteAddresses(['Duque de Caxias, 21 - Jd Estoril', 'Heitor de Andrade Campos, 274 - Jd Prudência'], 'Bauru, SP');
+  const url = new URL(buildGoogleMapsRoutes(addresses, true)[0]);
+  assert.equal(url.searchParams.get('waypoints'), 'Duque de Caxias, 21 - Jd Estoril, Bauru, SP');
+  assert.equal(url.searchParams.get('destination'), 'Heitor de Andrade Campos, 274 - Jd Prudência, Bauru, SP');
 });
