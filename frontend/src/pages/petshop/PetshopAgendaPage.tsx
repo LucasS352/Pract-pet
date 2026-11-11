@@ -232,7 +232,12 @@ export default function PetshopAgendaPage() {
   const [tutorQuery, setTutorQuery] = useState('');
   const [tutorResults, setTutorResults] = useState<Array<Pick<Tutor, 'id' | 'name' | 'phone'>>>([]);
   const [searchingTutors, setSearchingTutors] = useState(false);
+  const [searchedTutorQuery, setSearchedTutorQuery] = useState('');
+  const [tutorSearchError, setTutorSearchError] = useState(false);
+  const [loadingBookingPets, setLoadingBookingPets] = useState(false);
+  const [bookingPetsError, setBookingPetsError] = useState(false);
   const petsRequest = useRef(0);
+  const bookingPetsController = useRef<AbortController | null>(null);
   const transportEdited = useRef(false);
   const [services, setServices] = useState<PetService[]>([]);
   const [operators, setOperators] = useState<any[]>([]);
@@ -252,19 +257,13 @@ export default function PetshopAgendaPage() {
   // Modais e ações
   const [openReception, setOpenReception] = useState(false);
   const [openNew, setOpenNew] = useState(searchParams.get('new') === '1');
-
-  // Auto-carrega todos os pets para o seletor do modal de novo agendamento
   useEffect(() => {
-    if (openNew && pets.length === 0) {
-      api.get<Pet[]>('/petshop/pets')
-        .then(res => {
-          if (Array.isArray(res.data) && res.data.length > 0) {
-            setPets(res.data);
-          }
-        })
-        .catch(() => {});
-    }
+    if (openNew) return;
+    ++petsRequest.current;
+    bookingPetsController.current?.abort();
+    setLoadingBookingPets(false);
   }, [openNew]);
+
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [updatingId, setUpdatingId] = useState('');
   const [notifyingId, setNotifyingId] = useState('');
@@ -433,11 +432,17 @@ export default function PetshopAgendaPage() {
       return;
     }
     const controller = new AbortController();
+    const query = tutorQuery.trim();
     setSearchingTutors(true);
+    setTutorSearchError(false);
     const timer = window.setTimeout(() => {
-      api.get('/petshop/tutors/booking-search', { params: { search: tutorQuery.trim() }, signal: controller.signal })
-        .then(({ data }) => setTutorResults(Array.isArray(data) ? data : []))
-        .catch(() => { if (!controller.signal.aborted) toast.error('Não foi possível buscar tutores.'); })
+      api.get('/petshop/tutors/booking-search', { params: { search: query }, signal: controller.signal })
+        .then(({ data }) => {
+          if (controller.signal.aborted) return;
+          setTutorResults(Array.isArray(data) ? data : []);
+          setSearchedTutorQuery(query);
+        })
+        .catch(() => { if (!controller.signal.aborted) setTutorSearchError(true); })
         .finally(() => { if (!controller.signal.aborted) setSearchingTutors(false); });
     }, 250);
     return () => { window.clearTimeout(timer); controller.abort(); };
@@ -445,19 +450,49 @@ export default function PetshopAgendaPage() {
 
   const chooseTutor = async (tutor: Pick<Tutor, 'id' | 'name' | 'phone'>) => {
     const request = ++petsRequest.current;
+    bookingPetsController.current?.abort();
+    const controller = new AbortController();
+    bookingPetsController.current = controller;
     transportEdited.current = false;
     setSelectedTutor(tutor);
     setTutorResults([]);
     setPets([]);
+    setLoadingBookingPets(true);
+    setBookingPetsError(false);
     setAvailablePackages([]);
     setPackageSelections({});
     setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: '40', transportCoveredByPackage: false, transportNotes: '' }));
     try {
-      const { data } = await api.get<Pet[]>('/petshop/pets', { params: { customerId: tutor.id } });
-      if (request === petsRequest.current) setPets(Array.isArray(data) ? data : []);
+      const { data } = await api.get<Pet[]>('/petshop/pets', { params: { customerId: tutor.id }, signal: controller.signal });
+      if (request === petsRequest.current && !controller.signal.aborted) setPets(Array.isArray(data) ? data.filter(pet => pet.customerId === tutor.id) : []);
     } catch {
-      if (request === petsRequest.current) toast.error('Não foi possível carregar os pets deste tutor.');
+      if (request === petsRequest.current && !controller.signal.aborted) setBookingPetsError(true);
+    } finally {
+      if (request === petsRequest.current) setLoadingBookingPets(false);
     }
+  };
+
+  const selectBookingPet = (pet: Pet) => {
+    if (pet.customerId !== selectedTutor?.id) return;
+    transportEdited.current = false;
+    const parsedAddr = parseAddressParts(pet.customer?.address);
+    const hasAddr = Boolean(pet.customer?.address?.trim());
+    setAvailablePackages([]);
+    setPackageSelections({});
+    setForm(current => ({
+      ...current,
+      petId: pet.id,
+      serviceIds: [],
+      transportEnabled: false,
+      transportMode: 'both',
+      transportFee: '40',
+      transportCoveredByPackage: false,
+      customerStreet: parsedAddr.street,
+      customerNeighborhood: parsedAddr.neighborhood,
+      customerReference: pet.customer?.reference || '',
+      transportNotes: '',
+      saveAddressToCustomer: !hasAddr,
+    }));
   };
 
   // Carregar atendimentos do período
@@ -504,6 +539,12 @@ export default function PetshopAgendaPage() {
 
   useEffect(() => {
     if (searchParams.get('new') === '1') {
+      bookingPetsController.current?.abort();
+      setLoadingBookingPets(false);
+      setBookingPetsError(false);
+      setSelectedTutor(null);
+      setTutorQuery('');
+      setPets([]);
       transportEdited.current = false;
       const pid = searchParams.get('petId') || '';
       if (pid) {
@@ -678,10 +719,13 @@ export default function PetshopAgendaPage() {
   // Abertura do modal de criação pré-preenchendo data e horário
   const handleOpenNewForDay = (day: Date, timeStrPrefill = '09:00') => {
     ++petsRequest.current;
+    bookingPetsController.current?.abort();
     transportEdited.current = false;
     setSelectedTutor(null);
     setTutorQuery('');
     setPets([]);
+    setLoadingBookingPets(false);
+    setBookingPetsError(false);
     const dStr = formatISOYMD(day);
     setForm({
       petId: '',
@@ -3078,7 +3122,7 @@ export default function PetshopAgendaPage() {
         if (pet) {
           ++petsRequest.current;
           transportEdited.current = false;
-          setPets(current => [...current.filter(item => item.id !== pet.id), pet]);
+          setPets([pet]);
           setSelectedTutor({ id: pet.customer.id, name: pet.customer.name, phone: pet.customer.phone });
           setAvailablePackages([]);
           setPackageSelections({});
@@ -3106,16 +3150,30 @@ export default function PetshopAgendaPage() {
               </button>
             </div>
 
-            <div className="rounded-xl border border-zinc-200 bg-white p-3">
-              <label htmlFor="booking-tutor-search" className="mb-1 block text-xs font-bold text-zinc-700">Tutor *</label>
+            <section aria-label="Seleção de tutor" className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-xs">
+              <div className="mb-3 flex items-center gap-2.5">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#0d6e5a] text-xs font-bold text-white">1</span>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900">Encontre o tutor</h3>
+                  <p className="text-xs text-zinc-500">Busque pelo nome ou telefone cadastrado</p>
+                </div>
+              </div>
               {selectedTutor ? (
-                <div className="flex items-center justify-between gap-2 text-sm">
-                  <span className="min-w-0 truncate text-zinc-800">{selectedTutor.name} · {selectedTutor.phone}</span>
-                  <button type="button" className="shrink-0 font-semibold text-[#0d6e5a]" onClick={() => {
+                <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                  <div aria-hidden="true" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white text-sm font-bold text-[#0d6e5a]">{selectedTutor.name.slice(0, 2).toUpperCase()}</div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-bold text-zinc-900">{selectedTutor.name}</p>
+                    <p className="text-xs text-zinc-600">{selectedTutor.phone}</p>
+                  </div>
+                  <button type="button" className="min-h-11 shrink-0 rounded-lg px-2 text-sm font-semibold text-[#0d6e5a] hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6e5a]" onClick={() => {
                     ++petsRequest.current;
+                    bookingPetsController.current?.abort();
                     setSelectedTutor(null);
                     setTutorQuery('');
+                    setSearchedTutorQuery('');
                     setPets([]);
+                    setLoadingBookingPets(false);
+                    setBookingPetsError(false);
                     setAvailablePackages([]);
                     setPackageSelections({});
                     setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportCoveredByPackage: false }));
@@ -3123,68 +3181,61 @@ export default function PetshopAgendaPage() {
                 </div>
               ) : (
                 <>
-                  <input id="booking-tutor-search" className={inputClass} value={tutorQuery} onChange={event => setTutorQuery(event.target.value)} placeholder="Buscar por nome ou telefone" autoComplete="off" />
-                  {searchingTutors && <p className="mt-1 text-xs text-zinc-500" role="status">Buscando tutores…</p>}
-                  {tutorResults.length > 0 && <div className="mt-2 max-h-40 overflow-y-auto rounded-lg border border-zinc-200">
-                    {tutorResults.map(tutor => <button key={tutor.id} type="button" className="flex w-full min-h-11 items-center justify-between gap-2 border-b border-zinc-100 px-3 text-left text-sm last:border-0 hover:bg-emerald-50" onClick={() => void chooseTutor(tutor)}>
-                      <span className="truncate font-medium text-zinc-800">{tutor.name}</span><span className="shrink-0 text-xs text-zinc-500">{tutor.phone}</span>
+                  <label htmlFor="booking-tutor-search" className="mb-1.5 block text-sm font-medium text-zinc-700">Nome ou telefone</label>
+                  <div className="relative">
+                    <Search size={18} aria-hidden="true" className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-500" />
+                    <input id="booking-tutor-search" type="search" inputMode="search" autoComplete="off" className="min-h-12 w-full rounded-xl border border-zinc-300 bg-white py-3 pl-11 pr-4 text-base text-zinc-900 outline-none placeholder:text-zinc-400 focus:border-[#0d6e5a] focus:ring-2 focus:ring-emerald-100" value={tutorQuery} onChange={event => {
+                      setTutorQuery(event.target.value);
+                      setSearchedTutorQuery('');
+                      setTutorResults([]);
+                      setTutorSearchError(false);
+                    }} placeholder="Ex.: Ana Souza ou (11) 99999-9999" />
+                  </div>
+                  {tutorQuery.trim().length < 2 && <p className="mt-2 text-xs text-zinc-500">Digite pelo menos 2 caracteres para buscar.</p>}
+                  <div aria-live="polite" className="mt-2 text-xs text-zinc-600">
+                    {searchingTutors && <span className="inline-flex items-center gap-1.5"><Loader2 size={14} className="animate-spin" aria-hidden="true" />Buscando tutores…</span>}
+                    {tutorSearchError && <span className="text-rose-700">Não foi possível buscar. Edite a busca e tente novamente.</span>}
+                    {!searchingTutors && !tutorSearchError && tutorQuery.trim().length >= 2 && searchedTutorQuery === tutorQuery.trim() && tutorResults.length === 0 && <span>Nenhum tutor encontrado. Confira o nome ou cadastre um novo tutor.</span>}
+                  </div>
+                  {tutorResults.length > 0 && <div className="mt-2 space-y-1" aria-label="Resultados da busca de tutores">
+                    {tutorResults.map(tutor => <button key={tutor.id} type="button" className="flex min-h-12 w-full items-center gap-3 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-left transition hover:border-emerald-300 hover:bg-emerald-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6e5a]" onClick={() => void chooseTutor(tutor)}>
+                      <div aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-emerald-50 text-xs font-bold text-[#0d6e5a]">{tutor.name.slice(0, 2).toUpperCase()}</div>
+                      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold text-zinc-900">{tutor.name}</span><span className="block text-xs text-zinc-600">{tutor.phone}</span></span>
+                      <ChevronRight size={18} aria-hidden="true" className="shrink-0 text-zinc-400" />
                     </button>)}
                   </div>}
                 </>
               )}
-            </div>
+            </section>
 
-            {/* 2. SELETOR DE PET */}
-            <div>
-              <label className="block text-xs font-bold text-zinc-700 mb-1 flex items-center gap-1.5">
-                <PawPrint size={13} className="text-teal-700" />
-                <span>Pet *</span>
-              </label>
+            {selectedTutor && <section aria-label="Seleção de pet" className="rounded-2xl border border-zinc-200 bg-white p-4 shadow-xs">
+              <div className="mb-3 flex items-center gap-2.5">
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-[#0d6e5a] text-xs font-bold text-white">2</span>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900">Escolha o pet</h3>
+                  <p className="text-xs text-zinc-500">Pets de {selectedTutor.name}</p>
+                </div>
+              </div>
+              {loadingBookingPets && <p role="status" className="flex items-center gap-2 py-3 text-sm text-zinc-600"><Loader2 size={16} className="animate-spin" aria-hidden="true" />Carregando pets…</p>}
+              {!loadingBookingPets && bookingPetsError && <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-rose-50 p-3 text-sm text-rose-800"><span>Não foi possível carregar os pets.</span><button type="button" className="min-h-11 font-semibold underline" onClick={() => void chooseTutor(selectedTutor)}>Tentar novamente</button></div>}
+              {!loadingBookingPets && !bookingPetsError && pets.length === 0 && <p className="rounded-xl bg-zinc-50 p-3 text-sm text-zinc-600">Nenhum pet ativo encontrado para este tutor. Use “Cadastrar tutor e pet” acima para adicionar um pet.</p>}
+              {!loadingBookingPets && !bookingPetsError && pets.length > 0 && <div className="grid gap-2 sm:grid-cols-2">
+                {pets.map(pet => {
+                  const selected = form.petId === pet.id;
+                  return <button key={pet.id} type="button" aria-pressed={selected} onClick={() => selectBookingPet(pet)} className={`flex min-h-16 w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0d6e5a] ${selected ? 'border-[#0d6e5a] bg-emerald-50 ring-1 ring-[#0d6e5a]' : 'border-zinc-200 bg-white hover:border-emerald-300 hover:bg-emerald-50/50'}`}>
+                    <PetAvatar pet={pet} size="md" />
+                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-bold text-zinc-900">{pet.name}</span><span className="block truncate text-xs text-zinc-600">{pet.breed || (pet.species === 'cat' ? 'Gato' : 'Cão')}{pet.size ? ` · ${sizeLabel(pet.size)}` : ''}</span></span>
+                    <span aria-hidden="true" className={`grid h-6 w-6 shrink-0 place-items-center rounded-full border ${selected ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white' : 'border-zinc-300 text-transparent'}`}><Check size={14} /></span>
+                  </button>;
+                })}
+              </div>}
+            </section>}
 
-              <select
-                required
-                className={inputClass}
-                value={form.petId}
-                onChange={e => {
-                  const pid = e.target.value;
-                  transportEdited.current = false;
-                  const petObj = pets.find(p => p.id === pid);
-                  if (petObj?.customer) {
-                    setSelectedTutor(petObj.customer);
-                  }
-                  const parsedAddr = parseAddressParts(petObj?.customer?.address);
-                  const hasAddr = Boolean(petObj?.customer?.address && petObj.customer.address.trim().length > 0);
-                  setAvailablePackages([]);
-                  setPackageSelections({});
-                  setForm({
-                    ...form,
-                    petId: pid,
-                    serviceIds: [],
-                    transportEnabled: false,
-                    transportMode: 'both',
-                    transportFee: '40',
-                    transportCoveredByPackage: false,
-                    customerStreet: parsedAddr.street,
-                    customerNeighborhood: parsedAddr.neighborhood,
-                    customerReference: petObj?.customer?.reference || '',
-                    transportNotes: '',
-                    saveAddressToCustomer: !hasAddr,
-                  });
-                }}
-              >
-                <option value="">Selecione o pet</option>
-                {pets.map(pet => (
-                  <option key={pet.id} value={pet.id}>
-                    {pet.name} · {pet.customer?.name || 'Tutor não informado'}
-                  </option>
-                ))}
-              </select>
-            </div>
-
+            {form.petId && <>
             {/* 3. CARD DE DETALHES DO PET SELECIONADO (Fiel ao Mockup Image 3) */}
             {form.petId && (() => {
               const selectedPetObj = pets.find(p => p.id === form.petId);
-              if (!selectedPetObj) return null;
+              if (!selectedPetObj || selectedPetObj.size) return null;
               return (
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-emerald-200/80 bg-emerald-50/40 p-3 shadow-2xs">
                   <div className="flex items-center gap-3 min-w-0">
@@ -3211,12 +3262,6 @@ export default function PetshopAgendaPage() {
 
                   <div className="text-left sm:text-right shrink-0">
                     <span className="block text-[11px] font-medium text-zinc-500 mb-1">Porte para cobrança:</span>
-                    {selectedPetObj.size ? (
-                      <span className="inline-flex items-center gap-1 rounded-xl bg-[#0d6e5a] text-white font-bold text-xs px-3 py-1 shadow-2xs">
-                        <PawPrint size={12} />
-                        {sizeLabel(selectedPetObj.size)}
-                      </span>
-                    ) : (
                       <div className="flex items-center gap-1.5">
                         <span className="text-amber-800 font-semibold text-[11px]">Sem porte!</span>
                         <select
@@ -3228,7 +3273,7 @@ export default function PetshopAgendaPage() {
                             try {
                               await api.patch(`/petshop/pets/${selectedPetObj.id}`, { size: val });
                               toast.success(`Porte do pet atualizado para ${sizeLabel(val)}!`);
-                              selectedPetObj.size = val;
+                              setPets(current => current.map(pet => pet.id === selectedPetObj.id ? { ...pet, size: val } : pet));
                               loadAppointments(false);
                             } catch {
                               toast.error('Erro ao salvar porte do pet.');
@@ -3243,7 +3288,6 @@ export default function PetshopAgendaPage() {
                           <option value="giant">Gigante (acima de 35kg)</option>
                         </select>
                       </div>
-                    )}
                   </div>
                 </div>
               );
@@ -3621,6 +3665,7 @@ export default function PetshopAgendaPage() {
               <CalendarDays size={16} />
               <span>{saving ? 'Agendando…' : 'Confirmar agendamento'}</span>
             </button>
+            </>}
           </form>
         </Modal>
       )}

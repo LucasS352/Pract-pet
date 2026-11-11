@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const { chromium } = require('C:/Users/Lucas Souza/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 
 const origin = process.env.PRACTPET_BROWSER_ORIGIN || 'http://127.0.0.1:5174';
+const screenshotDir = process.env.PRACTPET_SCREENSHOT_DIR;
 const now = new Date();
 const local = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 9).toISOString();
 const old = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2, 9).toISOString();
@@ -29,6 +30,9 @@ const browser = async () => {
   try {
     for (const width of [390, 412, 768]) {
       let submittedBooking = null;
+      let unfilteredPetRequests = 0;
+      let scopedPetRequests = 0;
+      let tutorSearchRequests = 0;
       const context = await instance.newContext({
         viewport: { width, height: 844 }, isMobile: width < 768, hasTouch: width < 768,
         userAgent: width < 768 ? 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36' : undefined,
@@ -49,9 +53,13 @@ const browser = async () => {
         else if (path === '/petshop/appointments/overdue-pickups') data = [overdue];
         else if (path === '/petshop/pending-reservations') data = [];
         else if (path === '/petshop/services') data = [service];
-        else if (path === '/petshop/pets') data = url.searchParams.has('customerId') ? [pet] : [pet];
+        else if (path === '/petshop/pets') {
+          if (!url.searchParams.has('customerId')) unfilteredPetRequests++;
+          else scopedPetRequests++;
+          data = url.searchParams.get('customerId') === customer.id ? [pet] : [];
+        }
         else if (path === `/petshop/pets/${pet.id}`) data = pet;
-        else if (path === '/petshop/tutors/booking-search') data = [customer];
+        else if (path === '/petshop/tutors/booking-search') { tutorSearchRequests++; data = [customer]; }
         else if (path === `/petshop/packages/available/${pet.id}`) data = [packagePlan];
         else if (path === '/products') data = { data: [], total: 0 };
         else if (path === '/categories') data = [{ id: 'category-audit', name: 'Audit' }];
@@ -80,10 +88,19 @@ const browser = async () => {
         assert.ok(layout.contentLength > 150, `conteúdo vazio em ${path} (${width}px)`);
         assert.ok(layout.scrollWidth <= layout.clientWidth + 1, `overflow horizontal em ${path} (${width}px)`);
         assert.deepEqual(errors, [], `erro JavaScript em ${path} (${width}px)`);
+        if (width === 768 && path === '/petshop/agenda' && screenshotDir) {
+          await page.getByRole('button', { name: /Novo agendamento/i }).first().click();
+          await page.getByRole('dialog').first().waitFor();
+          await page.screenshot({ path: `${screenshotDir}/booking-tablet.png` });
+          await page.keyboard.press('Escape');
+          await page.getByRole('dialog').first().waitFor({ state: 'detached' });
+        }
         if (width < 768 && path === '/petshop/agenda') {
+          const unfilteredBeforeBooking = unfilteredPetRequests;
           const open = page.getByRole('button', { name: /Novo agendamento/i }).first();
           await open.click();
           await page.getByRole('dialog').first().waitFor();
+          if (screenshotDir && width === 390) await page.screenshot({ path: `${screenshotDir}/booking-tutor.png` });
           assert.equal(await page.evaluate(() => document.body.style.overflow), 'hidden');
           await page.getByRole('button', { name: /Cadastrar tutor e pet/i }).click();
           await page.waitForTimeout(100);
@@ -103,9 +120,14 @@ const browser = async () => {
           if (width === 390) {
             await open.click();
             const booking = page.getByRole('dialog').first();
-            await booking.getByPlaceholder('Buscar por nome ou telefone').fill('Tutor Audit');
+            const tutorSearch = booking.getByPlaceholder('Ex.: Ana Souza ou (11) 99999-9999');
+            await tutorSearch.fill('T');
+            await page.waitForTimeout(350);
+            assert.equal(tutorSearchRequests, 0, 'a busca não deve consultar o servidor com um caractere');
+            await tutorSearch.fill('Tutor Audit');
             await booking.getByRole('button', { name: /Tutor Audit/ }).click();
-            await booking.locator('select').first().selectOption(pet.id);
+            await booking.getByRole('button', { name: /Pet Audit/ }).click();
+            if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/booking-pet.png` });
             await booking.getByText('Pacote Audit').waitFor();
             await booking.locator('fieldset').first().locator('input[type="checkbox"]').first().check();
             await booking.getByRole('button', { name: 'Confirmar agendamento' }).click();
@@ -114,6 +136,8 @@ const browser = async () => {
             assert.deepEqual(submittedBooking?.serviceIds, [service.id]);
             assert.deepEqual(submittedBooking?.packageSelections, { [service.id]: packagePlan.id });
             assert.equal(submittedBooking?.transport?.coveredByPackage, true);
+            assert.equal(unfilteredPetRequests, unfilteredBeforeBooking, 'o agendamento não deve buscar todos os pets');
+            assert.equal(scopedPetRequests, 1, 'os pets devem ser buscados somente após selecionar o tutor');
             results.push({ width, path, bookingFlow: 'tutor→pet→serviço/pacote→POST', passed: true });
           }
         }
