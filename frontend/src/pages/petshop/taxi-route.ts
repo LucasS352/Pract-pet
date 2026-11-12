@@ -23,17 +23,52 @@ export function requireRouteAddresses(addresses: Array<string | null | undefined
   return orderedRouteAddresses(addresses);
 }
 
-export function qualifyRouteAddresses(addresses: string[], cityState: string): string[] {
-  const location = cityState.trim();
-  if (!/^.+,\s*[A-Za-z]{2}$/.test(location)) throw new Error('Informe cidade e UF da rota (ex.: Bauru, SP) para localizar os endereços no Maps.');
-  return addresses.map(address => `${address.trim()}, ${location}`);
+/**
+ * Detecta se o endereço já possui UF explícita (ex: - SP, , SP, /SP) ou CEP brasileiro.
+ */
+export function addressHasCityOrState(address: string): boolean {
+  return /(-|\/|,)\s*(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/i.test(address)
+    || /\b\d{5}-?\d{3}\b/.test(address);
 }
 
-export function buildGoogleMapsRoutes(addresses: string[], mobile: boolean): string[] {
+/**
+ * Qualifica um endereço de forma inteligente:
+ * 1. Se o endereço já tiver indicação de UF/estado ou CEP, preserva sem alterar (evita misturar cidades diferentes).
+ * 2. Se for fornecida uma cidade/UF padrão (ex.: da loja), enriquece apenas os endereços que ainda não possuem cidade.
+ * 3. Se nenhuma cidade for fornecida, mantém o endereço limpo para o Google Maps resolver por proximidade/GPS do motorista.
+ * Nunca bloqueia nem lança erro exigindo UF digitada.
+ */
+export function qualifyRouteAddress(address: string, fallbackCityState?: string | null): string {
+  const clean = (address || '').trim();
+  if (!clean) return '';
+  if (addressHasCityOrState(clean)) {
+    return clean;
+  }
+  const fallback = (fallbackCityState || '').trim();
+  if (fallback) {
+    const cityName = fallback.split(',')[0].trim().toLowerCase();
+    if (cityName && clean.toLowerCase().endsWith(cityName)) {
+      const uf = fallback.includes(',') ? fallback.split(',')[1].trim() : '';
+      return uf ? `${clean}, ${uf}` : clean;
+    }
+    return `${clean}, ${fallback}`;
+  }
+  return clean;
+}
+
+export function qualifyRouteAddresses(addresses: string[], fallbackCityState?: string | null): string[] {
+  return addresses.map(address => qualifyRouteAddress(address, fallbackCityState));
+}
+
+export function buildGoogleMapsRoutes(
+  addresses: string[],
+  mobile: boolean,
+  originAddress?: string | null,
+): string[] {
   const stops = orderedRouteAddresses(addresses);
   const maxStops = mobile ? 4 : 10; // Maps URLs: 3 mobile or 9 desktop waypoints, plus destination.
   const routes: string[] = [];
-  let previousDestination: string | undefined;
+  let previousDestination = originAddress?.trim() || undefined;
   let next = 0;
   while (next < stops.length) {
     let count = Math.min(maxStops, stops.length - next);

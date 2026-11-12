@@ -44,10 +44,56 @@ export function TaxiDogWidget({
   const [manifestFilter, setManifestFilter] = useState<'all' | 'pickup' | 'in_store' | 'ready'>('all');
   const [openManifestModal, setOpenManifestModal] = useState(false);
   const [checkedStops, setCheckedStops] = useState<Record<string, boolean>>({});
+  // Ordem sequencial das paradas da rota
+  const [routeOrder, setRouteOrder] = useState<string[]>([]);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [overdueItems, setOverdueItems] = useState<Appointment[]>([]);
   const [routeLinks, setRouteLinks] = useState<string[]>([]);
-  const [routeCity, setRouteCity] = useState('');
+  const [routeCity, setRouteCity] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return localStorage.getItem('practpet_route_city') || '';
+    }
+    return '';
+  });
+
+  const handleRouteCityChange = (val: string) => {
+    setRouteCity(val);
+    try {
+      if (val.trim()) localStorage.setItem('practpet_route_city', val.trim());
+      else localStorage.removeItem('practpet_route_city');
+    } catch {}
+  };
+
+  const getStopNumber = (id: string) => {
+    const idx = routeOrder.indexOf(id);
+    return idx >= 0 ? idx + 1 : 0;
+  };
+
+  const toggleRouteStop = (id: string) => {
+    setRouteOrder(current => {
+      const idx = current.indexOf(id);
+      if (idx >= 0) return current.filter(itemId => itemId !== id);
+      return [...current, id];
+    });
+  };
+
+  const moveStop = (id: string, direction: 'up' | 'down') => {
+    setRouteOrder(current => {
+      const idx = current.indexOf(id);
+      if (idx < 0) return current;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= current.length) return current;
+      const next = [...current];
+      const temp = next[idx];
+      next[idx] = next[targetIdx];
+      next[targetIdx] = temp;
+      return next;
+    });
+  };
+
+  const clearRoute = () => {
+    setRouteOrder([]);
+  };
   const manifestToken = useRef(`taxi-manifest-${Math.random().toString(36).slice(2)}`);
   const historyCleanup = useRef<number | null>(null);
 
@@ -184,19 +230,34 @@ export function TaxiDogWidget({
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
-  const selectedRouteItems = useMemo(
-    () => transportItems.filter(item => Boolean(checkedStops[item.id]) && needsTaxiStop(item)),
-    [transportItems, checkedStops],
-  );
+  const selectedRouteItems = useMemo(() => {
+    if (routeOrder.length > 0) {
+      return routeOrder
+        .map(id => transportItems.find(it => it.id === id))
+        .filter((it): it is Appointment => Boolean(it && needsTaxiStop(it)));
+    }
+    return transportItems.filter(item => Boolean(checkedStops[item.id]) && needsTaxiStop(item));
+  }, [transportItems, routeOrder, checkedStops]);
+
+  const selectAllInSequence = () => {
+    const pending = transportItems
+      .filter(item => needsTaxiStop(item))
+      .map(item => item.id);
+    setRouteOrder(pending);
+  };
 
   const openMultiStopGoogleMaps = () => {
-    if (selectedRouteItems.length === 0) {
-      toast.error('Marque (flegue) pelo menos 1 endereço na lista para montar a rota.');
+    const itemsToRoute = selectedRouteItems.length > 0
+      ? selectedRouteItems
+      : transportItems.filter(it => needsTaxiStop(it));
+
+    if (itemsToRoute.length === 0) {
+      toast.error('Nenhum endereço pendente para montar a rota.');
       return;
     }
 
     try {
-      const addresses = requireRouteAddresses(selectedRouteItems.map(item => item.transport?.address || item.customer?.address));
+      const addresses = requireRouteAddresses(itemsToRoute.map(item => item.transport?.address || item.customer?.address));
       const mobile = isMobileMapsClient(navigator.userAgent, window.matchMedia('(pointer: coarse)').matches, window.innerWidth);
       const links = buildGoogleMapsRoutes(qualifyRouteAddresses(addresses, routeCity), mobile);
       setRouteLinks(links);
@@ -747,10 +808,44 @@ export function TaxiDogWidget({
               </button>
             </div>
 
-            {/* Filtros por Fase dentro do Manifesto */}
-            <label className="mb-3 block text-xs font-semibold text-zinc-700">Cidade e UF dos endereços
-              <input value={routeCity} onChange={event => setRouteCity(event.target.value)} placeholder="Ex.: Bauru, SP" className="mt-1 min-h-11 w-full rounded-lg border border-zinc-300 px-3 text-sm" />
-            </label>
+            {/* Localização & Cidade padrão (opcional) */}
+            <div className="mb-3 rounded-xl border border-zinc-200 bg-zinc-50/80 p-2.5 text-xs space-y-1.5">
+              <div className="flex flex-wrap items-center justify-between gap-1">
+                <span className="font-bold text-zinc-800 flex items-center gap-1.5">
+                  <MapPin size={13} className="text-teal-700" />
+                  Localização & Cidade padrão:
+                </span>
+                <span className="text-[11px] text-zinc-500">
+                  Opcional · O Maps prioriza o GPS do motorista
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={routeCity}
+                  onChange={event => handleRouteCityChange(event.target.value)}
+                  placeholder="Cidade padrão da loja (Ex: Bauru, SP) — opcional"
+                  className="min-h-9 flex-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs text-zinc-800 outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
+                />
+                {typeof navigator !== 'undefined' && navigator.geolocation && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.geolocation.getCurrentPosition(
+                        pos => {
+                          toast.success(`GPS ativo (${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}). A rota usará sua localização como ponto de partida.`);
+                        },
+                        () => toast.info('Permissão de GPS não concedida. O Maps usará a localização atual do seu aparelho.'),
+                      );
+                    }}
+                    title="Testar sinal de GPS no aparelho"
+                    className="inline-flex items-center gap-1 shrink-0 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 cursor-pointer shadow-2xs"
+                  >
+                    <Navigation size={13} className="text-teal-700" />
+                    <span>GPS Ativo</span>
+                  </button>
+                )}
+              </div>
+            </div>
             {routeLinks.length > 1 && <div className="flex flex-wrap gap-2 mb-3">{routeLinks.map((url, index) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-800">Abrir trecho {index + 1} de {routeLinks.length}</a>)}</div>}
             <div className="flex flex-wrap items-center gap-1.5 mb-3">
               <button
@@ -803,58 +898,30 @@ export function TaxiDogWidget({
             <div className="flex flex-wrap items-center justify-between gap-2 mb-3 bg-zinc-50 p-2.5 rounded-xl border border-zinc-200 text-xs">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="font-semibold text-zinc-700">
-                  Marcados p/ rota:{' '}
-                  <strong className="text-teal-800 font-extrabold">
-                    {selectedRouteItems.length}
-                  </strong>
+                  {routeOrder.length > 0 ? (
+                    <span>
+                      🚗 <strong className="text-teal-800 font-extrabold">{routeOrder.length} parada(s)</strong> na rota ordenada
+                    </span>
+                  ) : (
+                    <span>Marcados p/ rota: <strong className="text-teal-800 font-extrabold">{selectedRouteItems.length}</strong></span>
+                  )}
                 </span>
-                {pendingPickups.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next: Record<string, boolean> = {};
-                      pendingPickups.forEach(it => {
-                        next[it.id] = true;
-                      });
-                      setCheckedStops(next);
-                    }}
-                    className="rounded-md bg-amber-100 px-2 py-0.5 text-[11px] font-bold text-amber-900 hover:bg-amber-200 cursor-pointer"
-                  >
-                    Marcar só Falta Buscar ({pendingPickups.length})
-                  </button>
-                )}
-                {readyDropoffs.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next: Record<string, boolean> = {};
-                      readyDropoffs.forEach(it => {
-                        next[it.id] = true;
-                      });
-                      setCheckedStops(next);
-                    }}
-                    className="rounded-md bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-900 hover:bg-emerald-200 cursor-pointer"
-                  >
-                    Marcar só Prontos p/ Levar ({readyDropoffs.length})
-                  </button>
-                )}
                 <button
                   type="button"
-                  onClick={() => {
-                    if (selectedRouteItems.length > 0) {
-                      setCheckedStops({});
-                    } else {
-                      const all: Record<string, boolean> = {};
-                      manifestDisplayedItems.forEach(it => {
-                        if (needsTaxiStop(it)) all[it.id] = true;
-                      });
-                      setCheckedStops(all);
-                    }
-                  }}
-                  className="text-[11px] font-bold text-teal-700 hover:text-teal-900 underline cursor-pointer"
+                  onClick={selectAllInSequence}
+                  className="rounded-md bg-teal-100 px-2 py-0.5 text-[11px] font-bold text-teal-900 hover:bg-teal-200 cursor-pointer"
                 >
-                  {selectedRouteItems.length > 0 ? 'Limpar seleção' : 'Marcar visíveis'}
+                  Marcar em sequência (1ª, 2ª...)
                 </button>
+                {routeOrder.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearRoute}
+                    className="text-[11px] font-bold text-red-600 hover:text-red-800 underline cursor-pointer"
+                  >
+                    Limpar rota
+                  </button>
+                )}
               </div>
 
               <div className="flex items-center gap-2">
@@ -932,24 +999,59 @@ export function TaxiDogWidget({
                           : 'border-zinc-200 bg-white shadow-2xs hover:border-amber-300'
                       }`}
                     >
-                      {/* Checkbox para incluir na rota */}
-                      <input
-                        type="checkbox"
-                        checked={isChecked}
-                        disabled={!needsTaxiStop(item)}
-                        onChange={e =>
-                          setCheckedStops(prev => ({
-                            ...prev,
-                            [item.id]: e.target.checked,
-                          }))
-                        }
-                        className="mt-1 h-5 w-5 rounded border-zinc-300 text-teal-600 focus:ring-teal-500 cursor-pointer"
-                      />
-
-                      {/* Número da parada */}
-                      <span className="grid h-7 w-7 place-items-center rounded-lg bg-zinc-100 text-xs font-bold text-zinc-700 shrink-0">
-                        {index + 1}
-                      </span>
+                      {/* Ordem da Parada / Controle da Rota */}
+                      {needsTaxiStop(item) ? (
+                        <div className="shrink-0 flex flex-col items-center gap-1">
+                          {getStopNumber(item.id) > 0 ? (
+                            <div className="flex flex-col items-center gap-1">
+                              <span className="grid h-7 w-7 place-items-center rounded-lg bg-teal-600 text-xs font-black text-white shadow-xs" title={`${getStopNumber(item.id)}ª parada na rota`}>
+                                {getStopNumber(item.id)}ª
+                              </span>
+                              <div className="inline-flex items-center rounded border border-zinc-200 bg-white shadow-2xs">
+                                <button
+                                  type="button"
+                                  disabled={getStopNumber(item.id) === 1}
+                                  onClick={() => moveStop(item.id, 'up')}
+                                  title="Subir parada"
+                                  className="px-1 text-[10px] font-extrabold text-zinc-700 hover:bg-zinc-100 disabled:opacity-20 cursor-pointer"
+                                >
+                                  ▲
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={getStopNumber(item.id) === routeOrder.length}
+                                  onClick={() => moveStop(item.id, 'down')}
+                                  title="Descer parada"
+                                  className="px-1 text-[10px] font-extrabold text-zinc-700 hover:bg-zinc-100 disabled:opacity-20 cursor-pointer"
+                                >
+                                  ▼
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleRouteStop(item.id)}
+                                  title="Remover da rota"
+                                  className="px-1 text-[10px] font-bold text-red-600 hover:bg-red-50 cursor-pointer"
+                                >
+                                  ✕
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => toggleRouteStop(item.id)}
+                              title={`Adicionar como ${routeOrder.length + 1}ª parada`}
+                              className="h-7 px-2 rounded-lg border border-dashed border-teal-600/70 bg-teal-50/60 text-[10px] font-bold text-teal-800 hover:bg-teal-100 cursor-pointer transition"
+                            >
+                              + {routeOrder.length + 1}ª
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="grid h-7 w-7 place-items-center rounded-lg bg-zinc-100 text-xs font-bold text-zinc-700 shrink-0">
+                          {index + 1}
+                        </span>
+                      )}
 
                       {/* Informações da Parada */}
                       <div className="min-w-0 flex-1">

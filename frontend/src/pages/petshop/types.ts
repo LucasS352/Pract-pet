@@ -40,27 +40,46 @@ export type Tutor = {
 };
 
 export function parseDetailedAddress(raw?: string | null) {
-  if (!raw) return { street: '', number: '', neighborhood: '' };
+  if (!raw) return { street: '', number: '', neighborhood: '', city: '' };
   const parts = raw.split(' - ');
   const main = parts[0] || '';
-  const neighborhood = parts.slice(1).join(' - ').trim();
+  let neighborhood = '';
+  let city = '';
+  if (parts.length >= 3) {
+    neighborhood = parts[1].trim();
+    city = parts.slice(2).join(' - ').trim();
+  } else if (parts.length === 2) {
+    const subParts = parts[1].split(',');
+    if (subParts.length >= 2) {
+      neighborhood = subParts[0].trim();
+      city = subParts.slice(1).join(',').trim();
+    } else {
+      neighborhood = parts[1].trim();
+    }
+  }
   const commaIdx = main.lastIndexOf(',');
   if (commaIdx !== -1) {
     return {
       street: main.substring(0, commaIdx).trim(),
       number: main.substring(commaIdx + 1).trim(),
       neighborhood,
+      city,
     };
   }
-  return { street: main.trim(), number: '', neighborhood };
+  return { street: main.trim(), number: '', neighborhood, city };
 }
 
-export function composeDetailedAddress(street?: string | null, number?: string | null, neighborhood?: string | null) {
+export function composeDetailedAddress(street?: string | null, number?: string | null, neighborhood?: string | null, city?: string | null) {
   const cleanStreet = (street || '').trim();
   const cleanNumber = (number || '').trim();
   const cleanNeigh = (neighborhood || '').trim();
+  const cleanCity = (city || '').trim();
   const streetWithNumber = [cleanStreet, cleanNumber].filter(Boolean).join(', ');
-  return [streetWithNumber, cleanNeigh].filter(Boolean).join(' - ');
+  const base = [streetWithNumber, cleanNeigh].filter(Boolean).join(' - ');
+  if (cleanCity) {
+    return base ? `${base} - ${cleanCity}` : cleanCity;
+  }
+  return base;
 }
 
 export type Vaccination = {

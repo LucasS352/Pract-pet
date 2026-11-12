@@ -21,6 +21,7 @@ export function ReceptionRegistrationModal({ includePet = false, onClose, onSave
     street: '',
     number: '',
     neighborhood: '',
+    city: '',
     reference: '',
     notes: '',
     photoUrl: '',
@@ -52,6 +53,7 @@ export function ReceptionRegistrationModal({ includePet = false, onClose, onSave
           street: parsed.street,
           number: parsed.number,
           neighborhood: parsed.neighborhood,
+          city: parsed.city,
           reference: data.reference || '',
           notes: data.notes || '',
           photoUrl: data.photoUrl || '',
@@ -75,7 +77,7 @@ export function ReceptionRegistrationModal({ includePet = false, onClose, onSave
     savingRef.current = true;
     setSaving(true);
     try {
-      const fullAddress = composeDetailedAddress(tutor.street, tutor.number, tutor.neighborhood);
+      const fullAddress = composeDetailedAddress(tutor.street, tutor.number, tutor.neighborhood, tutor.city);
       const tutorPayload = {
         name: tutor.name.trim(),
         phone: tutor.phone.trim(),
@@ -211,17 +213,28 @@ export function ReceptionRegistrationModal({ includePet = false, onClose, onSave
               </label>
             </div>
 
-            {/* Bairro e Referência */}
-            <label>
-              <span className={labelClass}>Bairro</span>
-              <input
-                className={inputClass}
-                placeholder="Ex: Vila Leozina"
-                value={tutor.neighborhood}
-                onChange={e => setTutor({ ...tutor, neighborhood: e.target.value })}
-              />
-            </label>
-            <label>
+            {/* Bairro e Cidade */}
+            <div className="sm:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-12">
+              <label className="sm:col-span-6">
+                <span className={labelClass}>Bairro</span>
+                <input
+                  className={inputClass}
+                  placeholder="Ex: Vila Leozina"
+                  value={tutor.neighborhood}
+                  onChange={e => setTutor({ ...tutor, neighborhood: e.target.value })}
+                />
+              </label>
+              <label className="sm:col-span-6">
+                <span className={labelClass}>Cidade (opcional)</span>
+                <input
+                  className={inputClass}
+                  placeholder="Ex: Bauru ou cidade vizinha"
+                  value={tutor.city}
+                  onChange={e => setTutor({ ...tutor, city: e.target.value })}
+                />
+              </label>
+            </div>
+            <label className="sm:col-span-2">
               <span className={labelClass}>Ponto de referência / Complemento</span>
               <input
                 className={inputClass}

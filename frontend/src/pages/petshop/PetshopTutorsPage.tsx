@@ -15,6 +15,7 @@ const emptyTutor = {
   street: '',
   number: '',
   neighborhood: '',
+  city: '',
   reference: '',
   notes: '',
   photoUrl: '',
@@ -46,6 +47,7 @@ export default function PetshopTutorsPage() {
       street: parsed.street,
       number: parsed.number,
       neighborhood: parsed.neighborhood,
+      city: parsed.city,
       reference: tutor.reference || '',
       notes: tutor.notes || '',
       photoUrl: tutor.photoUrl || '',
@@ -64,7 +66,7 @@ export default function PetshopTutorsPage() {
     event.preventDefault();
     setSaving(true);
     try {
-      const fullAddress = composeDetailedAddress(form.street, form.number, form.neighborhood);
+      const fullAddress = composeDetailedAddress(form.street, form.number, form.neighborhood, form.city);
       const payload = {
         name: form.name.trim(),
         phone: form.phone.trim(),
@@ -191,12 +193,18 @@ export default function PetshopTutorsPage() {
           </label>
         </div>
 
-        {/* Bairro e Referência */}
-        <label>
-          <span className={labelClass}>Bairro</span>
-          <input className={inputClass} placeholder="Ex: Vila Leozina" value={form.neighborhood} onChange={event => setForm({ ...form, neighborhood: event.target.value })} />
-        </label>
-        <label>
+        {/* Bairro e Cidade */}
+        <div className="sm:col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-12">
+          <label className="sm:col-span-6">
+            <span className={labelClass}>Bairro</span>
+            <input className={inputClass} placeholder="Ex: Vila Leozina" value={form.neighborhood} onChange={event => setForm({ ...form, neighborhood: event.target.value })} />
+          </label>
+          <label className="sm:col-span-6">
+            <span className={labelClass}>Cidade (opcional)</span>
+            <input className={inputClass} placeholder="Ex: Bauru ou cidade vizinha" value={form.city} onChange={event => setForm({ ...form, city: event.target.value })} />
+          </label>
+        </div>
+        <label className="sm:col-span-2">
           <span className={labelClass}>Ponto de referência / Complemento</span>
           <input className={inputClass} placeholder="Ex: Próximo ao Campo Orlandão" value={form.reference} onChange={event => setForm({ ...form, reference: event.target.value })} />
         </label>

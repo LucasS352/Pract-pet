@@ -95,11 +95,70 @@ export default function PetshopTaxiDogPage() {
   // Modal de Manifesto de Rota
   const [openManifestModal, setOpenManifestModal] = useState(false);
   const [checkedStops, setCheckedStops] = useState<Record<string, boolean>>({});
-  const [routeSelection, setRouteSelection] = useState<Record<string, boolean>>({});
-  const [routeCity, setRouteCity] = useState('');
+  // Ordem sequencial das paradas escolhidas pelo motorista: [id1, id2, id3...]
+  const [routeOrder, setRouteOrder] = useState<string[]>([]);
+
+  // Cidade padrão da loja ou salva no dispositivo (opcional)
+  const defaultRouteCity = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('practpet_route_city');
+      if (saved) return saved;
+    }
+    if (tenant?.municipio && tenant?.uf) return `${tenant.municipio}, ${tenant.uf}`;
+    return tenant?.municipio || '';
+  }, [tenant]);
+
+  const [routeCity, setRouteCity] = useState(defaultRouteCity);
+
+  useEffect(() => {
+    if (defaultRouteCity && !routeCity) {
+      setRouteCity(defaultRouteCity);
+    }
+  }, [defaultRouteCity]);
+
+  const handleRouteCityChange = (val: string) => {
+    setRouteCity(val);
+    try {
+      if (val.trim()) localStorage.setItem('practpet_route_city', val.trim());
+      else localStorage.removeItem('practpet_route_city');
+    } catch {}
+  };
+
   const [routeLinks, setRouteLinks] = useState<string[]>([]);
   const [overdueCount, setOverdueCount] = useState(0);
   const loadController = useRef<AbortController | null>(null);
+
+  // Manipulação da ordem de paradas da rota
+  const getStopNumber = (id: string) => {
+    const idx = routeOrder.indexOf(id);
+    return idx >= 0 ? idx + 1 : 0;
+  };
+
+  const toggleRouteStop = (id: string) => {
+    setRouteOrder(current => {
+      const idx = current.indexOf(id);
+      if (idx >= 0) return current.filter(itemId => itemId !== id);
+      return [...current, id];
+    });
+  };
+
+  const moveStop = (id: string, direction: 'up' | 'down') => {
+    setRouteOrder(current => {
+      const idx = current.indexOf(id);
+      if (idx < 0) return current;
+      const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+      if (targetIdx < 0 || targetIdx >= current.length) return current;
+      const next = [...current];
+      const temp = next[idx];
+      next[idx] = next[targetIdx];
+      next[targetIdx] = temp;
+      return next;
+    });
+  };
+
+  const clearRoute = () => {
+    setRouteOrder([]);
+  };
 
   // Modais de Cancelamento e Reagendamento Fácil
   const [appointmentToCancel, setAppointmentToCancel] = useState<Appointment | null>(null);
@@ -135,11 +194,18 @@ export default function PetshopTaxiDogPage() {
     return () => loadController.current?.abort();
   }, [loadAppointments]);
 
-  useEffect(() => { setRouteLinks([]); }, [selectedDate, appointments, checkedStops, routeSelection, routeCity]);
+  useEffect(() => { setRouteLinks([]); }, [selectedDate, appointments, checkedStops, routeOrder, routeCity]);
 
   // Filtra apenas agendamentos com transporte habilitado e não cancelados
   const operation = useMemo(() => summarizeTaxiAppointments(appointments), [appointments]);
   const taxiAppointments = operation.all;
+
+  const selectAllInSequence = useCallback(() => {
+    const pending = taxiAppointments
+      .filter(item => !checkedStops[item.id] && needsTaxiStop(item))
+      .map(item => item.id);
+    setRouteOrder(pending);
+  }, [taxiAppointments, checkedStops]);
 
   // 1. FALTA BUSCAR (Coleta pendente antes do check-in)
   const pendingPickups = operation.pickups;
@@ -244,43 +310,79 @@ export default function PetshopTaxiDogPage() {
       return;
     }
 
-    const lines = [
-      `🚐 *ROTA DO TÁXI DOG — ${formatDate(selectedDate)}*`,
-      `Estabelecimento: ${tenant?.name || 'Pet Shop'}`,
-      `Total de corridas: ${taxiAppointments.length}`,
-      '',
-      `📥 *COLETAS A BUSCAR (${pendingPickups.length}):*`,
-      ...pendingPickups.map((item, idx) => {
-        const timeStr = time(item.startsAt);
-        const pet = item.pet?.name || 'Pet';
-        const tutor = item.pet?.customer?.name || 'Tutor';
-        const phone = item.pet?.customer?.phone || '';
-        const addr = item.transport?.address || 'Sem endereço';
-        const ref = item.transport?.reference ? ` (Ref: ${item.transport.reference})` : '';
-        return `${idx + 1}. [${timeStr}] *${pet}* (Tutor: ${tutor} - ${phone})\n📍 ${addr}${ref}`;
-      }),
-      '',
-      `📤 *ENTREGAS / LEVAR:*`,
-      ...dropoffQueue.map((item, idx) => {
-        const pet = item.pet?.name || 'Pet';
-        const tutor = item.pet?.customer?.name || 'Tutor';
-        const phone = item.pet?.customer?.phone || '';
-        const addr = item.transport?.address || 'Sem endereço';
-        const isReady = item.status === 'ready' ? ' [🚀 PRONTO!]' : ' [⏳ Na Loja]';
-        return `${idx + 1}. *${pet}*${isReady} (Tutor: ${tutor} - ${phone})\n📍 ${addr}`;
-      }),
-    ];
+    const hasOrderedStops = routeOrder.length > 0;
+    const orderedStops = hasOrderedStops
+      ? routeOrder
+          .map(id => taxiAppointments.find(item => item.id === id))
+          .filter((item): item is Appointment => Boolean(item && !checkedStops[item.id]))
+      : [];
+
+    const lines = hasOrderedStops && orderedStops.length > 0
+      ? [
+          `🚐 *ROTEIRO DO TÁXI DOG — ${formatDate(selectedDate)}*`,
+          `Estabelecimento: ${tenant?.name || 'Pet Shop'}`,
+          `Total na rota: ${orderedStops.length} parada(s) organizada(s)`,
+          '',
+          `*ORDEM DAS PARADAS (1ª à ${orderedStops.length}ª):*`,
+          ...orderedStops.map((item, idx) => {
+            const timeStr = time(item.startsAt);
+            const pet = item.pet?.name || 'Pet';
+            const tutor = item.pet?.customer?.name || (item as any).tutorName || 'Tutor';
+            const phone = item.pet?.customer?.phone || '';
+            const addr = item.transport?.address || 'Sem endereço';
+            const ref = item.transport?.reference ? ` (Ref: ${item.transport.reference})` : '';
+            const modeLabel = isPreCheckinStatus(item.status) ? '📥 Buscar' : '📤 Levar';
+            return `${idx + 1}ª Parada [${timeStr}] - *${pet}* (${modeLabel})\n📍 ${addr}${ref}\nTutor: ${tutor}${phone ? ` (${phone})` : ''}\n`;
+          }),
+        ]
+      : [
+          `🚐 *ROTA DO TÁXI DOG — ${formatDate(selectedDate)}*`,
+          `Estabelecimento: ${tenant?.name || 'Pet Shop'}`,
+          `Total de corridas: ${taxiAppointments.length}`,
+          '',
+          `📥 *COLETAS A BUSCAR (${pendingPickups.length}):*`,
+          ...pendingPickups.map((item, idx) => {
+            const timeStr = time(item.startsAt);
+            const pet = item.pet?.name || 'Pet';
+            const tutor = item.pet?.customer?.name || (item as any).tutorName || 'Tutor';
+            const phone = item.pet?.customer?.phone || '';
+            const addr = item.transport?.address || 'Sem endereço';
+            const ref = item.transport?.reference ? ` (Ref: ${item.transport.reference})` : '';
+            return `${idx + 1}. [${timeStr}] *${pet}* (Tutor: ${tutor} - ${phone})\n📍 ${addr}${ref}`;
+          }),
+          '',
+          `📤 *ENTREGAS / LEVAR:*`,
+          ...dropoffQueue.map((item, idx) => {
+            const pet = item.pet?.name || 'Pet';
+            const tutor = item.pet?.customer?.name || (item as any).tutorName || 'Tutor';
+            const phone = item.pet?.customer?.phone || '';
+            const addr = item.transport?.address || 'Sem endereço';
+            const isReady = item.status === 'ready' ? ' [🚀 PRONTO!]' : ' [⏳ Na Loja]';
+            return `${idx + 1}. *${pet}*${isReady} (Tutor: ${tutor} - ${phone})\n📍 ${addr}`;
+          }),
+        ];
 
     const text = lines.join('\n');
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank');
   };
 
-  // Abrir rota completa no Google Maps (com múltiplas paradas / waypoints)
+  // Abrir rota completa no Google Maps (com múltiplas paradas / waypoints na ordem selecionada)
   const handleOpenGoogleMapsRoute = () => {
     try {
-      const stops = taxiAppointments.filter(item => routeSelection[item.id] && !checkedStops[item.id] && needsTaxiStop(item));
-      if (!stops.length) { toast.error('Selecione pelo menos uma parada pendente para montar a rota.'); return; }
+      let stops: Appointment[] = [];
+      if (routeOrder.length > 0) {
+        stops = routeOrder
+          .map(id => taxiAppointments.find(item => item.id === id))
+          .filter((item): item is Appointment => Boolean(item && !checkedStops[item.id] && needsTaxiStop(item)));
+      } else {
+        stops = taxiAppointments.filter(item => !checkedStops[item.id] && needsTaxiStop(item));
+      }
+
+      if (!stops.length) {
+        toast.error('Selecione pelo menos uma parada pendente para montar a rota.');
+        return;
+      }
       const validAddresses = requireRouteAddresses(stops.map(item => item.transport?.address));
       const mobile = isMobileMapsClient(navigator.userAgent, window.matchMedia('(pointer: coarse)').matches, window.innerWidth);
       const links = buildGoogleMapsRoutes(qualifyRouteAddresses(validAddresses, routeCity), mobile);
@@ -896,40 +998,114 @@ export default function PetshopTaxiDogPage() {
           maxWidth="max-w-2xl"
         >
           <div className="space-y-4">
-            <p className="text-xs text-zinc-500">Selecione as paradas para a rota. Marque como concluída somente após visitar o endereço.</p>
-            <label className="block text-xs font-semibold text-zinc-700">Cidade e UF dos endereços
-              <input value={routeCity} onChange={event => setRouteCity(event.target.value)} placeholder="Ex.: Bauru, SP" className="mt-1 min-h-11 w-full rounded-lg border border-zinc-300 px-3 text-sm" />
-            </label>
+            <p className="text-xs text-zinc-500">Selecione as paradas para organizar a rota do motorista (1ª, 2ª, 3ª...). Marque a visita como concluída após atender.</p>
+
+            {/* Localização & Cidade padrão (opcional) */}
+            <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 text-xs space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-1.5">
+                <span className="font-bold text-zinc-800 flex items-center gap-1.5">
+                  <MapPin size={14} className="text-teal-700" />
+                  Localização & Cidade padrão:
+                </span>
+                <span className="text-[11px] text-zinc-500">
+                  Opcional · O Maps prioriza o GPS do motorista e cidades específicas de cada tutor
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  value={routeCity}
+                  onChange={event => handleRouteCityChange(event.target.value)}
+                  placeholder="Cidade padrão da loja (Ex: Bauru, SP) — opcional"
+                  className="min-h-9 flex-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs text-zinc-800 outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
+                />
+                {typeof navigator !== 'undefined' && navigator.geolocation && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.geolocation.getCurrentPosition(
+                        pos => {
+                          toast.success(`GPS ativo (${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}). A rota usará sua localização como ponto de partida.`);
+                        },
+                        () => toast.info('Permissão de GPS não concedida. O Maps usará a localização atual do seu aparelho.'),
+                      );
+                    }}
+                    title="Testar sinal de GPS no aparelho"
+                    className="inline-flex items-center gap-1 shrink-0 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 cursor-pointer shadow-2xs"
+                  >
+                    <Navigation size={13} className="text-teal-700" />
+                    <span>GPS Ativo</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
             {overdueCount > 0 && <p className="text-xs font-semibold text-amber-800">Inclui {overdueCount} coleta{overdueCount === 1 ? '' : 's'} pendente{overdueCount === 1 ? '' : 's'} de dias anteriores.</p>}
-          <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
-            <div>
-              <p className="text-xs font-bold text-zinc-900">
-                {taxiAppointments.length} paradas no manifesto · {taxiAppointments.filter(item => routeSelection[item.id] && !checkedStops[item.id] && needsTaxiStop(item)).length} selecionadas para rota
-              </p>
-              <p className="text-[11px] text-zinc-400">
-                Use o checkbox da rota para escolher destinos; conclua cada parada depois da visita.
-              </p>
+
+            {/* Barra de Ações e Resumo Ordenado */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-zinc-100">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-xs font-bold text-zinc-900">
+                    {routeOrder.length > 0 ? (
+                      <span>
+                        🚗 <strong className="text-teal-800 font-extrabold">{routeOrder.length} parada(s)</strong> na rota ordenada
+                      </span>
+                    ) : (
+                      <span>{taxiAppointments.length} paradas no manifesto</span>
+                    )}
+                  </p>
+                  {routeOrder.length > 0 ? (
+                    <button
+                      type="button"
+                      onClick={clearRoute}
+                      className="text-[11px] font-bold text-red-600 hover:text-red-800 underline cursor-pointer"
+                    >
+                      Limpar rota
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={selectAllInSequence}
+                      className="text-[11px] font-bold text-teal-700 hover:text-teal-900 underline cursor-pointer"
+                    >
+                      Marcar todas em sequência (1ª, 2ª, 3ª...)
+                    </button>
+                  )}
+                </div>
+                <p className="text-[11px] text-zinc-500">
+                  {routeOrder.length > 0
+                    ? 'Paradas organizadas na ordem que o motorista vai visitar. Ajuste a sequência com ▲ e ▼.'
+                    : 'Clique em "+ Definir como parada" para montar a 1ª, 2ª, 3ª parada da viagem.'}
+                </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleOpenGoogleMapsRoute}
+                  className="flex items-center gap-1.5 rounded-xl bg-[#0d6e5a] text-white px-3.5 py-2 text-xs font-bold hover:bg-[#0a5747] cursor-pointer shadow-xs transition"
+                >
+                  <Navigation size={14} />
+                  <span>Abrir Rota no Maps</span>
+                </button>
+                {routeLinks.length > 1 && (
+                  <div className="flex flex-wrap gap-2">
+                    {routeLinks.map((url, index) => (
+                      <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-800">
+                        Abrir trecho {index + 1} de {routeLinks.length}
+                      </a>
+                    ))}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  onClick={handleShareManifestWhatsApp}
+                  className="flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-2 text-xs font-bold hover:bg-emerald-100 cursor-pointer shadow-2xs transition"
+                >
+                  <Share2 size={14} />
+                  <span>WhatsApp</span>
+                </button>
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={handleOpenGoogleMapsRoute}
-                className="flex items-center gap-1.5 rounded-xl bg-[#0d6e5a] text-white px-3 py-1.5 text-xs font-bold hover:bg-[#0a5747] cursor-pointer shadow-xs transition"
-              >
-                <Navigation size={14} />
-                <span>Abrir Rota no Maps</span>
-              </button>
-              {routeLinks.length > 1 && <div className="flex flex-wrap gap-2">{routeLinks.map((url, index) => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-800">Abrir trecho {index + 1} de {routeLinks.length}</a>)}</div>}
-              <button
-                type="button"
-                onClick={handleShareManifestWhatsApp}
-                className="flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 px-3 py-1.5 text-xs font-bold hover:bg-emerald-100 cursor-pointer shadow-2xs transition"
-              >
-                <Share2 size={14} />
-                <span>WhatsApp</span>
-              </button>
-            </div>
-          </div>
 
           <div className="max-h-[60vh] overflow-y-auto space-y-2.5 pr-1">
             {taxiAppointments.map((item, idx) => {
@@ -978,9 +1154,54 @@ export default function PetshopTaxiDogPage() {
                       📍 {address}
                       {reference && <span className="text-zinc-400 ml-1">({reference})</span>}
                     </p>
-                    {needsTaxiStop(item) && !isChecked && <label className="mt-2 inline-flex min-h-11 items-center gap-2 font-semibold text-teal-800" onClick={event => event.stopPropagation()}>
-                      <input type="checkbox" checked={Boolean(routeSelection[item.id])} onChange={event => setRouteSelection(current => ({ ...current, [item.id]: event.target.checked }))} className="h-5 w-5" /> Incluir na rota
-                    </label>}
+                    {needsTaxiStop(item) && !isChecked && (
+                      <div className="mt-2" onClick={event => event.stopPropagation()}>
+                        {getStopNumber(item.id) > 0 ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-2.5 py-1 text-xs font-black text-white shadow-xs">
+                              <Navigation size={12} className="rotate-45" />
+                              {getStopNumber(item.id)}ª PARADA
+                            </span>
+                            <div className="inline-flex items-center rounded-lg border border-zinc-200 bg-zinc-50 p-0.5">
+                              <button
+                                type="button"
+                                disabled={getStopNumber(item.id) === 1}
+                                onClick={() => moveStop(item.id, 'up')}
+                                title="Mover para parada anterior"
+                                className="px-2 py-0.5 text-xs font-black text-zinc-700 hover:bg-white rounded disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                ▲
+                              </button>
+                              <button
+                                type="button"
+                                disabled={getStopNumber(item.id) === routeOrder.length}
+                                onClick={() => moveStop(item.id, 'down')}
+                                title="Mover para próxima parada"
+                                className="px-2 py-0.5 text-xs font-black text-zinc-700 hover:bg-white rounded disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                ▼
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleRouteStop(item.id)}
+                                title="Remover da rota"
+                                className="px-2 py-0.5 text-xs font-bold text-red-600 hover:bg-red-50 rounded cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => toggleRouteStop(item.id)}
+                            className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-dashed border-teal-600/70 bg-teal-50/60 px-3 py-1 text-xs font-bold text-teal-800 hover:bg-teal-100 hover:border-teal-700 cursor-pointer transition shadow-2xs"
+                          >
+                            + Definir como {routeOrder.length + 1}ª parada
+                          </button>
+                        )}
+                      </div>
+                    )}
 
                     <div className="mt-1.5 flex items-center gap-2">
                       {isPickup && (

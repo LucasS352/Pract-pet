@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildGoogleMapsRoutes, isMobileMapsClient, qualifyRouteAddresses, requireRouteAddresses, orderedRouteAddresses } from '../src/pages/petshop/taxi-route.ts';
+import {
+  buildGoogleMapsRoutes,
+  isMobileMapsClient,
+  qualifyRouteAddresses,
+  qualifyRouteAddress,
+  addressHasCityOrState,
+  requireRouteAddresses,
+  orderedRouteAddresses,
+} from '../src/pages/petshop/taxi-route.ts';
 
 test('Android horizontal continua no limite de três paradas intermediárias', () => {
   assert.equal(isMobileMapsClient('Mozilla/5.0 (Linux; Android 14)', true, 915), true);
@@ -39,10 +47,26 @@ test('uma parada sem endereço interrompe a rota em vez de ser omitida', () => {
   assert.deepEqual(requireRouteAddresses(['Rua A, 10', ' rua a, 10 ', 'Rua C, 30']), ['Rua A, 10', 'Rua C, 30']);
 });
 
-test('endereços abreviados recebem cidade e UF antes de abrir no Maps', () => {
-  assert.throws(() => qualifyRouteAddresses(['Rua A, 10'], ''), /Informe cidade e UF/);
-  const addresses = qualifyRouteAddresses(['Duque de Caxias, 21 - Jd Estoril', 'Heitor de Andrade Campos, 274 - Jd Prudência'], 'Bauru, SP');
-  const url = new URL(buildGoogleMapsRoutes(addresses, true)[0]);
-  assert.equal(url.searchParams.get('waypoints'), 'Duque de Caxias, 21 - Jd Estoril, Bauru, SP');
-  assert.equal(url.searchParams.get('destination'), 'Heitor de Andrade Campos, 274 - Jd Prudência, Bauru, SP');
+test('não obriga digitação de UF/cidade e preserva endereços com cidades diferentes', () => {
+  // Sem cidade fornecida, não lança erro: retorna o endereço limpo para resolver por GPS
+  const semCidade = qualifyRouteAddresses(['Rua A, 10', 'Rua B, 20'], '');
+  assert.deepEqual(semCidade, ['Rua A, 10', 'Rua B, 20']);
+
+  // Detecta se endereço já possui estado/cidade explícito
+  assert.equal(addressHasCityOrState('Av. Principal, 100 - Piratininga - SP'), true);
+  assert.equal(addressHasCityOrState('Rua 15, 200, Agudos - SP'), true);
+  assert.equal(addressHasCityOrState('Rua Sem Estado, 30 - Centro'), false);
+
+  // Endereço de outra cidade não é poluído pela cidade padrão da loja
+  const multiCidades = qualifyRouteAddresses(
+    [
+      'Rua Hipólito Lopes, 1419 - Redentor',
+      'Av. 13 de Maio, 50 - Centro - Agudos - SP',
+      'Rua B, 10 - Piratininga - SP',
+    ],
+    'Bauru, SP',
+  );
+  assert.equal(multiCidades[0], 'Rua Hipólito Lopes, 1419 - Redentor, Bauru, SP');
+  assert.equal(multiCidades[1], 'Av. 13 de Maio, 50 - Centro - Agudos - SP');
+  assert.equal(multiCidades[2], 'Rua B, 10 - Piratininga - SP');
 });
