@@ -84,6 +84,11 @@ const browser = async () => {
         else if (path === `/petshop/pets/${pet.id}`) data = pet;
         else if (path === '/petshop/tutors/booking-search') { tutorSearchRequests++; data = [customer]; }
         else if (path === '/petshop/tutors/booking-frequent') data = frequentTutors;
+        else if (path === '/users') data = [{ id: 'admin-audit', role: 'admin', email: 'admin@cliente.com' }];
+        else if (path === '/petshop/packages/contracts') data = [];
+        else if (path === '/petshop/packages/plans') data = [];
+        else if (path === '/petshop/packages/financial-overview') data = {};
+        else if (path === '/petshop/tutors') data = [customer];
         else if (path === '/petshop/tutors/booking-directory') data = { items: url.searchParams.get('page') === '2' ? [customer] : Array.from({ length: 20 }, (_, index) => ({ id: `directory-${index}`, name: `Cliente Diretório ${index}`, phone: customer.phone })), page: Number(url.searchParams.get('page') || 1), hasMore: url.searchParams.get('page') !== '2' };
         else if (path === `/petshop/packages/available/${pet.id}`) data = [packagePlan];
         else if (path === '/products') data = { data: [
@@ -98,7 +103,7 @@ const browser = async () => {
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
-      for (const path of ['/petshop', '/petshop/agenda', '/petshop/taxidog', '/petshop/produtos', '/petshop/servicos']) {
+      for (const path of ['/petshop', '/petshop/agenda', '/petshop/taxidog', '/petshop/produtos', '/petshop/servicos', '/petshop/pacotes']) {
         try {
           await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
         } catch (error) {
@@ -285,6 +290,20 @@ const browser = async () => {
           await page.getByRole('button', { name: 'Salvar', exact: true }).click();
           assert.equal(updatedTaxiFee, 55);
           results.push({ width, path, taxiFee: 'GET 50 → PUT 55', passed: true });
+        }
+        if (width < 768 && path === '/petshop/pacotes') {
+          for (const [buttonName, dialogName] of [
+            ['Novo Plano no Catálogo', 'Novo plano de pacote'],
+            ['Contratar Pacote p/ Cliente', 'Contratar Pacote para Cliente'],
+          ]) {
+            await page.getByRole('button', { name: buttonName }).click();
+            const dialog = page.getByRole('dialog', { name: dialogName });
+            await dialog.waitFor();
+            const dimensions = await dialog.evaluate(element => ({ width: element.clientWidth, scrollWidth: element.scrollWidth, viewport: document.documentElement.clientWidth }));
+            assert.ok(dimensions.width <= dimensions.viewport && dimensions.scrollWidth <= dimensions.width, JSON.stringify({ buttonName, dimensions }));
+            await dialog.getByRole('button', { name: 'Fechar' }).click();
+            results.push({ width, path, modal: dialogName, horizontalOverflow: false });
+          }
         }
       }
       await context.close();

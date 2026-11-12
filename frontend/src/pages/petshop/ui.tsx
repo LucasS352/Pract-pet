@@ -201,7 +201,7 @@ export function Modal({
 
   return (
     <div
-      className={`fixed inset-0 z-[80] grid place-items-end bg-slate-950/50 p-0 pt-[max(0.75rem,env(safe-area-inset-top,0px))] backdrop-blur-[2px] sm:place-items-center sm:p-4 ${suspended ? 'invisible pointer-events-none' : ''}`}
+      className={`fixed inset-0 z-[80] grid min-w-0 place-items-end overflow-x-clip bg-slate-950/50 p-0 pt-[max(0.75rem,env(safe-area-inset-top,0px))] backdrop-blur-[2px] sm:place-items-center sm:p-4 ${suspended ? 'invisible pointer-events-none' : ''}`}
       aria-hidden={suspended}
       onMouseDown={event => {
         if (event.target === event.currentTarget) onClose();
@@ -212,7 +212,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
-        className={`max-h-[calc(100dvh-env(safe-area-inset-top,0px)-0.75rem)] sm:max-h-[92dvh] w-full overflow-y-auto overscroll-contain rounded-t-2xl bg-white pb-[calc(1rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:pb-0 ${maxWidth}`}
+        className={`max-h-[calc(100dvh-env(safe-area-inset-top,0px)-0.75rem)] sm:max-h-[92dvh] w-full min-w-0 max-w-[100vw] overflow-x-hidden overflow-y-auto overscroll-contain rounded-t-2xl bg-white pb-[calc(1rem+env(safe-area-inset-bottom,0px))] shadow-2xl sm:rounded-2xl sm:pb-0 [&_input]:min-w-0 [&_select]:min-w-0 [&_textarea]:min-w-0 max-sm:[&_input]:text-base max-sm:[&_select]:text-base max-sm:[&_textarea]:text-base ${maxWidth}`}
       >
         <div className="sticky top-0 z-20 flex items-center justify-between border-b border-[var(--pc-border)] bg-white/95 px-4 py-3 sm:px-5 sm:py-3.5 backdrop-blur">
           <div className="flex items-center gap-2.5 min-w-0 pr-2">

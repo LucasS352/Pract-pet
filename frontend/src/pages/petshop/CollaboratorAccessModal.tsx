@@ -37,7 +37,9 @@ export function CollaboratorAccessModal({
           setEmail(opUser.email);
         } else {
           setExistingUser(null);
-          setEmail('');
+          const adminEmail = users.find((u: any) => u.role === 'admin' && typeof u.email === 'string')?.email;
+          const domain = adminEmail?.split('@')[1]?.trim().toLowerCase();
+          setEmail(domain ? `colaboradores@${domain}` : '');
         }
       })
       .catch(() => {
