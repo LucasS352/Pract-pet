@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertTriangle,
@@ -150,6 +150,18 @@ export default function PetshopPackagesPage() {
 
   // Modal de Nova Contratação de Pacote
   const [openContractModal, setOpenContractModal] = useState(false);
+  const contractOpenRef = useRef(false);
+  contractOpenRef.current = openContractModal;
+  const [taxiDefaultFee, setTaxiDefaultFee] = useState('40');
+  useEffect(() => {
+    api.get<{ fee: number }>('/petshop/taxi-default-fee')
+      .then(({ data }) => {
+        const fee = String(data.fee);
+        setTaxiDefaultFee(fee);
+        if (!contractOpenRef.current) setContractForm(current => ({ ...current, transportFee: fee }));
+      })
+      .catch(() => toast.error('Não foi possível carregar o preço padrão do Táxi Dog.'));
+  }, []);
   const [savingContract, setSavingContract] = useState(false);
   const [priceSimulation, setPriceSimulation] = useState<any>(null);
   const [contractForm, setContractForm] = useState({
@@ -169,7 +181,7 @@ export default function PetshopPackagesPage() {
     notes: '',
     transportEnabled: false,
     transportMode: 'round_trip' as 'round_trip' | 'pickup_only' | 'dropoff_only',
-    transportFee: '40',
+    transportFee: taxiDefaultFee,
     customerStreet: '',
     customerNeighborhood: '',
     customerReference: '',
@@ -589,7 +601,7 @@ export default function PetshopPackagesPage() {
       notes: '',
       transportEnabled: false,
       transportMode: 'round_trip',
-      transportFee: '40',
+      transportFee: taxiDefaultFee,
       customerStreet: parseAddressParts(defaultTutor?.address).street,
       customerNeighborhood: parseAddressParts(defaultTutor?.address).neighborhood,
       customerReference: defaultTutor?.reference || '',
@@ -641,7 +653,7 @@ export default function PetshopPackagesPage() {
       notes: `Renovação de pacote (${op.planName || matchedPlan.name})`,
       transportEnabled: false,
       transportMode: 'round_trip',
-      transportFee: '40',
+      transportFee: taxiDefaultFee,
       customerStreet: parsedAddr.street,
       customerNeighborhood: parsedAddr.neighborhood,
       customerReference: tutorObj?.reference || '',

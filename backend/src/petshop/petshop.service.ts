@@ -11,6 +11,7 @@ import { PetshopWhatsappService } from './petshop-whatsapp.service';
 import { PetshopPricingService, DEFAULT_STAGE_DEFINITIONS, PetshopStageItem } from './petshop-pricing.service';
 import { PetshopCommissionsService } from './petshop-commissions.service';
 import { normalizeTransport, parseAppointmentTransport, serializeAppointmentTransport } from './petshop-transport';
+import { parseTaxiDefaultFee, readTaxiDefaultFee, TAXI_DEFAULT_FEE_SETTINGS_ID } from './taxi-default-fee';
 import { addonSettingsId, parseAddonSettings, validateAddonSettings } from './service-addon-settings';
 import { recordAddedServiceCommissions } from '../sales/petshop-checkout';
 
@@ -81,6 +82,24 @@ export class PetshopService {
       height: optimized.height,
       optimized: true,
     };
+  }
+
+  async getTaxiDefaultFee() {
+    return { fee: await readTaxiDefaultFee(await this.prisma()) };
+  }
+
+  async updateTaxiDefaultFee(value: unknown, req?: any) {
+    if (req?.user?.type || !['admin', 'superadmin'].includes(req?.user?.role)) {
+      throw new ForbiddenException('Apenas administradores podem alterar o preço padrão do Táxi Dog.');
+    }
+    const fee = parseTaxiDefaultFee(value);
+    const prisma = await this.prisma();
+    await prisma.tenantSettings.upsert({
+      where: { id: TAXI_DEFAULT_FEE_SETTINGS_ID },
+      update: { paymentMethodsConfig: { fee } },
+      create: { id: TAXI_DEFAULT_FEE_SETTINGS_ID, paymentMethodsConfig: { fee } },
+    });
+    return { fee };
   }
 
   async overview() {
@@ -1485,7 +1504,10 @@ export class PetshopService {
     }
 
     const endsAt = new Date(startsAt.getTime() + totalMinutes * 60_000);
-    const transport = normalizeTransport(data.transport);
+    const transportInput = data.transport?.enabled && data.transport.fee == null
+      ? { ...data.transport, fee: await readTaxiDefaultFee(prisma) }
+      : data.transport;
+    const transport = normalizeTransport(transportInput);
     const professionalId = optionalText(data.professionalId) ?? null;
 
     const packageSelections: Record<string, string> =

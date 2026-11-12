@@ -52,6 +52,8 @@ export class PetshopController {
   @Delete('vaccinations/:id') removeVaccination(@Param('id') id: string) { return this.petshop.removeVaccination(id); }
 
   @Get('services') listServices(@Query('includeInactive') includeInactive?: string) { return this.petshop.listServices(includeInactive === 'true'); }
+  @Get('taxi-default-fee') taxiDefaultFee() { return this.petshop.getTaxiDefaultFee(); }
+  @Put('taxi-default-fee') updateTaxiDefaultFee(@Body('fee') fee: unknown, @Req() req: any) { return this.petshop.updateTaxiDefaultFee(fee, req); }
   @Get('stages') getStages() { return this.petshop.getTenantStages(); }
   @Put('stages') updateStages(@Body() body: any, @Req() req: any) { return this.petshop.updateTenantStages(body, req); }
   @Get('services/:id') getService(@Param('id') id: string) { return this.petshop.getService(id); }

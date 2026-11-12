@@ -257,6 +257,16 @@ export default function PetshopAgendaPage() {
   const directoryController = useRef<AbortController | null>(null);
   const directoryRequest = useRef(0);
   const transportEdited = useRef(false);
+  const [taxiDefaultFee, setTaxiDefaultFee] = useState('40');
+  useEffect(() => {
+    api.get<{ fee: number }>('/petshop/taxi-default-fee')
+      .then(({ data }) => {
+        const fee = String(data.fee);
+        setTaxiDefaultFee(fee);
+        if (!transportEdited.current) setForm(current => ({ ...current, transportFee: fee }));
+      })
+      .catch(() => toast.error('Não foi possível carregar o preço padrão do Táxi Dog.'));
+  }, []);
   const [services, setServices] = useState<PetService[]>([]);
   const [operators, setOperators] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -366,7 +376,7 @@ export default function PetshopAgendaPage() {
     notes: '',
     transportEnabled: false,
     transportMode: 'both' as 'pickup' | 'dropoff' | 'both',
-    transportFee: '40',
+    transportFee: taxiDefaultFee,
     transportCoveredByPackage: false,
     customerStreet: '',
     customerNeighborhood: '',
@@ -426,7 +436,7 @@ export default function PetshopAgendaPage() {
     setForm(prev => {
       if (!first) {
         return prev.transportCoveredByPackage
-          ? { ...prev, transportCoveredByPackage: false, transportFee: prev.transportFee === '0' ? '40' : prev.transportFee }
+          ? { ...prev, transportCoveredByPackage: false, transportFee: prev.transportFee === '0' ? taxiDefaultFee : prev.transportFee }
           : prev;
       }
       const mode = transportEdited.current ? prev.transportMode : packageTransportUiMode(first.mode);
@@ -437,14 +447,14 @@ export default function PetshopAgendaPage() {
         transportEnabled: transportEdited.current ? prev.transportEnabled : true,
         transportMode: mode as typeof prev.transportMode,
         transportCoveredByPackage: Boolean(covered),
-        transportFee: covered ? '0' : prev.transportFee === '0' ? '40' : prev.transportFee,
+        transportFee: covered ? '0' : prev.transportFee === '0' ? taxiDefaultFee : prev.transportFee,
         customerStreet: prev.customerStreet || first.street || parsed.street || '',
         customerNeighborhood: prev.customerNeighborhood || first.neighborhood || parsed.neighborhood || '',
         customerReference: prev.customerReference || first.reference || '',
         transportNotes: prev.transportNotes || first.notes || '',
       };
     });
-  }, [openNew, selectedTransportPackages, form.transportMode]);
+  }, [openNew, selectedTransportPackages, form.transportMode, taxiDefaultFee]);
 
   // Cálculo da semana ativa
   const monday = useMemo(() => getMonday(anchorDate), [anchorDate]);
@@ -538,7 +548,7 @@ export default function PetshopAgendaPage() {
     setBookingPetsError(false);
     setAvailablePackages([]);
     setPackageSelections({});
-    setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: '40', transportCoveredByPackage: false, transportNotes: '' }));
+    setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: taxiDefaultFee, transportCoveredByPackage: false, transportNotes: '' }));
     try {
       const { data } = await api.get<Pet[]>('/petshop/pets', { params: { customerId: tutor.id }, signal: controller.signal });
       if (request === petsRequest.current && !controller.signal.aborted) setPets(Array.isArray(data) ? data.filter(pet => pet.customerId === tutor.id) : []);
@@ -562,7 +572,7 @@ export default function PetshopAgendaPage() {
       serviceIds: [],
       transportEnabled: false,
       transportMode: 'both',
-      transportFee: '40',
+      transportFee: taxiDefaultFee,
       transportCoveredByPackage: false,
       customerStreet: parsedAddr.street,
       customerNeighborhood: parsedAddr.neighborhood,
@@ -651,7 +661,7 @@ export default function PetshopAgendaPage() {
         notes: '',
         transportEnabled: false,
         transportMode: 'both',
-        transportFee: '40',
+        transportFee: taxiDefaultFee,
         transportCoveredByPackage: false,
         customerStreet: parsedAddr.street,
         customerNeighborhood: parsedAddr.neighborhood,
@@ -813,7 +823,7 @@ export default function PetshopAgendaPage() {
       notes: '',
       transportEnabled: false,
       transportMode: 'both',
-      transportFee: '40',
+      transportFee: taxiDefaultFee,
       transportCoveredByPackage: false,
       customerStreet: '',
       customerNeighborhood: '',
@@ -896,7 +906,7 @@ export default function PetshopAgendaPage() {
         notes: '',
         transportEnabled: false,
         transportMode: 'both',
-        transportFee: '40',
+        transportFee: taxiDefaultFee,
         transportCoveredByPackage: false,
         customerStreet: '',
         customerNeighborhood: '',
@@ -3233,7 +3243,7 @@ export default function PetshopAgendaPage() {
           setSelectedTutor({ id: pet.customer.id, name: pet.customer.name, phone: pet.customer.phone });
           setAvailablePackages([]);
           setPackageSelections({});
-          setForm(current => ({ ...current, petId: pet.id, serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: '40', transportCoveredByPackage: false, transportNotes: '' }));
+          setForm(current => ({ ...current, petId: pet.id, serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: taxiDefaultFee, transportCoveredByPackage: false, transportNotes: '' }));
         }
         setOpenReception(false);
       }} />}

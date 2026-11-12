@@ -8,6 +8,7 @@ import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { hasTaxiDropoff, hasTaxiPickup, type TaxiMode } from './petshop-transport';
+import { readTaxiDefaultFee } from './taxi-default-fee';
 
 const VALID_SPECIES = new Set(['all', 'dog', 'cat']);
 const VALID_SIZES = new Set(['all', 'small', 'medium', 'large', 'giant']);
@@ -685,7 +686,7 @@ export class PetshopPackagesService {
     }
 
     const transportEnabled = Boolean(data?.transport?.enabled);
-    const transportFee = transportEnabled ? Math.max(0, Number(data?.transport?.fee ?? 40)) : 0;
+    const transportFee = transportEnabled ? Math.max(0, Number(data?.transport?.fee ?? await readTaxiDefaultFee(prisma))) : 0;
     if (!Number.isFinite(transportFee) || transportFee < 0) {
       throw new BadRequestException('Taxa de transporte inválida.');
     }

@@ -26,6 +26,7 @@ import {
   Syringe,
   Tag,
   Trash2,
+  Truck,
   X,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -322,6 +323,10 @@ function ServiceRowActionsMenu({
 
 export default function PetshopServicesPage() {
   const [items, setItems] = useState<PetService[]>([]);
+  const [taxiDefaultFee, setTaxiDefaultFee] = useState('40');
+  const [taxiFeeDraft, setTaxiFeeDraft] = useState('40');
+  const [savingTaxiFee, setSavingTaxiFee] = useState(false);
+  const [loadingTaxiFee, setLoadingTaxiFee] = useState(true);
   const [loading, setLoading] = useState(true);
   const [updatingId, setUpdatingId] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -347,6 +352,10 @@ export default function PetshopServicesPage() {
 
   useEffect(() => {
     void load();
+    api.get<{ fee: number }>('/petshop/taxi-default-fee')
+      .then(({ data }) => { setTaxiDefaultFee(String(data.fee)); setTaxiFeeDraft(String(data.fee)); })
+      .catch(() => toast.error('Não foi possível carregar o preço padrão do Táxi Dog.'))
+      .finally(() => setLoadingTaxiFee(false));
   }, []);
 
   // KPIs
@@ -777,6 +786,30 @@ export default function PetshopServicesPage() {
       <div className="hidden md:block">
         <CatalogTabs />
       </div>
+
+      <section aria-label="Serviço padrão Táxi Dog" className="mb-4 flex flex-col gap-3 rounded-2xl border border-teal-200 bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-3">
+          <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-teal-50 text-teal-800"><Truck size={20} aria-hidden="true" /></span>
+          <div><h2 className="text-sm font-bold text-zinc-900">Táxi Dog · preço padrão</h2><p className="mt-1 text-xs text-zinc-600">Usado em novos agendamentos e pacotes. Você pode alterar o valor em cada contratação; os anteriores mantêm o preço combinado.</p></div>
+        </div>
+        <form className="flex shrink-0 items-end gap-2" onSubmit={async event => {
+          event.preventDefault();
+          const fee = Number(taxiFeeDraft);
+          if (!Number.isFinite(fee) || fee < 0 || fee > 10000 || !/^\d+(?:\.\d{1,2})?$/.test(taxiFeeDraft)) { toast.error('Informe um preço válido com até duas casas decimais.'); return; }
+          setSavingTaxiFee(true);
+          try {
+            const { data } = await api.put<{ fee: number }>('/petshop/taxi-default-fee', { fee });
+            setTaxiDefaultFee(String(data.fee)); setTaxiFeeDraft(String(data.fee));
+            toast.success('Preço padrão do Táxi Dog atualizado.');
+          } catch (error: any) { toast.error(error?.response?.data?.message || 'Não foi possível salvar o preço padrão.'); }
+          finally { setSavingTaxiFee(false); }
+        }}>
+          <label className="text-xs font-semibold text-zinc-700">Valor padrão (R$)
+            <input type="number" min="0" max="10000" step="0.01" value={taxiFeeDraft} onChange={event => setTaxiFeeDraft(event.target.value)} disabled={loadingTaxiFee || savingTaxiFee} className="mt-1 block min-h-11 w-28 rounded-lg border border-zinc-300 px-3 text-sm" />
+          </label>
+          <button type="submit" disabled={loadingTaxiFee || savingTaxiFee || taxiFeeDraft === taxiDefaultFee} className={`${primaryButton} disabled:opacity-50`}>Salvar</button>
+        </form>
+      </section>
 
       {/* 3. Filtros - Mobile (Estruturado em card idêntico ao mockup) */}
       <section

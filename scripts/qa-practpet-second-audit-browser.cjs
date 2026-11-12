@@ -50,6 +50,7 @@ const browser = async () => {
       let reversedPayment = null;
       let editedProduct = null;
       let uploadedPhotoBytes = null;
+      let updatedTaxiFee = null;
       const context = await instance.newContext({
         viewport: { width, height: 844 }, isMobile: width < 768, hasTouch: width < 768,
         userAgent: width < 768 ? 'Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/131.0.0.0 Mobile Safari/537.36' : undefined,
@@ -66,6 +67,7 @@ const browser = async () => {
         let data = [];
         if (path === '/tenants/me') data = { id: 'audit-tenant', nomeFantasia: 'Pract Pet Audit', modulos: { petshop: true } };
         else if (path === '/petshop/overview') data = { metrics: { pets: 1, tutors: 1, products: 1, services: 1, today: 1, inProgress: 0, vaccinesDue: 0 }, nextAppointments: [current] };
+        else if (path === '/petshop/taxi-default-fee') { if (route.request().method() === 'PUT') updatedTaxiFee = route.request().postDataJSON()?.fee; data = { fee: updatedTaxiFee ?? 50 }; }
         else if (path === '/petshop/appointments') data = route.request().method() === 'POST' ? appointment('appointment-created', local, 'scheduled') : [current, secondStop];
         else if (path === '/petshop/appointments/appointment-created/checkout') { prepayRequests++; assert.equal(route.request().postDataJSON().prepay, true); data = { id: 'comanda-created', total: 50 }; }
         else if (path === '/petshop/appointments/appointment-today/payment') data = reversedPayment ? null : { saleId: 'sale-audit', total: 40, paidAt: local, nfceStatus: null };
@@ -96,7 +98,7 @@ const browser = async () => {
       const page = await context.newPage();
       const errors = [];
       page.on('pageerror', error => errors.push(error.message));
-      for (const path of ['/petshop', '/petshop/agenda', '/petshop/taxidog', '/petshop/produtos']) {
+      for (const path of ['/petshop', '/petshop/agenda', '/petshop/taxidog', '/petshop/produtos', '/petshop/servicos']) {
         try {
           await page.goto(origin + path, { waitUntil: 'domcontentloaded' });
         } catch (error) {
@@ -192,6 +194,9 @@ const browser = async () => {
             await booking.getByRole('button', { name: /Pet Audit/ }).click();
             if (screenshotDir) await page.screenshot({ path: `${screenshotDir}/booking-pet.png` });
             await booking.getByText('Pacote Audit').waitFor();
+            const taxiOption = booking.getByLabel(/Incluir Transporte do Animal/);
+            await taxiOption.check();
+            assert.equal(await booking.getByRole('spinbutton', { name: /Valor do Transporte/ }).inputValue(), '50');
             await booking.locator('fieldset').first().locator('input[type="checkbox"]').first().check();
             await booking.getByRole('button', { name: 'Confirmar agendamento' }).click();
             await page.waitForFunction(() => !document.querySelector('[role="dialog"]'));
@@ -271,6 +276,15 @@ const browser = async () => {
             assert.equal(editedProduct?.categoryId, 'category-audit');
             results.push({ width, path, edit: 'PATCH preserva categoria e atualiza nome', passed: true });
           }
+        }
+        if (width === 390 && path === '/petshop/servicos') {
+          const fee = page.getByRole('spinbutton', { name: 'Valor padrão (R$)' });
+          await fee.waitFor();
+          assert.equal(await fee.inputValue(), '50');
+          await fee.fill('55');
+          await page.getByRole('button', { name: 'Salvar', exact: true }).click();
+          assert.equal(updatedTaxiFee, 55);
+          results.push({ width, path, taxiFee: 'GET 50 → PUT 55', passed: true });
         }
       }
       await context.close();
