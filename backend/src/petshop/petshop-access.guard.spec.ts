@@ -19,6 +19,7 @@ describe('Pet Shop operational authorization', () => {
     expect(await guard.canActivate(context('appointments/a/status', 'PATCH'))).toBe(true);
     expect(await guard.canActivate(context('appointments/a/checkout', 'POST'))).toBe(true);
     expect(await guard.canActivate(context('appointments/a/receive', 'POST'))).toBe(true);
+    expect(await guard.canActivate(context('appointments/batch-taxi-departure', 'POST'))).toBe(true);
     expect(await guard.canActivate(context('pending-reservations'))).toBe(true);
     await expect(guard.canActivate(context('services/a', 'PATCH'))).rejects.toThrow();
   });

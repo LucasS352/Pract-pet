@@ -72,6 +72,7 @@ export class PetshopController {
   @Post('appointments/:id/reverse-payment') reverseAppointmentPayment(@Param('id') id: string, @Body('reason') reason: string) { return this.petshop.reverseAppointmentPayment(id, reason); }
   @Patch('appointments/:id') updateAppointment(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointment(id, body, req); }
   @Patch('appointments/:id/status') updateAppointmentStatus(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointmentStatus(id, body, req); }
+  @Post('appointments/batch-taxi-departure') batchTaxiDeparture(@Body() body: any) { return this.whatsapp.sendTaxiDogBatchDeparture(body?.appointmentIds); }
   @Post('appointments/:id/taxi-departure') taxiDeparture(@Param('id') id: string, @Body() body: any) { return this.whatsapp.sendTaxiDogDeparture(id, body?.direction); }
 
   @Get('commissions/rules') commissionRules(@Req() req: any) { return this.commissions.listRules(req); }

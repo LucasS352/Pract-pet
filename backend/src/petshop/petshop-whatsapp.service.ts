@@ -70,6 +70,24 @@ const DEFAULT_NOTIFICATION_RULES = [
       'Olá, {nome_tutor}! *{nome_pet}* já está pronto(a), cheiroso(a) e aguardando você para retirada aqui na *{nome_loja}*!',
   },
   {
+    name: 'Táxi Dog - Saída para Buscar',
+    triggerType: 'TAXI_DOG_PICKUP_DEPARTURE',
+    triggerMinutesBefore: null,
+    includePhoto: false,
+    active: true,
+    messageTemplate:
+      'Olá, {nome_tutor}! O motorista do Táxi Dog da *{nome_loja}* acabou de sair a caminho do seu endereço ({endereco}) para buscar o(a) *{nome_pet}*. Já estamos a caminho!',
+  },
+  {
+    name: 'Táxi Dog - Saída para Entregar',
+    triggerType: 'TAXI_DOG_DROPOFF_DEPARTURE',
+    triggerMinutesBefore: null,
+    includePhoto: false,
+    active: true,
+    messageTemplate:
+      'Olá, {nome_tutor}! O(A) *{nome_pet}* já está prontinho(a)! Nosso motorista acabou de iniciar a rota de entrega a caminho de {endereco}. Já já estamos por aí!',
+  },
+  {
     name: 'Alerta de Última Sessão do Pacote',
     triggerType: 'PACKAGE_LAST_SESSION',
     triggerMinutesBefore: null,
@@ -642,6 +660,20 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
         });
       }
 
+      // Sincroniza regras padrão ausentes para tenants já existentes (ex: gatilhos de Táxi Dog)
+      const existingTriggers = new Set(existing.map((r: any) => r.triggerType));
+      const missingRules = DEFAULT_NOTIFICATION_RULES.filter(r => !existingTriggers.has(r.triggerType));
+      if (missingRules.length > 0) {
+        try {
+          await prisma.petshopNotificationRule.createMany({ data: missingRules });
+          return await prisma.petshopNotificationRule.findMany({
+            orderBy: [{ triggerType: 'asc' }, { triggerMinutesBefore: 'desc' }, { createdAt: 'asc' }],
+          });
+        } catch {
+          // ignore concurrent collision
+        }
+      }
+
       return existing;
     } catch (err: any) {
       this.logger.warn(`Aviso ao consultar regras de notificação WhatsApp: ${err?.message}`);
@@ -664,6 +696,8 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       'APPOINTMENT_CONFIRMED',
       'BEFORE_APPOINTMENT',
       'PET_READY',
+      'TAXI_DOG_PICKUP_DEPARTURE',
+      'TAXI_DOG_DROPOFF_DEPARTURE',
       'PACKAGE_LAST_SESSION',
       'PACKAGE_EXPIRING',
       'INACTIVE_CUSTOMER',
@@ -1048,27 +1082,79 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
     if (direction !== 'pickup' && direction !== 'dropoff') throw new BadRequestException('Direção do Táxi Dog inválida.');
     const { tenantId, databaseUrl } = this.tenantContext.get();
     const prisma = await this.prisma();
-    const appointment = await prisma.petAppointment.findUnique({ where: { id: appointmentId }, include: { customer: true, pet: true } });
+    const appointment = await prisma.petAppointment.findUnique({
+      where: { id: appointmentId },
+      include: {
+        customer: true,
+        pet: true,
+        services: { select: { nameSnapshot: true } },
+      },
+    });
     if (!appointment) throw new NotFoundException('Agendamento não encontrado.');
     const transport = parseAppointmentTransport(appointment.checkInNotes);
     if (!transport || (direction === 'pickup' ? !hasTaxiPickup(transport.mode) : !hasTaxiDropoff(transport.mode))) {
       throw new BadRequestException('Esta corrida não inclui a direção solicitada.');
     }
-    if (direction === 'pickup' && appointment.status !== 'scheduled') throw new BadRequestException('A coleta exige um agendamento confirmado ainda não iniciado.');
-    if (direction === 'dropoff' && appointment.status !== 'ready') throw new BadRequestException('A entrega exige um pet pronto.');
-    if (appointment.customer.whatsappOptIn === false) throw new BadRequestException('Tutor não autorizou mensagens WhatsApp.');
+    if (direction === 'pickup' && !['scheduled', 'confirmed', 'requested'].includes(appointment.status)) {
+      throw new BadRequestException('A coleta exige um agendamento confirmado ainda não iniciado.');
+    }
+    if (direction === 'dropoff' && appointment.status !== 'ready') {
+      throw new BadRequestException('A entrega exige um pet pronto.');
+    }
+    if (appointment.customer.whatsappOptIn === false) {
+      return { id: '', status: 'OPT_OUT', alreadySent: false, sent: false, reason: 'Tutor não autorizou mensagens WhatsApp.' };
+    }
     // Garante que o aviso de pet pronto entre na fila antes do aviso de saída,
     // inclusive quando o operador clica em seguida à mudança de status.
     if (direction === 'dropoff') await this.enqueueAppointmentEvent('PET_READY', appointmentId);
     const phone = this.normalizeBrazilPhone(appointment.customer.phone);
-    if (phone.length < 12) throw new BadRequestException('Telefone do tutor inválido.');
+    if (phone.length < 12) {
+      return { id: '', status: 'INVALID_PHONE', alreadySent: false, sent: false, reason: 'Telefone do tutor inválido.' };
+    }
+
+    const triggerType = direction === 'pickup' ? 'TAXI_DOG_PICKUP_DEPARTURE' : 'TAXI_DOG_DROPOFF_DEPARTURE';
+
+    // Regra configurada no sistema (permite personalizar o texto e ativar/desativar)
+    const rule = await prisma.petshopNotificationRule.findFirst({
+      where: { triggerType },
+      orderBy: { createdAt: 'desc' },
+    });
+    if (rule && !rule.active) {
+      return { id: '', status: 'DISABLED', alreadySent: false, sent: false, reason: 'Regra de automação desativada.' };
+    }
+
     const shop = await this.resolveShopMetadata(tenantId);
     const pet = appointment.pet?.name || 'seu pet';
     const tutor = appointment.customer.name.split(' ')[0] || appointment.customer.name;
-    const messageContent = direction === 'pickup'
-      ? `Olá, ${tutor}! O Táxi Dog da *${shop.shopName}* está a caminho para buscar *${pet}* em ${transport.address}. Por favor, deixe o pet pronto para embarque.`
-      : `Olá, ${tutor}! O Táxi Dog da *${shop.shopName}* saiu para levar *${pet}* de volta para ${transport.address}. Estamos a caminho!`;
-    const triggerType = direction === 'pickup' ? 'TAXI_DOG_PICKUP_DEPARTURE' : 'TAXI_DOG_DROPOFF_DEPARTURE';
+    const address = transport.address || appointment.customer.address || 'seu endereço';
+    const serviceName = appointment.services?.[0]?.nameSnapshot || 'atendimento';
+    const dateFormatted = appointment.startsAt
+      ? new Date(appointment.startsAt).toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+      : '';
+    const timeFormatted = appointment.startsAt
+      ? new Date(appointment.startsAt).toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'America/Sao_Paulo',
+        })
+      : '';
+    const neighborhood = (appointment.customer as any)?.neighborhood || transport.reference || '';
+
+    const defaultTemplate = direction === 'pickup'
+      ? 'Olá, {nome_tutor}! O motorista do Táxi Dog da *{nome_loja}* acabou de sair a caminho do seu endereço ({endereco}) para buscar o(a) *{nome_pet}*. Já estamos a caminho!'
+      : 'Olá, {nome_tutor}! O(A) *{nome_pet}* já está prontinho(a)! Nosso motorista acabou de iniciar a rota de entrega a caminho de {endereco}. Já já estamos por aí!';
+
+    const template = rule?.messageTemplate?.trim() || defaultTemplate;
+    const messageContent = template
+      .replace(/\{nome_tutor\}/g, tutor)
+      .replace(/\{nome_pet\}/g, pet)
+      .replace(/\{servico\}/g, serviceName)
+      .replace(/\{data\}/g, dateFormatted)
+      .replace(/\{hora\}/g, timeFormatted)
+      .replace(/\{nome_loja\}/g, shop.shopName)
+      .replace(/\{endereco\}/g, address)
+      .replace(/\{bairro\}/g, neighborhood);
+
     const idempotencyKey = `taxi-departure:${direction}:${appointmentId}`;
     const job = await prisma.petshopNotificationJob.upsert({
       where: { idempotencyKey }, update: {},
@@ -1080,7 +1166,52 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       },
     });
     this.processTenantQueue(tenantId, databaseUrl).catch(() => {});
-    return { id: job.id, status: job.status, alreadySent: job.status === 'SENT' };
+    return { id: job.id, status: job.status, alreadySent: job.status === 'SENT', sent: true };
+  }
+
+  async sendTaxiDogBatchDeparture(appointmentIds: string[]) {
+    if (!Array.isArray(appointmentIds) || appointmentIds.length === 0) {
+      throw new BadRequestException('Nenhum agendamento informado para a rota.');
+    }
+    const prisma = await this.prisma();
+    const appointments = await prisma.petAppointment.findMany({
+      where: { id: { in: appointmentIds } },
+      include: { customer: true, pet: true, services: { select: { nameSnapshot: true } } },
+    });
+
+    const results: Array<{ appointmentId: string; petName: string; status: string; reason?: string }> = [];
+    let sentCount = 0;
+
+    for (const app of appointments) {
+      try {
+        const transport = parseAppointmentTransport(app.checkInNotes);
+        let direction: 'pickup' | 'dropoff' | null = null;
+        if (app.status === 'ready' && transport && hasTaxiDropoff(transport.mode)) {
+          direction = 'dropoff';
+        } else if (['scheduled', 'confirmed', 'requested'].includes(app.status) && transport && hasTaxiPickup(transport.mode)) {
+          direction = 'pickup';
+        }
+
+        if (!direction) {
+          results.push({ appointmentId: app.id, petName: app.pet?.name || 'Pet', status: 'SKIPPED', reason: 'Status não elegível para partida' });
+          continue;
+        }
+
+        const res = await this.sendTaxiDogDeparture(app.id, direction);
+        if (res.sent || res.status === 'SENT' || res.status === 'PENDING') {
+          sentCount++;
+        }
+        results.push({ appointmentId: app.id, petName: app.pet?.name || 'Pet', status: res.status, reason: (res as any).reason });
+      } catch (err: any) {
+        results.push({ appointmentId: app.id, petName: app.pet?.name || 'Pet', status: 'ERROR', reason: err?.message });
+      }
+    }
+
+    return {
+      total: appointments.length,
+      sent: sentCount,
+      results,
+    };
   }
 
   async enqueueStagePhoto(appointmentId: string) {

@@ -602,9 +602,13 @@ export type PetshopNotificationRule = {
     | 'APPOINTMENT_CONFIRMED'
     | 'BEFORE_APPOINTMENT'
     | 'PET_READY'
+    | 'STAGE_PHOTO'
+    | 'TAXI_DOG_PICKUP_DEPARTURE'
+    | 'TAXI_DOG_DROPOFF_DEPARTURE'
     | 'PACKAGE_LAST_SESSION'
     | 'PACKAGE_EXPIRING'
-    | 'INACTIVE_CUSTOMER';
+    | 'INACTIVE_CUSTOMER'
+    | string;
   triggerMinutesBefore?: number | null;
   messageTemplate: string;
   includePhoto: boolean;

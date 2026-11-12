@@ -226,7 +226,7 @@ export default function PetshopTaxiDogPage() {
   const displayedItems = useMemo(() => {
     let base: Appointment[] = [];
     if (activeTab === 'pickups') base = pendingPickups;
-    else if (activeTab === 'dropoffs') base = dropoffQueue;
+    else if (activeTab === 'dropoffs') base = readyDropoffs;
     else if (activeTab === 'in_store') base = inStorePets;
     else if (activeTab === 'delivered') base = deliveredPets;
     else base = taxiAppointments;
@@ -397,6 +397,57 @@ export default function PetshopTaxiDogPage() {
   // Imprimir manifesto de rota
   const handlePrintManifest = () => {
     window.print();
+  };
+
+  const [startingRoute, setStartingRoute] = useState(false);
+
+  // Iniciar rota no Maps e notificar clientes individualmente via WhatsApp
+  const handleStartRouteAndNotify = async () => {
+    if (routeOrder.length === 0) {
+      toast.error('Selecione pelo menos uma parada nos cards abaixo para iniciar a rota.');
+      return;
+    }
+
+    const stops = routeOrder
+      .map(id => taxiAppointments.find(item => item.id === id))
+      .filter((item): item is Appointment => Boolean(item && needsTaxiStop(item)));
+
+    if (!stops.length) {
+      toast.error('Nenhuma parada pendente na rota selecionada.');
+      return;
+    }
+
+    try {
+      // 1. Abre a rota no Google Maps
+      const validAddresses = requireRouteAddresses(stops.map(item => item.transport?.address));
+      const mobile = isMobileMapsClient(navigator.userAgent, window.matchMedia('(pointer: coarse)').matches, window.innerWidth);
+      const links = buildGoogleMapsRoutes(qualifyRouteAddresses(validAddresses, routeCity), mobile);
+      setRouteLinks(links);
+      if (links.length === 1) {
+        window.open(links[0], '_blank', 'noopener,noreferrer');
+      } else if (links.length > 1) {
+        window.open(links[0], '_blank', 'noopener,noreferrer');
+        toast.info(`O roteiro tem ${links.length} trechos. O 1º trecho foi aberto no Maps.`);
+      }
+
+      // 2. Notifica clientes individualmente pelo WhatsApp através da automação
+      setStartingRoute(true);
+      const res = await api.post<{ total: number; sent: number; results: any[] }>(
+        '/petshop/appointments/batch-taxi-departure',
+        { appointmentIds: routeOrder },
+      );
+
+      const sentCount = res.data?.sent ?? 0;
+      if (sentCount > 0) {
+        toast.success(`Rota iniciada no Google Maps! ${sentCount} tutor(es) notificado(s) individualmente via WhatsApp.`);
+      } else {
+        toast.success('Rota iniciada no Google Maps! (Notificações pausadas ou sem telefone cadastrado).');
+      }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || error?.message || 'Erro ao iniciar a rota.');
+    } finally {
+      setStartingRoute(false);
+    }
   };
 
   const todayStr = localDateKey(new Date());
@@ -608,6 +659,67 @@ export default function PetshopTaxiDogPage() {
         </div>
       </section>
 
+      {/* 3.1 BARRA DE ROTA MONTADA NO TÁXI DOG (INICIAR ROTA & NOTIFICAR) */}
+      {routeOrder.length > 0 && (
+        <section
+          aria-label="Controle de rota montada"
+          className="mb-4 sm:mb-6 rounded-2xl border-2 border-teal-600 bg-teal-50/90 p-3.5 sm:p-4 shadow-sm"
+        >
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-teal-800 text-white font-black text-xs">
+                  🚗
+                </span>
+                <strong className="text-sm font-extrabold text-teal-950">
+                  Rota do Táxi Dog Montada · {routeOrder.length} parada(s)
+                </strong>
+                <span className="text-[11px] font-semibold text-teal-700 bg-teal-100/80 px-2 py-0.5 rounded-md">
+                  Sequência das paradas
+                </span>
+              </div>
+              <p className="text-xs text-teal-900 font-medium break-words">
+                {routeOrder.map((id, i) => {
+                  const apt = taxiAppointments.find(a => a.id === id);
+                  const pet = apt?.pet?.name || 'Pet';
+                  const isPre = apt ? isPreCheckinStatus(apt.status) : false;
+                  return `${i + 1}ª ${pet} (${isPre ? 'Buscar' : 'Levar'})`;
+                }).join(' ➔ ')}
+              </p>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={clearRoute}
+                className="h-10 px-3.5 rounded-xl border border-teal-200 bg-white text-xs font-bold text-red-600 hover:bg-red-50 hover:border-red-200 transition cursor-pointer shadow-2xs"
+              >
+                Limpar Rota
+              </button>
+
+              <button
+                type="button"
+                onClick={handleStartRouteAndNotify}
+                disabled={startingRoute}
+                className="h-10 px-4 rounded-xl bg-teal-800 hover:bg-teal-900 text-white text-xs font-black flex items-center gap-2 shadow-xs hover:shadow-md transition cursor-pointer disabled:opacity-50"
+              >
+                {startingRoute ? (
+                  <>
+                    <RefreshCw size={14} className="animate-spin" />
+                    <span>Iniciando rota & avisando...</span>
+                  </>
+                ) : (
+                  <>
+                    <Navigation size={14} />
+                    <span>Iniciar Rota no Maps & Notificar Clientes</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </section>
+      )}
+
       {/* 4. BARRA DE BUSCA E ABAS OPERACIONAIS */}
       <section aria-label="Abas e busca" className="mb-6 space-y-3">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
@@ -641,7 +753,7 @@ export default function PetshopTaxiDogPage() {
                   : 'text-zinc-600 hover:text-zinc-900'
               }`}
             >
-              <span>📦 Levar</span>
+              <span>📦 Prontos p/ Levar</span>
               <span
                 className={`rounded-md px-1.5 py-0.2 text-[10px] font-extrabold ${
                   readyDropoffs.length > 0
@@ -649,7 +761,7 @@ export default function PetshopTaxiDogPage() {
                     : 'bg-zinc-200 text-zinc-600'
                 }`}
               >
-                {readyDropoffs.length > 0 ? readyDropoffs.length : dropoffQueue.length}
+                {readyDropoffs.length}
               </span>
             </button>
 
@@ -871,6 +983,61 @@ export default function PetshopTaxiDogPage() {
                         ))}
                       </div>
                     )}
+
+                    {/* Botão de Ordem na Rota (Diretamente no Card) */}
+                    {needsTaxiStop(item) && (
+                      <div className="mb-3 pt-2 border-t border-zinc-100">
+                        {getStopNumber(item.id) > 0 ? (
+                          <div className="flex items-center justify-between bg-teal-50 border border-teal-200 rounded-xl px-2.5 py-1.5 shadow-2xs">
+                            <span className="inline-flex items-center gap-1.5 text-xs font-black text-teal-900">
+                              <span className="flex h-5 w-5 items-center justify-center rounded-md bg-teal-700 text-white text-[10px] font-black">
+                                {getStopNumber(item.id)}
+                              </span>
+                              <span>{getStopNumber(item.id)}ª PARADA DA ROTA</span>
+                            </span>
+                            <div className="inline-flex items-center rounded-lg border border-teal-200 bg-white p-0.5 shadow-2xs">
+                              <button
+                                type="button"
+                                disabled={getStopNumber(item.id) === 1}
+                                onClick={() => moveStop(item.id, 'up')}
+                                title="Mover para parada anterior"
+                                className="px-2 py-0.5 text-xs font-black text-teal-800 hover:bg-teal-50 rounded disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                ▲
+                              </button>
+                              <button
+                                type="button"
+                                disabled={getStopNumber(item.id) === routeOrder.length}
+                                onClick={() => moveStop(item.id, 'down')}
+                                title="Mover para próxima parada"
+                                className="px-2 py-0.5 text-xs font-black text-teal-800 hover:bg-teal-50 rounded disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer"
+                              >
+                                ▼
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => toggleRouteStop(item.id)}
+                                title="Remover da rota"
+                                className="px-2 py-0.5 text-xs font-bold text-rose-600 hover:bg-rose-50 rounded cursor-pointer"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => toggleRouteStop(item.id)}
+                            className="w-full flex h-8 items-center justify-center gap-1.5 rounded-xl border border-dashed border-teal-600/70 bg-teal-50/60 hover:bg-teal-100/70 text-xs font-bold text-teal-800 transition cursor-pointer"
+                          >
+                            <span>+ Incluir na rota</span>
+                            <span className="text-[11px] font-semibold text-teal-600">
+                              ({routeOrder.length + 1}ª parada)
+                            </span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Rodapé do Card: Ações do Motorista */}
@@ -998,46 +1165,9 @@ export default function PetshopTaxiDogPage() {
           maxWidth="max-w-2xl"
         >
           <div className="space-y-4">
-            <p className="text-xs text-zinc-500">Selecione as paradas para organizar a rota do motorista (1ª, 2ª, 3ª...). Marque a visita como concluída após atender.</p>
-
-            {/* Localização & Cidade padrão (opcional) */}
-            <div className="rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 text-xs space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-1.5">
-                <span className="font-bold text-zinc-800 flex items-center gap-1.5">
-                  <MapPin size={14} className="text-teal-700" />
-                  Localização & Cidade padrão:
-                </span>
-                <span className="text-[11px] text-zinc-500">
-                  Opcional · O Maps prioriza o GPS do motorista e cidades específicas de cada tutor
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  value={routeCity}
-                  onChange={event => handleRouteCityChange(event.target.value)}
-                  placeholder="Cidade padrão da loja (Ex: Bauru, SP) — opcional"
-                  className="min-h-9 flex-1 rounded-lg border border-zinc-300 bg-white px-3 text-xs text-zinc-800 outline-none focus:border-teal-600 focus:ring-1 focus:ring-teal-600"
-                />
-                {typeof navigator !== 'undefined' && navigator.geolocation && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      navigator.geolocation.getCurrentPosition(
-                        pos => {
-                          toast.success(`GPS ativo (${pos.coords.latitude.toFixed(3)}, ${pos.coords.longitude.toFixed(3)}). A rota usará sua localização como ponto de partida.`);
-                        },
-                        () => toast.info('Permissão de GPS não concedida. O Maps usará a localização atual do seu aparelho.'),
-                      );
-                    }}
-                    title="Testar sinal de GPS no aparelho"
-                    className="inline-flex items-center gap-1 shrink-0 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 cursor-pointer shadow-2xs"
-                  >
-                    <Navigation size={13} className="text-teal-700" />
-                    <span>GPS Ativo</span>
-                  </button>
-                )}
-              </div>
-            </div>
+            <p className="text-xs text-zinc-500">
+              Manifesto operacional de transporte do dia. Marque cada visita como concluída após atender.
+            </p>
 
             {overdueCount > 0 && <p className="text-xs font-semibold text-amber-800">Inclui {overdueCount} coleta{overdueCount === 1 ? '' : 's'} pendente{overdueCount === 1 ? '' : 's'} de dias anteriores.</p>}
 
@@ -1074,28 +1204,19 @@ export default function PetshopTaxiDogPage() {
                 </div>
                 <p className="text-[11px] text-zinc-500">
                   {routeOrder.length > 0
-                    ? 'Paradas organizadas na ordem que o motorista vai visitar. Ajuste a sequência com ▲ e ▼.'
-                    : 'Clique em "+ Definir como parada" para montar a 1ª, 2ª, 3ª parada da viagem.'}
+                    ? 'Paradas na ordem selecionada. Use a tela principal para iniciar a navegação no Maps.'
+                    : 'Você pode selecionar e ordenar as paradas diretamente nos cards da tela principal.'}
                 </p>
               </div>
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={handleOpenGoogleMapsRoute}
-                  className="flex items-center gap-1.5 rounded-xl bg-[#0d6e5a] text-white px-3.5 py-2 text-xs font-bold hover:bg-[#0a5747] cursor-pointer shadow-xs transition"
+                  onClick={handlePrintManifest}
+                  className="flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white text-zinc-700 px-3 py-2 text-xs font-bold hover:bg-zinc-50 cursor-pointer shadow-2xs transition"
                 >
-                  <Navigation size={14} />
-                  <span>Abrir Rota no Maps</span>
+                  <Printer size={14} />
+                  <span>Imprimir</span>
                 </button>
-                {routeLinks.length > 1 && (
-                  <div className="flex flex-wrap gap-2">
-                    {routeLinks.map((url, index) => (
-                      <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="rounded-lg border border-teal-200 px-3 py-2 text-xs font-semibold text-teal-800">
-                        Abrir trecho {index + 1} de {routeLinks.length}
-                      </a>
-                    ))}
-                  </div>
-                )}
                 <button
                   type="button"
                   onClick={handleShareManifestWhatsApp}

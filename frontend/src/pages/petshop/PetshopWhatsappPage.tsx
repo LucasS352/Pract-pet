@@ -617,6 +617,8 @@ export default function PetshopWhatsappPage() {
                   <option value="APPOINTMENT_CONFIRMED">Confirmação</option>
                   <option value="BEFORE_APPOINTMENT">Lembretes</option>
                   <option value="PET_READY">Pet Pronto</option>
+                  <option value="TAXI_DOG_PICKUP_DEPARTURE">Táxi Dog - Buscar</option>
+                  <option value="TAXI_DOG_DROPOFF_DEPARTURE">Táxi Dog - Levar</option>
                   <option value="PACKAGE_LAST_SESSION">Pacotes</option>
                   <option value="INACTIVE_CUSTOMER">Retorno / Inativos</option>
                 </select>
@@ -913,6 +915,12 @@ export default function PetshopWhatsappPage() {
                           )}
                           {selectedRule.triggerType === 'PACKAGE_EXPIRING' && (
                             <p>Disparado quando faltam 3 dias para a validade do pacote expirar e o cliente ainda possui saldo disponível.</p>
+                          )}
+                          {selectedRule.triggerType === 'TAXI_DOG_PICKUP_DEPARTURE' && (
+                            <p>Disparado quando o motorista inicia a rota para <strong>buscar o pet</strong> no endereço do tutor.</p>
+                          )}
+                          {selectedRule.triggerType === 'TAXI_DOG_DROPOFF_DEPARTURE' && (
+                            <p>Disparado quando o motorista inicia a rota para <strong>levar o pet de volta</strong> para a casa do tutor.</p>
                           )}
                         </div>
                       )}
@@ -1364,14 +1372,19 @@ export default function PetshopWhatsappPage() {
                   value={newRuleForm.triggerType}
                   onChange={e => {
                     const nextType = e.target.value as PetshopNotificationRule['triggerType'];
+                    let nextTemplate = newRuleForm.messageTemplate;
+                    if (nextType === 'INACTIVE_CUSTOMER') {
+                      nextTemplate = 'Olá, {nome_tutor}! Já faz *{dias_sem_vir} dias* que não vemos *{nome_pet}* por aqui na *{nome_loja}*! Que tal agendar um horário para deixar {nome_pet} limpinho(a) essa semana?';
+                    } else if (nextType === 'TAXI_DOG_PICKUP_DEPARTURE') {
+                      nextTemplate = 'Olá, {nome_tutor}! O motorista do Táxi Dog da *{nome_loja}* acabou de sair a caminho do seu endereço ({endereco}) para buscar o(a) *{nome_pet}*. Já estamos a caminho!';
+                    } else if (nextType === 'TAXI_DOG_DROPOFF_DEPARTURE') {
+                      nextTemplate = 'Olá, {nome_tutor}! O(A) *{nome_pet}* já está prontinho(a)! Nosso motorista acabou de iniciar a rota de entrega a caminho de {endereco}. Já já estamos por aí!';
+                    }
                     setNewRuleForm({
                       ...newRuleForm,
                       triggerType: nextType,
                       triggerMinutesBefore: nextType === 'INACTIVE_CUSTOMER' ? 15 : 120,
-                      messageTemplate:
-                        nextType === 'INACTIVE_CUSTOMER'
-                          ? 'Olá, {nome_tutor}! Já faz *{dias_sem_vir} dias* que não vemos *{nome_pet}* por aqui na *{nome_loja}*! Que tal agendar um horário para deixar {nome_pet} limpinho(a) essa semana?'
-                          : newRuleForm.messageTemplate,
+                      messageTemplate: nextTemplate,
                     });
                   }}
                   className={inputClass}
@@ -1380,6 +1393,8 @@ export default function PetshopWhatsappPage() {
                   <option value="BEFORE_APPOINTMENT">Lembrete Antes do Atendimento</option>
                   <option value="APPOINTMENT_CONFIRMED">Confirmação de Agendamento</option>
                   <option value="PET_READY">Pet Pronto p/ Retirada</option>
+                  <option value="TAXI_DOG_PICKUP_DEPARTURE">Táxi Dog - Saída para Buscar</option>
+                  <option value="TAXI_DOG_DROPOFF_DEPARTURE">Táxi Dog - Saída para Levar</option>
                   <option value="PACKAGE_LAST_SESSION">Última Sessão do Pacote</option>
                   <option value="PACKAGE_EXPIRING">Pacote Próximo do Vencimento</option>
                 </select>
