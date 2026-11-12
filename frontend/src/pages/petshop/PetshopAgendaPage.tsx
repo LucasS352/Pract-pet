@@ -1104,29 +1104,19 @@ export default function PetshopAgendaPage() {
   const notifyTutorWhatsApp = async (item: Appointment, customNotes?: string | null) => {
     setNotifyingId(item.id);
     try {
-      const { data } = await api.post(`/petshop/tutors/${item.customer.id}/portal-link`, {
-        rotate: false,
-      });
-      const portalUrl = `${window.location.origin}${data.path}`;
       const cleanPhone = (item.customer.phone || '').replace(/\D/g, '');
       const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-      const message = buildWhatsAppMessage(item, portalUrl, customNotes ?? item.stageNotes);
-
-      try {
-        await navigator.clipboard.writeText(portalUrl);
-      } catch {
-        // silencioso
-      }
+      const message = buildWhatsAppMessage(item, null, customNotes ?? item.stageNotes);
 
       const whatsappUrl = `https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`;
       window.open(whatsappUrl, '_blank', 'noopener,noreferrer');
       toast.success(
         item.status === 'ready'
           ? `Aviso "${hasTaxiDogReturn(item) ? 'Pronto para entrega' : 'Pronto para buscar'}" preparado para ${item.customer.name}!`
-          : `Link de acompanhamento ao vivo preparado para ${item.customer.name}!`,
+          : `Mensagem WhatsApp preparada para ${item.customer.name}!`,
       );
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Não foi possível gerar link do tutor.');
+    } catch {
+      toast.error('Não foi possível abrir o WhatsApp para este tutor.');
     } finally {
       setNotifyingId('');
     }
@@ -2864,7 +2854,7 @@ export default function PetshopAgendaPage() {
                 />
                 <div className="text-xs">
                   <p className="font-semibold text-zinc-800">Foto da etapa enviada ao tutor</p>
-                  <p className="text-zinc-500">Visível no link ao vivo de acompanhamento.</p>
+                  <p className="text-zinc-500">Registrada no histórico deste atendimento.</p>
                 </div>
               </div>
             )}

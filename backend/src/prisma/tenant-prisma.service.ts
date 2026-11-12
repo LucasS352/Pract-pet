@@ -11,7 +11,11 @@ export class TenantConnectionManager implements OnModuleDestroy {
   private readonly logger = new Logger(TenantConnectionManager.name);
   private clients = new Map<string, CachedClient>();
   private connectionPromises = new Map<string, Promise<PrismaClient>>();
-  private readonly MAX_CLIENTS = 100;
+  private readonly MAX_CLIENTS = Math.max(1, Number(process.env.TENANT_DB_MAX_CLIENTS) || 80);
+  private readonly CONNECTION_LIMIT = Math.max(1, Number(process.env.TENANT_DB_CONNECTION_LIMIT) || 10);
+  /** Tempo de espera antes de desconectar um client removido do cache, para que requisicoes/transacoes em andamento terminem. */
+  private readonly DISCONNECT_GRACE_MS = 2 * 60 * 1000;
+  private lastCleanup = 0;
   private readonly IDLE_TIMEOUT = 30 * 60 * 1000; // 30 minutos
 
   /**
@@ -41,11 +45,11 @@ export class TenantConnectionManager implements OnModuleDestroy {
 
     // 5. Injeta limite de conexões na URL (Bulletproof para escalabilidade)
     const url = new URL(databaseUrl);
-    url.searchParams.set('connection_limit', '10');
+    url.searchParams.set('connection_limit', String(this.CONNECTION_LIMIT));
     url.searchParams.set('pool_timeout', '20'); // segundos
     const optimizedUrl = url.toString();
 
-    this.logger.log(`Iniciando novo Pool Prisma para Tenant: ${tenantId} (limit=10)`);
+    this.logger.log(`Iniciando novo Pool Prisma para Tenant: ${tenantId} (limit=${this.CONNECTION_LIMIT})`);
 
     const client = new PrismaClient({
       datasources: {
@@ -77,7 +81,7 @@ export class TenantConnectionManager implements OnModuleDestroy {
     for (const [id, entry] of this.clients.entries()) {
       if (now - entry.lastUsed > this.IDLE_TIMEOUT) {
         this.logger.log(`Limpando conexão ociosa do Tenant: ${id}`);
-        entry.client.$disconnect().catch(() => {});
+        this.scheduleDisconnect(entry.client);
         this.clients.delete(id);
       }
     }
@@ -97,9 +101,17 @@ export class TenantConnectionManager implements OnModuleDestroy {
     if (oldestId) {
       this.logger.log(`Limite de cache atingido. Removendo cliente mais antigo: ${oldestId}`);
       const entry = this.clients.get(oldestId)!;
-      entry.client.$disconnect().catch(() => {});
+      this.scheduleDisconnect(entry.client);
       this.clients.delete(oldestId);
     }
+  }
+
+  /** Desconecta com atraso: o client sai do cache imediatamente (novas requisicoes criam outro), mas as operacoes em andamento terminam. */
+  private scheduleDisconnect(client: PrismaClient) {
+    const timer = setTimeout(() => {
+      client.$disconnect().catch(() => {});
+    }, this.DISCONNECT_GRACE_MS);
+    timer.unref?.();
   }
 
   async onModuleDestroy() {

@@ -30,6 +30,8 @@ describe('comunicação Táxi Dog', () => {
     expect(taxiNotificationText('PET_READY', create('both'), vars)).toContain('entrega pelo Táxi Dog');
     expect(taxiNotificationText('PET_READY', create('dropoff_only'), vars)).toContain('entrega pelo Táxi Dog');
     expect(taxiNotificationText('PET_READY', create('pickup_only'), vars)).toContain('para você retirar');
+    expect(taxiNotificationText('PET_READY', create('both'), { ...vars, portalLink: 'https://x/p' })).not.toContain('Acompanhe pelo portal');
+    expect(taxiNotificationText('APPOINTMENT_CONFIRMED', create('both'), { ...vars, portalLink: 'https://x/p' })).not.toContain('Acompanhe pelo portal');
     expect(taxiNotificationText('PET_READY', null, vars)).toBeNull();
   });
 });

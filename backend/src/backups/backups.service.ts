@@ -93,8 +93,10 @@ export class BackupsService implements OnModuleInit {
     try {
       this.logger.log('Ajustando autenticação do usuário root no MySQL para suportar mysqldump (mysql_native_password)...');
       const heartConfig = this.getDbConfig(process.env.DATABASE_URL_HEART!);
-      await this.heartPrisma.$executeRawUnsafe(`ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '${heartConfig.password}';`);
-      await this.heartPrisma.$executeRawUnsafe(`ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${heartConfig.password}';`);
+      // Escapa a senha para literal SQL (a senha vem do ambiente, nunca do usuário).
+      const pwd = String(heartConfig.password ?? '').replace(/\\/g, '\\\\').replace(/'/g, "''");
+      await this.heartPrisma.$executeRawUnsafe(`ALTER USER 'root'@'%' IDENTIFIED WITH mysql_native_password BY '${pwd}';`);
+      await this.heartPrisma.$executeRawUnsafe(`ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY '${pwd}';`);
       await this.heartPrisma.$executeRawUnsafe(`FLUSH PRIVILEGES;`);
       this.logger.log('Autenticação do usuário root ajustada com sucesso.');
     } catch (e: any) {

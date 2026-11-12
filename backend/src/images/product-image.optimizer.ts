@@ -56,7 +56,7 @@ export class ProductImageOptimizer {
         !metadata.width || !metadata.height || (metadata.pages || 1) !== 1) {
       throw new BadRequestException('Formato não suportado ou imagem animada. Envie uma foto estática JPG, PNG ou WebP.');
     }
-    for (const quality of [80, 68, 58]) {
+    for (const quality of [80, 68, 58, 45]) {
       const { data, info } = await sharp(input, options)
         .autoOrient()
         .resize({ width: IMAGE_OUTPUT_EDGE, height: IMAGE_OUTPUT_EDGE, fit: 'inside', withoutEnlargement: true })
@@ -69,6 +69,17 @@ export class ProductImageOptimizer {
         originalBytes: input.length, policy: PRODUCT_IMAGE_POLICY,
       };
     }
+    // Último recurso para fotos muito detalhadas (ex: pelos de pets): reduz borda para 600px mantendo <= 200 KB.
+    const { data, info } = await sharp(input, options)
+      .autoOrient()
+      .resize({ width: 600, height: 600, fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 50, effort: 3 })
+      .timeout({ seconds: 8 })
+      .toBuffer({ resolveWithObject: true });
+    if (data.length <= IMAGE_OUTPUT_BYTES) return {
+      data, mimeType: 'image/webp', width: info.width, height: info.height,
+      originalBytes: input.length, policy: PRODUCT_IMAGE_POLICY,
+    };
     throw new BadRequestException('A foto continua acima de 200 KB após otimização. Selecione uma foto mais simples ou recorte o produto.');
   }
 }

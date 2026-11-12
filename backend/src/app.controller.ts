@@ -16,6 +16,17 @@ export class AppController {
     };
   }
 
+  /** Healthcheck com verificação do banco Heart (usado pelo Docker/Portainer). */
+  @Get('health')
+  async health(@Res() res: Response) {
+    try {
+      await this.heartPrisma.$queryRawUnsafe('SELECT 1');
+      return res.status(200).json({ status: 'ok', db: 'up', uptime: process.uptime() });
+    } catch {
+      return res.status(503).json({ status: 'degraded', db: 'down' });
+    }
+  }
+
   @Get('products/uploads/images/:id')
   async serveProductImage(@Param('id') id: string, @Res() res: Response) {
     try {

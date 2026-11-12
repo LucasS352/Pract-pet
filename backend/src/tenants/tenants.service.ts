@@ -23,6 +23,7 @@ function generateTvPublicId(): string {
 
 import { ProvisionTenantDto } from './provision-tenant.dto';
 import { seedDefaultGruposStatic } from '../tributacao/tributacao.service';
+import { safeEqual } from '../common/security/security';
 
 @Injectable()
 export class TenantsService {
@@ -222,10 +223,9 @@ export class TenantsService {
   }
 
   async validatePin(pin: string): Promise<boolean> {
-    const setupPin = process.env.SETUP_PIN || 'teltech352';
-    const sqlPin = process.env.SQL_PIN || '43619835';
-    if (!pin) return false;
-    return pin === setupPin || pin === sqlPin;
+    // Sem fallback: se SETUP_PIN/SQL_PIN não estiverem definidos, nenhum PIN é aceito.
+    if (!pin || typeof pin !== 'string') return false;
+    return safeEqual(pin, process.env.SETUP_PIN) || safeEqual(pin, process.env.SQL_PIN);
   }
 
   async migrateTenants(tenantIds: string[], includeHeart = false): Promise<any[]> {

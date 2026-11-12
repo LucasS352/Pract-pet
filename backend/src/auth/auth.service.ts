@@ -27,6 +27,9 @@ export class AuthService {
       if (!user.active) {
         throw new UnauthorizedException('Sua conta foi inativada pelo administrador.');
       }
+      if (user.tenant?.status && user.tenant.status !== 'active' && user.role !== 'superadmin') {
+        throw new UnauthorizedException('Acesso da loja suspenso ou inativo. Entre em contato com o suporte.');
+      }
       const { password, ...result } = user;
       return result;
     }

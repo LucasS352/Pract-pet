@@ -40,7 +40,7 @@ const DEFAULT_NOTIFICATION_RULES = [
     includePhoto: false,
     active: true,
     messageTemplate:
-      'Olá, {nome_tutor}! Confirmamos o agendamento de *{nome_pet}* para *{servico}* no dia *{data}* às *{hora}* na *{nome_loja}*.\n\nAcompanhe o atendimento ao vivo pelo link: {link_portal}',
+      'Olá, {nome_tutor}! Confirmamos o agendamento de *{nome_pet}* para *{servico}* no dia *{data}* às *{hora}* na *{nome_loja}*.',
   },
   {
     name: 'Lembrete 24h Antes do Atendimento',
@@ -67,7 +67,7 @@ const DEFAULT_NOTIFICATION_RULES = [
     includePhoto: true,
     active: true,
     messageTemplate:
-      'Olá, {nome_tutor}! *{nome_pet}* já está pronto(a), cheiroso(a) e aguardando você para retirada aqui na *{nome_loja}*!\n\nVeja os detalhes do cuidado no portal: {link_portal}',
+      'Olá, {nome_tutor}! *{nome_pet}* já está pronto(a), cheiroso(a) e aguardando você para retirada aqui na *{nome_loja}*!',
   },
   {
     name: 'Alerta de Última Sessão do Pacote',
@@ -869,6 +869,10 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
     };
 
     let result = template;
+    if (!vars.link_portal) {
+      // Remove convites antigos do portal em regras já salvas no banco quando o portal estiver oculto.
+      result = result.replace(/\n*(?:Acompanhe[^\n]*|Veja os detalhes[^\n]*)\{link_portal\}/gi, '');
+    }
     for (const [tag, value] of Object.entries(replacements)) {
       result = result.split(tag).join(value);
     }
@@ -969,11 +973,6 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       if (phone.length < 12) return;
 
       const shopMeta = await this.resolveShopMetadata(tenantId);
-      const portalLink = await this.ensureCustomerPortalLink(
-        prisma,
-        appointment.customerId,
-        shopMeta.tvPublicId,
-      );
       const { data, hora } = this.formatBrDateAndTime(appointment.startsAt);
       const serviceNames =
         appointment.services.map((s: any) => s.nameSnapshot).join(', ') || 'Atendimento Pet';
@@ -1004,12 +1003,12 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
           hora,
           nome_loja: shopMeta.shopName,
           endereco: shopMeta.address,
-          link_portal: portalLink,
+          link_portal: '',
         });
         const messageContent = taxiNotificationText(triggerType, parseAppointmentTransport(appointment.checkInNotes), {
           tutor: appointment.customer.name.split(' ')[0] || appointment.customer.name,
           pet: appointment.pet?.name || 'Pet', service: serviceNames, date: data, time: hora,
-          shop: shopMeta.shopName, portalLink,
+          shop: shopMeta.shopName,
         }) || templateContent;
 
         const expiresAt =

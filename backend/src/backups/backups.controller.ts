@@ -11,7 +11,7 @@ export class BackupsController {
   ) {}
 
   private async validateSetupPin(req: any) {
-    const pin = (req.headers['x-setup-pin'] || req.query['pin']) as string;
+    const pin = req.headers['x-setup-pin'] as string;
     if (!pin) throw new UnauthorizedException('PIN inválido.');
     const valid = await this.tenantsService.validatePin(pin);
     if (!valid) throw new UnauthorizedException('PIN inválido.');

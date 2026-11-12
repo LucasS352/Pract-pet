@@ -9,6 +9,7 @@ import { ProductSearchSelect } from './ProductSearchSelect';
 import { useKdsConfig } from '@/hooks/useKdsEnabled';
 import { ProductPreparationFields } from './ProductPreparationFields';
 import { useAuthStore } from '@/store/auth';
+import { compressImageForUpload, MAX_CLIENT_UPLOAD_BYTES } from '@/lib/imageCompression';
 
 const UNIT_OPTIONS = ['UN', 'KG', 'LT', 'CX', 'DZ', 'PCT', 'FD', 'ML', 'GR'];
 const ORIGEM_OPTIONS = [
@@ -77,39 +78,19 @@ export function AddProductModal({ isOpen, onClose, onSuccess, variant = 'default
     };
   }, [isOpen, variant]);
 
-  // ── Compressor de imagem (Canvas API nativa, zero deps) ──────────────────
-  const compressImage = (file: File, maxPx = 1200, quality = 0.82): Promise<Blob> =>
-    new Promise((resolve, reject) => {
-      const img = new window.Image();
-      const url = URL.createObjectURL(file);
-      img.onload = () => {
-        URL.revokeObjectURL(url);
-        const scale = Math.min(1, maxPx / Math.max(img.width, img.height));
-        const canvas = document.createElement('canvas');
-        canvas.width  = Math.round(img.width  * scale);
-        canvas.height = Math.round(img.height * scale);
-        canvas.getContext('2d')!.drawImage(img, 0, 0, canvas.width, canvas.height);
-        canvas.toBlob(
-          blob => blob ? resolve(blob) : reject(new Error('Falha ao comprimir imagem')),
-          'image/webp',
-          quality,
-        );
-      };
-      img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Formato não reconhecido. Exporte a foto como JPG ou PNG e tente novamente.')); };
-      img.src = url;
-    });
-
   const uploadFile = async (file: File) => {
-    if (file.size > 15 * 1024 * 1024) {
+    if (file.size > MAX_CLIENT_UPLOAD_BYTES) {
       toast.error('A imagem deve ter no máximo 15MB.');
       return;
     }
 
     setIsUploading(true);
     try {
-      // Comprimir antes de enviar: foto de 5MB vira ~100KB
-      const compressed = await compressImage(file);
-      const compressedFile = new File([compressed], 'product.webp', { type: 'image/webp' });
+      const compressedFile = await compressImageForUpload(file, {
+        maxEdge: 800,
+        targetBytes: 200 * 1024,
+        baseName: 'product',
+      });
 
       const formDataObj = new FormData();
       formDataObj.append('file', compressedFile);

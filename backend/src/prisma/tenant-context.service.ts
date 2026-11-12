@@ -30,7 +30,7 @@ export class TenantContextService {
 @Injectable()
 export class TenantInterceptor implements NestInterceptor {
   private urlCache = new Map<string, { url: string; expiresAt: number }>();
-  private readonly CACHE_TTL = 1000 * 60 * 60; // 1 hora de cache
+  private readonly CACHE_TTL = 60 * 1000; // 1 minuto: alivia o banco em picos e revoga lojas suspensas rapidamente
 
   constructor(
     private readonly tenantContext: TenantContextService,
@@ -39,7 +39,8 @@ export class TenantInterceptor implements NestInterceptor {
 
   private async getDatabaseUrl(tenantId: string): Promise<string> {
     if (tenantId === 'demo-tenant-001') {
-      return process.env.DATABASE_URL_TENANT || 'mysql://root:7bar%402025@mysql:3306/demo_adega';
+      if (!process.env.DATABASE_URL_TENANT) throw new Error('DATABASE_URL_TENANT não definido.');
+      return process.env.DATABASE_URL_TENANT;
     }
 
     const cached = this.urlCache.get(tenantId);
@@ -51,8 +52,9 @@ export class TenantInterceptor implements NestInterceptor {
       where: { id: tenantId }
     });
 
-    if (!tenant) {
-      throw new UnauthorizedException('Acesso negado: Tenant inativo ou não encontrado.');
+    if (!tenant || (tenant.status && tenant.status !== 'active')) {
+      this.urlCache.delete(tenantId);
+      throw new UnauthorizedException('Acesso negado: Loja inativa, suspensa ou não encontrada.');
     }
 
     const databaseUrl = tenant.databaseUrl;

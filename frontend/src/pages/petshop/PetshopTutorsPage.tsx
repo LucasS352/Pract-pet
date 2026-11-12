@@ -1,6 +1,6 @@
 import { ReceptionRegistrationModal } from './ReceptionRegistrationModal';
 import { FormEvent, useEffect, useState } from 'react';
-import { Bell, BellOff, Link2, MapPin, MessageCircle, PackageCheck, PawPrint, Pencil, Phone, Plus, Users } from 'lucide-react';
+import { Bell, BellOff, MapPin, MessageCircle, PackageCheck, PawPrint, Pencil, Phone, Plus, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
@@ -27,7 +27,6 @@ export default function PetshopTutorsPage() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [generatingId, setGeneratingId] = useState('');
   const [form, setForm] = useState(emptyTutor);
   const [editingTutor, setEditingTutor] = useState<Tutor | null>(null);
 
@@ -95,43 +94,18 @@ export default function PetshopTutorsPage() {
     }
   };
 
-  const copyPortalLink = async (id: string) => {
-    setGeneratingId(id);
-    try {
-      const { data } = await api.post(`/petshop/tutors/${id}/portal-link`, { rotate: false });
-      const url = `${window.location.origin}${data.path}`;
-      await navigator.clipboard.writeText(url);
-      toast.success('Link da área do cliente copiado para a área de transferência!');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Não foi possível gerar o link.');
-    } finally {
-      setGeneratingId('');
+  const openTutorWhatsApp = (tutor: Tutor) => {
+    const cleanPhone = (tutor.phone || '').replace(/\D/g, '');
+    if (!cleanPhone) {
+      toast.error('Tutor sem telefone cadastrado.');
+      return;
     }
-  };
-
-  const sendPortalWhatsApp = async (tutor: Tutor) => {
-    setGeneratingId(tutor.id);
-    try {
-      const { data } = await api.post(`/petshop/tutors/${tutor.id}/portal-link`, { rotate: false });
-      const url = `${window.location.origin}${data.path}`;
-      const cleanPhone = (tutor.phone || '').replace(/\D/g, '');
-      const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-      const firstName = tutor.name.split(' ')[0];
-      const petNames = tutor.pets?.map(p => p.name).join(', ') || 'seu pet';
-      const message =
-        `Olá *${firstName}*! Aqui está o seu link exclusivo da Área do Tutor para acompanhar os atendimentos, fotos em tempo real e vacinas de *${petNames}*:\n\n` +
-        `${url}`;
-      window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(message)}`, '_blank', 'noopener,noreferrer');
-      toast.success('WhatsApp aberto com o link do tutor!');
-    } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Não foi possível preparar o WhatsApp.');
-    } finally {
-      setGeneratingId('');
-    }
+    const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
+    window.open(`https://wa.me/${fullPhone}`, '_blank', 'noopener,noreferrer');
   };
 
   return <div className={pageClass}>
-    <PageHeader eyebrow="Relacionamento" title="Tutores" description="Responsáveis, contatos e acesso à área do cliente." action={<button className={primaryButton} onClick={handleOpenNew}><Plus aria-hidden="true" className="mr-1.5 inline" size={17} />Novo tutor</button>} />
+    <PageHeader eyebrow="Relacionamento" title="Tutores" description="Responsáveis e contatos dos pets." action={<button className={primaryButton} onClick={handleOpenNew}><Plus aria-hidden="true" className="mr-1.5 inline" size={17} />Novo tutor</button>} />
 
     <div className="mb-5 max-w-xl"><SearchField value={search} onChange={setSearch} label="Buscar tutores" placeholder="Buscar por nome, telefone ou CPF" /></div>
 
@@ -174,8 +148,7 @@ export default function PetshopTutorsPage() {
             <Pencil aria-hidden="true" size={14} />
             <span>Editar</span>
           </button>
-          <button onClick={() => sendPortalWhatsApp(tutor)} disabled={!tutor.pets?.length || generatingId === tutor.id} className="flex min-h-11 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[var(--pc-action-soft)] px-3 text-xs font-semibold text-[var(--pc-action-hover)] transition hover:bg-[var(--pc-action)] hover:text-white disabled:cursor-not-allowed disabled:opacity-50" title="Enviar link da área do cliente pelo WhatsApp"><MessageCircle aria-hidden="true" size={15} />WhatsApp</button>
-          <button onClick={() => copyPortalLink(tutor.id)} disabled={!tutor.pets?.length || generatingId === tutor.id} className={secondaryButton + ' flex items-center justify-center gap-2 whitespace-nowrap px-3 text-xs'}><Link2 aria-hidden="true" size={15} />{generatingId === tutor.id ? 'Gerando…' : 'Copiar link'}</button>
+          <button type="button" onClick={() => openTutorWhatsApp(tutor)} disabled={!tutor.phone} className="flex min-h-11 cursor-pointer items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-[var(--pc-action-soft)] px-3 text-xs font-semibold text-[var(--pc-action-hover)] transition hover:bg-[var(--pc-action)] hover:text-white disabled:cursor-not-allowed disabled:opacity-50" title="Abrir conversa com o tutor no WhatsApp"><MessageCircle aria-hidden="true" size={15} />WhatsApp</button>
         </div>
       </article>)}</div>}
     </section>

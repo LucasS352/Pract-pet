@@ -1,5 +1,6 @@
 import { Controller, Get, Patch, Param, Body, Query, ForbiddenException, Headers } from '@nestjs/common';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
+import { safeEqual } from '../common/security/security';
 
 class UpdateLeadDto {
   status?: string;
@@ -11,10 +12,7 @@ export class LeadsController {
   constructor(private readonly heartPrisma: HeartPrismaService) {}
 
   private validateAccess(pin?: string) {
-    const validPin = process.env.SETUP_PIN || 'teltech352';
-    if (pin === validPin) return true;
-    // Também aceita se PIN foi fornecido via query ou autorização
-    if (pin && pin.length >= 4) return true;
+    if (safeEqual(pin, process.env.SETUP_PIN)) return true;
     throw new ForbiddenException('Acesso negado. Requer PIN de setup do sistema.');
   }
 

@@ -36,7 +36,7 @@ export class FiscalImportController {
    * Retorna os dados parseados para o frontend exibir antes de confirmar.
    */
   @Post('upload-xml')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 10 * 1024 * 1024 } }))
   async uploadXml(
     @Request() req: any,
     @UploadedFile() file?: Express.Multer.File,

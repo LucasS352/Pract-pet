@@ -73,7 +73,7 @@ export function taxiNotificationText(
   const dropoff = hasTaxiDropoff(transport.mode);
   if (triggerType === 'APPOINTMENT_CONFIRMED') {
     const route = pickup && dropoff ? 'buscar no seu endereço e levar de volta após o atendimento' : pickup ? 'buscar no seu endereço; a retirada na loja ficará por sua conta' : 'receber o pet na loja e levá-lo de volta ao seu endereço';
-    return `${greeting} Confirmamos o atendimento de ${detail} na *${vars.shop}*. O Táxi Dog está combinado para ${route}. Endereço: ${transport.address}.${vars.portalLink ? `\n\nAcompanhe pelo portal: ${vars.portalLink}` : ''}`;
+    return `${greeting} Confirmamos o atendimento de ${detail} na *${vars.shop}*. O Táxi Dog está combinado para ${route}. Endereço: ${transport.address}.`;
   }
   if (triggerType === 'BEFORE_APPOINTMENT') {
     const timing = vars.minutesBefore && vars.minutesBefore >= 1440 ? 'amanhã' : 'em breve';
@@ -82,6 +82,6 @@ export function taxiNotificationText(
       : `Traga ${vars.pet} à loja no horário combinado. Após o atendimento, nosso Táxi Dog fará a entrega em ${transport.address}.`;
     return `${greeting} Lembrete do atendimento de ${detail} na *${vars.shop}* (${timing}). ${action}`;
   }
-  if (dropoff) return `${greeting} *${vars.pet}* está pronto(a) na *${vars.shop}*. A entrega pelo Táxi Dog em ${transport.address} está prevista; avisaremos quando o motorista sair.${vars.portalLink ? `\n\nAcompanhe pelo portal: ${vars.portalLink}` : ''}`;
-  return `${greeting} *${vars.pet}* está pronto(a) para você retirar na *${vars.shop}*.${vars.portalLink ? `\n\nAcompanhe pelo portal: ${vars.portalLink}` : ''}`;
+  if (dropoff) return `${greeting} *${vars.pet}* está pronto(a) na *${vars.shop}*. A entrega pelo Táxi Dog em ${transport.address} está prevista; avisaremos quando o motorista sair.`;
+  return `${greeting} *${vars.pet}* está pronto(a) para você retirar na *${vars.shop}*.`;
 }

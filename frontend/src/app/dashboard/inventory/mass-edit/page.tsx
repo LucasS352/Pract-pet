@@ -5,6 +5,7 @@ import { toast } from 'sonner';
 import { Save, ArrowLeft, RefreshCw, Search, Filter, X, Loader2, CheckCircle2, Camera, Trash2, Package } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuthStore } from '@/store/auth';
+import { compressImageForUpload, isSupportedImageFile } from '@/lib/imageCompression';
 
 interface ProductRow {
   id: string;
@@ -20,34 +21,6 @@ interface ProductRow {
   saving: boolean;
   saved: boolean;
 }
-
-const compressImage = (file: File, maxPx = 800, quality = 0.82): Promise<Blob> =>
-  new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width > maxPx || height > maxPx) {
-        if (width > height) {
-          height = Math.round((height * maxPx) / width);
-          width = maxPx;
-        } else {
-          width = Math.round((width * maxPx) / height);
-          height = maxPx;
-        }
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return reject(new Error('Canvas ctx error'));
-      ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('toBlob error'))), 'image/webp', quality);
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
 
 export default function MassEditPage() {
   const { user } = useAuthStore();
@@ -104,14 +77,17 @@ export default function MassEditPage() {
   };
 
   const handleImageUpload = async (id: string, file: File) => {
-    if (!file.type.startsWith('image/')) {
+    if (!isSupportedImageFile(file)) {
       toast.error('Por favor, selecione um arquivo de imagem.');
       return;
     }
     setUploadingId(id);
     try {
-      const compressed = await compressImage(file);
-      const compressedFile = new File([compressed], 'product.webp', { type: 'image/webp' });
+      const compressedFile = await compressImageForUpload(file, {
+        maxEdge: 800,
+        targetBytes: 200 * 1024,
+        baseName: 'product',
+      });
       const formDataObj = new FormData();
       formDataObj.append('file', compressedFile);
 

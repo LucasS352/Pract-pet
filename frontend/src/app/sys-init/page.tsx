@@ -682,14 +682,29 @@ export default function SysInitPage() {
   };
 
   // ── SQL EDITOR HANDLER ────────────────────────────────────────────────
-  const handleSqlUnlock = () => {
-    if (sqlPinInput === '43619835') {
+  const handleSqlUnlock = async () => {
+    if (!sqlPinInput.trim()) {
+      setSqlPinError('Digite o PIN do console SQL.');
+      return;
+    }
+    setSqlLoadingTables(true);
+    setSqlPinError('');
+    try {
+      const pin = pinDigits.join('');
+      const res = await api.post(
+        '/tenants/setup/sql',
+        { sql: 'SHOW TABLES', tenantId: sqlSelectedDb.tenantId, useHeart: sqlSelectedDb.useHeart },
+        { headers: { 'x-setup-pin': pin, 'x-sql-pin': sqlPinInput } }
+      );
       setSqlPinUnlocked(true);
-      setSqlPinError('');
-      loadTablesForDb(sqlSelectedDb);
-    } else {
-      setSqlPinError('PIN incorreto.');
+      if (res.data?.type === 'query' && Array.isArray(res.data?.rows)) {
+        setSqlTables(res.data.rows.map((row: any[]) => String(row[0])).filter(Boolean));
+      }
+    } catch (err: any) {
+      setSqlPinError(err?.response?.data?.message || 'PIN incorreto.');
       setSqlPinInput('');
+    } finally {
+      setSqlLoadingTables(false);
     }
   };
 
@@ -701,7 +716,7 @@ export default function SysInitPage() {
       const res = await api.post(
         '/tenants/setup/sql',
         { sql: 'SHOW TABLES', tenantId: db.tenantId, useHeart: db.useHeart },
-        { headers: { 'x-setup-pin': pin, 'x-sql-pin': '43619835' } }
+        { headers: { 'x-setup-pin': pin, 'x-sql-pin': sqlPinInput } }
       );
       if (res.data?.type === 'query' && Array.isArray(res.data?.rows)) {
         const tableList = res.data.rows.map((row: any[]) => String(row[0])).filter(Boolean);
@@ -729,7 +744,7 @@ export default function SysInitPage() {
       const res = await api.post(
         '/tenants/setup/sql',
         { sql: queryToRun, tenantId: db.tenantId, useHeart: db.useHeart },
-        { headers: { 'x-setup-pin': pin, 'x-sql-pin': '43619835' } }
+        { headers: { 'x-setup-pin': pin, 'x-sql-pin': sqlPinInput } }
       );
       setSqlResult(res.data);
       // salvar no histórico
@@ -754,7 +769,7 @@ export default function SysInitPage() {
       await api.post(
         '/tenants/setup/sql',
         { sql: q, tenantId: sqlSelectedDb.tenantId, useHeart: sqlSelectedDb.useHeart },
-        { headers: { 'x-setup-pin': pin, 'x-sql-pin': '43619835' } }
+        { headers: { 'x-setup-pin': pin, 'x-sql-pin': sqlPinInput } }
       );
       toast.success(`Caixa ${cashRegisterId.slice(0, 8)} fechado com sucesso!`);
       await handleExecuteSql(sqlQuery);
@@ -774,7 +789,7 @@ export default function SysInitPage() {
       await api.post(
         '/tenants/setup/sql',
         { sql: q, tenantId: sqlSelectedDb.tenantId, useHeart: sqlSelectedDb.useHeart },
-        { headers: { 'x-setup-pin': pin, 'x-sql-pin': '43619835' } }
+        { headers: { 'x-setup-pin': pin, 'x-sql-pin': sqlPinInput } }
       );
       toast.success(`Venda ${saleId.slice(0, 8)} cancelada com sucesso!`);
       await handleExecuteSql(sqlQuery);
@@ -794,7 +809,7 @@ export default function SysInitPage() {
       await api.post(
         '/tenants/setup/sql',
         { sql: q, tenantId: sqlSelectedDb.tenantId, useHeart: sqlSelectedDb.useHeart },
-        { headers: { 'x-setup-pin': pin, 'x-sql-pin': '43619835' } }
+        { headers: { 'x-setup-pin': pin, 'x-sql-pin': sqlPinInput } }
       );
       toast.success(`Registro excluído com sucesso!`);
       await handleExecuteSql(sqlQuery);
@@ -815,7 +830,7 @@ export default function SysInitPage() {
       await api.post(
         '/tenants/setup/sql',
         { sql: q, tenantId: sqlSelectedDb.tenantId, useHeart: sqlSelectedDb.useHeart },
-        { headers: { 'x-setup-pin': pin, 'x-sql-pin': '43619835' } }
+        { headers: { 'x-setup-pin': pin, 'x-sql-pin': sqlPinInput } }
       );
       toast.success(`Campo "${editingCell.column}" atualizado com sucesso!`);
       setEditingCell(null);
@@ -1745,7 +1760,7 @@ export default function SysInitPage() {
                     setDownloadingAll(true);
                     try {
                       const pin = pinDigits.join('');
-                      const response = await api.get(`/sys-init/backups/download-all?pin=${pin}`, { responseType: 'blob' });
+                      const response = await api.get(`/sys-init/backups/download-all`, { responseType: 'blob', headers: { 'x-setup-pin': pin } });
                       const url = window.URL.createObjectURL(new Blob([response.data]));
                       const link = document.createElement('a'); link.href = url;
                       link.setAttribute('download', `Backups_7bar_${new Date().getTime()}.zip`);
@@ -1833,7 +1848,7 @@ export default function SysInitPage() {
                                   <td className="px-6 py-3 text-right">
                                     <div className="flex justify-end gap-1">
                                       <button onClick={async () => {
-                                        try { const pin = pinDigits.join(''); const response = await api.get(`/sys-init/backups/download/${file.path}?pin=${pin}`, { responseType: 'blob' });
+                                        try { const pin = pinDigits.join(''); const response = await api.get(`/sys-init/backups/download/${file.path}`, { responseType: 'blob', headers: { 'x-setup-pin': pin } });
                                           const url = window.URL.createObjectURL(new Blob([response.data])); const link = document.createElement('a'); link.href = url;
                                           link.setAttribute('download', file.filename); document.body.appendChild(link); link.click(); link.parentNode?.removeChild(link);
                                         } catch (e) { toast.error("Erro ao fazer download"); }

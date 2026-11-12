@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { CatalogTabs, PageHeader, pageClass, primaryButton, secondaryButton, inputClass } from './ui';
 import { money } from './types';
+import { compressImageForUpload, isSupportedImageFile } from '@/lib/imageCompression';
 
 interface ProductRow {
   id: string;
@@ -22,34 +23,6 @@ interface ProductRow {
   saving: boolean;
   saved: boolean;
 }
-
-const compressImage = (file: File, maxPx = 800, quality = 0.82): Promise<Blob> =>
-  new Promise((resolve, reject) => {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(url);
-      let { width, height } = img;
-      if (width > maxPx || height > maxPx) {
-        if (width > height) {
-          height = Math.round((height * maxPx) / width);
-          width = maxPx;
-        } else {
-          width = Math.round((width * maxPx) / height);
-          height = maxPx;
-        }
-      }
-      const canvas = document.createElement('canvas');
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return reject(new Error('Canvas ctx error'));
-      ctx.drawImage(img, 0, 0, width, height);
-      canvas.toBlob(blob => (blob ? resolve(blob) : reject(new Error('toBlob error'))), 'image/webp', quality);
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
 
 export default function PetshopMassEditPage() {
   const [products, setProducts] = useState<ProductRow[]>([]);
@@ -103,15 +76,19 @@ export default function PetshopMassEditPage() {
   };
 
   const handleImageUpload = async (id: string, file: File) => {
-    if (!file.type.startsWith('image/')) {
+    if (!isSupportedImageFile(file)) {
       toast.error('Por favor, selecione um arquivo de imagem.');
       return;
     }
     setUploadingId(id);
     try {
-      const compressed = await compressImage(file);
+      const compressed = await compressImageForUpload(file, {
+        maxEdge: 800,
+        targetBytes: 200 * 1024,
+        baseName: 'product',
+      });
       const fd = new FormData();
-      fd.append('file', compressed, 'image.webp');
+      fd.append('file', compressed);
       const res = await api.post('/products/upload-image', fd, {
         headers: { 'Content-Type': 'multipart/form-data' },
       });

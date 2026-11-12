@@ -14,13 +14,14 @@ import {
 } from '@nestjs/common';
 import { GroupsService } from './groups.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { safeEqual } from '../common/security/security';
 
 @Controller('groups')
 export class GroupsController {
   constructor(private readonly groupsService: GroupsService) {}
 
   private checkPin(pin: string | undefined): void {
-    if (!pin || pin !== process.env.SETUP_PIN) {
+    if (!safeEqual(pin, process.env.SETUP_PIN)) {
       throw new UnauthorizedException('PIN inválido');
     }
   }

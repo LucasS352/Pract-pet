@@ -4,7 +4,7 @@ services:
     image: mysql:8.0
     container_name: practpet_mysql
     restart: unless-stopped
-    command: --innodb-redo-log-capacity=536870912
+    command: --innodb-redo-log-capacity=536870912 --max-connections=1000
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Defina MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: practpet
@@ -40,6 +40,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:?Defina JWT_SECRET}
       SETUP_PIN: ${SETUP_PIN:?Defina SETUP_PIN}
       SQL_PIN: ${SQL_PIN:?Defina SQL_PIN}
+      ENABLE_SQL_CONSOLE: ${ENABLE_SQL_CONSOLE:-false}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+      TENANT_DB_MAX_CLIENTS: ${TENANT_DB_MAX_CLIENTS:-80}
+      TENANT_DB_CONNECTION_LIMIT: ${TENANT_DB_CONNECTION_LIMIT:-10}
       NFCE_SERVICE_URL: http://nfce-service:80
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -54,6 +58,13 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3530/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     networks:
       - practpet_network
 

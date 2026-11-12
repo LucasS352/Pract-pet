@@ -282,17 +282,13 @@ export default function PetshopDashboardPage() {
 
   const notifyTutorDirect = async (item: Appointment) => {
     try {
-      const { data } = await api.post(`/petshop/tutors/${item.customer.id}/portal-link`, {
-        rotate: false,
-      });
-      const portalUrl = `${window.location.origin}${data.path}`;
       const cleanPhone = (item.customer?.phone || '').replace(/\D/g, '');
       const fullPhone = cleanPhone.startsWith('55') ? cleanPhone : `55${cleanPhone}`;
-      const msg = buildWhatsAppMessage(item, portalUrl, item.stageNotes);
+      const msg = buildWhatsAppMessage(item, null, item.stageNotes);
       window.open(`https://wa.me/${fullPhone}?text=${encodeURIComponent(msg)}`, '_blank', 'noopener,noreferrer');
       toast.success(`Aviso WhatsApp preparado para ${item.customer.name}!`);
     } catch {
-      toast.error('Não foi possível gerar link do tutor.');
+      toast.error('Não foi possível preparar o aviso no WhatsApp.');
     }
   };
 

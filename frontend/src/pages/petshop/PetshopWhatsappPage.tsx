@@ -123,7 +123,6 @@ const TEMPLATE_VARIABLES = [
   { tag: '{hora}', label: 'Horário', sample: '14:00' },
   { tag: '{nome_loja}', label: 'Nome da Loja', sample: 'PetSh' },
   { tag: '{endereco}', label: 'Endereço', sample: 'Av. Principal, 120' },
-  { tag: '{link_portal}', label: 'Link do Portal', sample: 'https://practpet.app/p/abc123' },
   { tag: '{saldo_pacote}', label: 'Saldo do Pacote', sample: '1' },
   { tag: '{validade_pacote}', label: 'Validade do Pacote', sample: '30/11' },
   { tag: '{dias_sem_vir}', label: 'Dias sem Agendar', sample: '15' },

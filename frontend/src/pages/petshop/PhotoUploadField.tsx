@@ -3,6 +3,7 @@ import { Camera, Loader2, Trash2, Upload } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
+import { compressImageForUpload, isSupportedImageFile, MAX_CLIENT_UPLOAD_BYTES } from '@/lib/imageCompression';
 
 type Props = {
   value?: string | null;
@@ -12,38 +13,6 @@ type Props = {
   circular?: boolean;
 };
 
-const acceptedTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
-
-async function compressImage(file: File): Promise<File> {
-  const bitmap = typeof createImageBitmap === 'function' ? await createImageBitmap(file) : null;
-  const fallback = bitmap ? null : await new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    const url = URL.createObjectURL(file);
-    image.onload = () => { URL.revokeObjectURL(url); resolve(image); };
-    image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não foi possível abrir a imagem.')); };
-    image.src = url;
-  });
-  try {
-    const source = bitmap || fallback!;
-    const scale = Math.min(1, 800 / Math.max(source.width, source.height));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(source.width * scale));
-    canvas.height = Math.max(1, Math.round(source.height * scale));
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('Não foi possível preparar a foto neste aparelho.');
-    context.drawImage(source, 0, 0, canvas.width, canvas.height);
-    let blob: Blob | null = null;
-    for (const quality of [0.72, 0.58, 0.44]) {
-      blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/webp', quality));
-      if (blob && blob.size <= 200 * 1024) break;
-    }
-    if (!blob || blob.type !== 'image/webp') throw new Error('Não foi possível otimizar a foto neste aparelho.');
-    return new File([blob], 'pet-care-photo.webp', { type: 'image/webp' });
-  } finally {
-    bitmap?.close();
-  }
-}
-
 export function PhotoUploadField({ value, onChange, label, subjectName, circular = true }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
   const cameraRef = useRef<HTMLInputElement>(null);
@@ -52,11 +21,11 @@ export function PhotoUploadField({ value, onChange, label, subjectName, circular
 
   const selectPhoto = async (file?: File) => {
     if (!file) return;
-    if (!acceptedTypes.has(file.type)) {
+    if (!isSupportedImageFile(file)) {
       toast.error('Use uma foto JPG, PNG ou WebP.');
       return;
     }
-    if (file.size > 15 * 1024 * 1024) {
+    if (file.size > MAX_CLIENT_UPLOAD_BYTES) {
       toast.error('A foto deve ter no máximo 15 MB.');
       return;
     }
@@ -64,7 +33,11 @@ export function PhotoUploadField({ value, onChange, label, subjectName, circular
     setUploading(true);
     setUploadStep('preparing');
     try {
-      const prepared = await compressImage(file);
+      const prepared = await compressImageForUpload(file, {
+        maxEdge: 800,
+        targetBytes: 200 * 1024,
+        baseName: 'pet-care-photo',
+      });
       setUploadStep('sending');
       const body = new FormData();
       body.append('file', prepared);

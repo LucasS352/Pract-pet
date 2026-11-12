@@ -10,6 +10,7 @@ import { join } from 'path';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TenantsService } from './tenants.service';
 import { ProvisionTenantDto } from './provision-tenant.dto';
+import { safeEqual } from '../common/security/security';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @Controller('tenants')
@@ -38,7 +39,7 @@ export class TenantsController {
   /** Lista tenants protegida por PIN — usada pelo sys-init sem JWT */
   @Get('setup/list')
   async listByPin(@Request() req: any) {
-    const pin = (req.headers['x-setup-pin'] || req.query['pin']) as string;
+    const pin = req.headers['x-setup-pin'] as string;
     const valid = await this.tenantsService.validatePin(pin);
     if (!valid) throw new UnauthorizedException('PIN inválido.');
     return this.tenantsService.findAll();
@@ -104,7 +105,7 @@ export class TenantsController {
    */
   @UseGuards(JwtAuthGuard)
   @Post('me/certificado')
-  @UseInterceptors(FileInterceptor('certPfx'))
+  @UseInterceptors(FileInterceptor('certPfx', { limits: { fileSize: 2 * 1024 * 1024 } }))
   async uploadCertificado(
     @Request() req: any,
     @UploadedFile() file: Express.Multer.File,
@@ -121,7 +122,7 @@ export class TenantsController {
 
   /** Upload de logotipo para White Label via sys-init (protegido por PIN) */
   @Post('setup/:id/logo')
-  @UseInterceptors(FileInterceptor('logo'))
+  @UseInterceptors(FileInterceptor('logo', { limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_req, file, cb) => cb(null, /^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype)) }))
   async uploadLogoSetup(
     @Request() req: any,
     @Param('id') id: string,
@@ -140,7 +141,7 @@ export class TenantsController {
    */
   @UseGuards(JwtAuthGuard)
   @Post(':id/logo')
-  @UseInterceptors(FileInterceptor('logo'))
+  @UseInterceptors(FileInterceptor('logo', { limits: { fileSize: 5 * 1024 * 1024 }, fileFilter: (_req, file, cb) => cb(null, /^image\/(png|jpe?g|webp|gif)$/.test(file.mimetype)) }))
   async uploadLogo(
     @Request() req: any,
     @Param('id') id: string,
@@ -361,13 +362,17 @@ export class TenantsController {
     @Request() req: any,
     @Body() body: { sql: string; tenantId?: string; useHeart?: boolean }
   ) {
+    // Console SQL desabilitado por padrão em produção. Habilite com ENABLE_SQL_CONSOLE=true apenas quando necessário.
+    if (process.env.ENABLE_SQL_CONSOLE !== 'true' && process.env.NODE_ENV !== 'development') {
+      throw new ForbiddenException('Console SQL desabilitado neste ambiente.');
+    }
+
     const pin = req.headers['x-setup-pin'] as string;
     const valid = await this.tenantsService.validatePin(pin);
     if (!valid) throw new UnauthorizedException('PIN do sys-init inválido.');
 
     const sqlPin = req.headers['x-sql-pin'] as string;
-    const expectedSqlPin = process.env.SQL_PIN || '43619835';
-    if (sqlPin !== expectedSqlPin) throw new UnauthorizedException('PIN do SQL editor inválido.');
+    if (!safeEqual(sqlPin, process.env.SQL_PIN)) throw new UnauthorizedException('PIN do SQL editor inválido.');
 
     if (!body.sql?.trim()) throw new BadRequestException('Query SQL vazia.');
 
