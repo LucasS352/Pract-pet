@@ -74,7 +74,9 @@ export interface PetshopLayoutContext {
   loadTenant: () => void;
   hasVaccines: boolean;
   isRestrictedStaff: boolean;
+  isOperatorAccount: boolean;
   operator: any;
+  openOperatorModal: (onSuccessCallback?: () => void) => void;
 }
 
 export function usePetshopContext() {
@@ -92,7 +94,13 @@ export function usePetshopContext() {
     loadTenant: context?.loadTenant,
     hasVaccines,
     isRestrictedStaff: context?.isRestrictedStaff ?? false,
+    isOperatorAccount: context?.isOperatorAccount ?? (user?.role === 'operator'),
     operator: context?.operator,
+    openOperatorModal: context?.openOperatorModal ?? ((cb?: () => void) => {
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('petshop-require-pin', { detail: { onSuccess: cb } }));
+      }
+    }),
   };
 }
 
@@ -105,8 +113,33 @@ export function PetshopLayout() {
   const [tenant, setTenant] = useState<any>(null);
   const [tenantError, setTenantError] = useState(false);
   const [showOpModal, setShowOpModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [showCreateAccessModal, setShowCreateAccessModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  const openOperatorModal = useCallback((onSuccessCallback?: () => void) => {
+    if (onSuccessCallback) {
+      setPendingAction(() => onSuccessCallback);
+    } else {
+      setPendingAction(null);
+    }
+    setShowOpModal(true);
+  }, []);
+
+  useEffect(() => {
+    const handleRequirePin = (e: any) => {
+      if (typeof e?.detail?.onSuccess === 'function') {
+        setPendingAction(() => e.detail.onSuccess);
+      }
+      setShowOpModal(true);
+    };
+    window.addEventListener('petshop-require-pin', handleRequirePin);
+    window.addEventListener('operator-token-expired', handleRequirePin);
+    return () => {
+      window.removeEventListener('petshop-require-pin', handleRequirePin);
+      window.removeEventListener('operator-token-expired', handleRequirePin);
+    };
+  }, []);
 
   const modules = useMemo(() => {
     const raw = tenant?.modulos;
@@ -478,7 +511,18 @@ export function PetshopLayout() {
             </div>
           </div>
         ) : (
-          <Outlet context={{ modules, tenant, loadTenant, hasVaccines: modules.petshopVacinas !== false, isRestrictedStaff, operator }} />
+          <Outlet
+            context={{
+              modules,
+              tenant,
+              loadTenant,
+              hasVaccines: modules.petshopVacinas !== false,
+              isRestrictedStaff,
+              isOperatorAccount,
+              operator,
+              openOperatorModal,
+            }}
+          />
         )}
       </main>
 
@@ -662,7 +706,20 @@ export function PetshopLayout() {
       <PetshopOperatorLoginModal
         isOpen={showOpModal}
         isMandatory={Boolean(isOperatorAccount && !operator)}
-        onClose={() => setShowOpModal(false)}
+        onClose={() => {
+          setShowOpModal(false);
+          setPendingAction(null);
+        }}
+        onSuccess={() => {
+          setShowOpModal(false);
+          if (pendingAction) {
+            const action = pendingAction;
+            setPendingAction(null);
+            setTimeout(() => {
+              try { action(); } catch {}
+            }, 100);
+          }
+        }}
       />
 
       {/* Modal de Acesso dos Colaboradores (Login E-mail e Senha) */}

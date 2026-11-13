@@ -180,7 +180,22 @@ export function TaxiDogWidget({
         );
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Não foi possível atualizar o status.');
+      const msg = err.response?.data?.message || 'Não foi possível atualizar o status.';
+      if (msg.includes('Identifique o colaborador') || msg.includes('PIN') || err.response?.status === 403) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('petshop-require-pin', {
+              detail: {
+                onSuccess: () => {
+                  void handleQuickStatusChange(item, nextStatus);
+                },
+              },
+            }),
+          );
+        }
+        return;
+      }
+      toast.error(msg);
     } finally {
       setUpdatingId(null);
     }

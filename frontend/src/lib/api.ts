@@ -144,6 +144,16 @@ api.interceptors.response.use(
       }
     }
 
+    // ── Notificação de PIN de colaborador (403 ou exigência operacional) ──
+    if (error.response?.status === 403 || error.response?.status === 401) {
+      const msg = String(error.response?.data?.message || '');
+      if (msg.includes('Identifique o colaborador') || msg.includes('PIN')) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('petshop-require-pin'));
+        }
+      }
+    }
+
     return Promise.reject(error);
   }
 );

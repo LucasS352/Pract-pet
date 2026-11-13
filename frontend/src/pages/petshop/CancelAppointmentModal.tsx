@@ -64,7 +64,22 @@ export function CancelAppointmentModal({ appointment, onClose, onSuccess }: Canc
       onSuccess(updated);
       onClose();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Erro ao cancelar agendamento.');
+      const msg = error.response?.data?.message || 'Erro ao cancelar agendamento.';
+      if (msg.includes('Identifique o colaborador') || msg.includes('PIN') || error.response?.status === 403) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('petshop-require-pin', {
+              detail: {
+                onSuccess: () => {
+                  void handleConfirm();
+                },
+              },
+            }),
+          );
+        }
+        return;
+      }
+      toast.error(msg);
     } finally {
       setSaving(false);
     }

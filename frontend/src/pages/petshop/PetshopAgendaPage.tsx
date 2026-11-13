@@ -218,7 +218,7 @@ const timeStr = (value: string) => {
 
 export default function PetshopAgendaPage() {
   const navigate = useNavigate();
-  const { tenant, isRestrictedStaff } = usePetshopContext();
+  const { tenant, isRestrictedStaff, isOperatorAccount, operator, openOperatorModal } = usePetshopContext();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Estados principais
@@ -1077,6 +1077,13 @@ export default function PetshopAgendaPage() {
 
   //Alterar etapa / status
   const changeStatus = async (item: Appointment, newStatus: string) => {
+    if (isOperatorAccount && !operator) {
+      openOperatorModal(() => {
+        void changeStatus(item, newStatus);
+      });
+      return;
+    }
+
     setUpdatingId(item.id);
     try {
       const { data: updated } = await api.patch(`/petshop/appointments/${item.id}/status`, { status: newStatus });
@@ -1094,7 +1101,14 @@ export default function PetshopAgendaPage() {
         toast.success(`Etapa de ${item.pet.name} atualizada para "${newStatus === 'ready' && hasTaxiDogReturn(item) ? 'Pronto p/ levar' : statusLabelMap[newStatus] || newStatus}".`);
       }
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Erro ao atualizar etapa.');
+      const msg = error.response?.data?.message || 'Erro ao atualizar etapa.';
+      if (msg.includes('Identifique o colaborador') || msg.includes('PIN') || error.response?.status === 403) {
+        openOperatorModal(() => {
+          void changeStatus(item, newStatus);
+        });
+        return;
+      }
+      toast.error(msg);
     } finally {
       setUpdatingId('');
     }
@@ -1136,6 +1150,14 @@ export default function PetshopAgendaPage() {
   const submitStageModal = async (event: FormEvent) => {
     event.preventDefault();
     if (!stageModalItem) return;
+
+    if (isOperatorAccount && !operator) {
+      openOperatorModal(() => {
+        void submitStageModal(event);
+      });
+      return;
+    }
+
     setSavingStage(true);
     try {
       const { data: updated } = await api.patch(`/petshop/appointments/${stageModalItem.id}/status`, {
@@ -1152,7 +1174,14 @@ export default function PetshopAgendaPage() {
       setStageModalItem(null);
       if (stageForm.notifyTutor && stageForm.stagePhotoUrl) toast.success('Foto colocada na fila do WhatsApp do tutor.');
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Erro ao salvar foto.');
+      const msg = error.response?.data?.message || 'Erro ao salvar foto.';
+      if (msg.includes('Identifique o colaborador') || msg.includes('PIN') || error.response?.status === 403) {
+        openOperatorModal(() => {
+          void submitStageModal(event);
+        });
+        return;
+      }
+      toast.error(msg);
     } finally {
       setSavingStage(false);
     }

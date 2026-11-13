@@ -76,7 +76,7 @@ function getPetSpeciesSize(pet: any): string {
 
 export default function PetshopTaxiDogPage() {
   const navigate = useNavigate();
-  const { tenant } = usePetshopContext();
+  const { tenant, operator, isOperatorAccount, openOperatorModal } = usePetshopContext();
 
   // Seletor de data
   const [selectedDate, setSelectedDate] = useState(() => {
@@ -252,6 +252,13 @@ export default function PetshopTaxiDogPage() {
 
   // Ações de alteração de status
   const handleUpdateStatus = async (item: Appointment, newStatus: string) => {
+    if (isOperatorAccount && !operator) {
+      openOperatorModal(() => {
+        void handleUpdateStatus(item, newStatus);
+      });
+      return;
+    }
+
     setUpdatingId(item.id);
     try {
       await api.patch(`/petshop/appointments/${item.id}/status`, { status: newStatus });
@@ -263,8 +270,15 @@ export default function PetshopTaxiDogPage() {
           : `Status atualizado com sucesso.`
       );
       await loadAppointments();
-    } catch {
-      toast.error('Não foi possível atualizar o status do atendimento.');
+    } catch (err: any) {
+      const msg = err?.response?.data?.message || 'Não foi possível atualizar o status do atendimento.';
+      if (msg.includes('Identifique o colaborador') || msg.includes('PIN') || err?.response?.status === 403) {
+        openOperatorModal(() => {
+          void handleUpdateStatus(item, newStatus);
+        });
+        return;
+      }
+      toast.error(msg);
     } finally {
       setUpdatingId(null);
     }
