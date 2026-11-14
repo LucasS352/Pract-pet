@@ -32,7 +32,7 @@ import {
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import type { PetService } from './types';
-import { money } from './types';
+import { money, stripServiceInternalTags } from './types';
 import { CatalogTabs, EmptyState, ListSkeleton, pageClass, PageHeader, primaryButton, secondaryButton } from './ui';
 import { ServiceEditorModal } from './ServiceEditorModal';
 import { ManageStoreStagesModal } from './ManageStoreStagesModal';
@@ -53,10 +53,10 @@ function parseServiceMetadata(service: PetService): ParsedServiceMeta {
   let targetPets: TargetPetGroup = 'Cães e Gatos';
 
   const metaMatch = rawDesc.match(/\[(cat|categoria):\s*([^|\]]+)(?:\|\s*(pets|porte):\s*([^\]]+))?\]/i);
-  let cleanDescription = rawDesc;
+  const cleanDescription = stripServiceInternalTags(rawDesc);
 
   if (metaMatch) {
-    cleanDescription = rawDesc.replace(metaMatch[0], '').replace(/\[icon:[a-z_]+\].*/gi, '').trim();
+    // descrição limpa já resolvida acima por stripServiceInternalTags
     const parsedCat = metaMatch[2]?.trim();
     const parsedPets = metaMatch[4]?.trim();
 
@@ -405,7 +405,7 @@ export default function PetshopServicesPage() {
       if (search.trim()) {
         const query = search.toLowerCase();
         const matchesName = item.name.toLowerCase().includes(query);
-        const matchesDesc = (item.description || item.meta.cleanDescription || '').toLowerCase().includes(query);
+        const matchesDesc = (item.meta.cleanDescription || '').toLowerCase().includes(query);
         const matchesCat = (item.category || item.meta.category).toLowerCase().includes(query);
         if (!matchesName && !matchesDesc && !matchesCat) return false;
       }

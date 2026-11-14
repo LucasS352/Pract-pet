@@ -249,14 +249,14 @@ export function ServiceEditorModal({
           setColor(s.color || '#0d9488');
           
           let rawDesc = s.description || '';
-          const iconMatch = rawDesc.match(/\[icon:([a-z_]+)\]/i);
+          const iconMatch = rawDesc.match(/\[icon:([a-z0-9_-]+)\]/i);
           if (iconMatch) {
             setSelectedIcon(iconMatch[1]);
             setIconTouched(true);
-            rawDesc = rawDesc.replace(iconMatch[0], '').trim();
           } else {
             setSelectedIcon(inferIconFromName(s.name, s.category));
           }
+          rawDesc = rawDesc.replace(/\[icon:[a-z0-9_-]+\]/gi, '').trim();
           setDescription(rawDesc);
 
           const bpNum = Number(s.price || 60);

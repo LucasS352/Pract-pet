@@ -645,3 +645,10 @@ export const coatLabels: Record<string, string> = {
 
 export const money = (value: string | number) => Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 export const dateTime = (value: string) => new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
+
+/** Remove marcadores internos como `[icon:...]` e `[cat:...|pets:...]` gravados na descrição do serviço. */
+export const stripServiceInternalTags = (raw?: string | null): string =>
+  String(raw || '')
+    .replace(/\[(cat|categoria):[^\]]*\]/gi, '')
+    .replace(/\[icon:[a-z0-9_-]+\]/gi, '')
+    .trim();

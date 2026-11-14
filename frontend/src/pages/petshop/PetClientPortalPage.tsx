@@ -33,6 +33,7 @@ import { toast } from 'sonner';
 import { useParams } from 'react-router-dom';
 import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
+import { stripServiceInternalTags } from './types';
 import { resolveAppointmentSteps, type StageHistoryEntry } from './types';
 import { inputClass, labelClass, PetAvatar, PetHeroShowcase, primaryButton } from './ui';
 import './petshop.css';
@@ -256,7 +257,7 @@ export default function PetClientPortalPage() {
       const matchSearch =
         !serviceSearch ||
         svc.name.toLowerCase().includes(serviceSearch.toLowerCase()) ||
-        (svc.description && svc.description.toLowerCase().includes(serviceSearch.toLowerCase()));
+        (stripServiceInternalTags(svc.description).toLowerCase().includes(serviceSearch.toLowerCase()));
       const matchCat = categoryFilter === 'all' || svc.category === categoryFilter;
       return matchSearch && matchCat;
     });
@@ -910,9 +911,9 @@ export default function PetClientPortalPage() {
                                 {isChecked && <Check size={13} strokeWidth={3} />}
                               </div>
                             </div>
-                            {svc.description && (
+                            {stripServiceInternalTags(svc.description) && (
                               <p className="text-xs text-zinc-500 mt-1 line-clamp-2 leading-relaxed">
-                                {svc.description}
+                                {stripServiceInternalTags(svc.description)}
                               </p>
                             )}
                           </div>
