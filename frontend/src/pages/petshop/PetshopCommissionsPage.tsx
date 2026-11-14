@@ -17,7 +17,6 @@ import {
   FileText,
   Filter,
   History,
-  Layers,
   PawPrint,
   Percent,
   Plus,
@@ -323,15 +322,6 @@ export default function PetshopCommissionsPage() {
         eyebrow="Equipe"
         title="Comissões"
         description="Conferência de produtividade, regras e pagamentos por período."
-        action={
-          <Link
-            to="/petshop/equipe/comissoes/regras"
-            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-[#0d6e5a] px-4 py-2 text-xs font-semibold text-white shadow-2xs transition hover:bg-[#0b5c4b]"
-          >
-            <Layers size={15} />
-            Mapa de Status & Comissões
-          </Link>
-        }
       />
 
       {/* Subnavegação por abas em pílulas */}
@@ -869,18 +859,6 @@ export default function PetshopCommissionsPage() {
 
           {showRulesConfig && (
             <div className="border-t border-zinc-100 p-5">
-              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-200/70 bg-teal-50/50 px-3.5 py-2.5 text-xs">
-                <span className="text-teal-900">
-                  Quer visualizar todos os <strong>status do fluxo e serviços</strong> mapeados com suas comissões e editar direto na tela?
-                </span>
-                <Link
-                  to="/petshop/equipe/comissoes/regras"
-                  className="inline-flex items-center gap-1 rounded-lg bg-[#0d6e5a] px-3 py-1.5 font-semibold text-white transition hover:bg-[#0b5c4b]"
-                >
-                  <Layers size={13} /> Abrir Mapa Completo
-                </Link>
-              </div>
-
               <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Etapa Rastreada</label>

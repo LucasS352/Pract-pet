@@ -50,7 +50,6 @@ import PetshopServicesPage from './pages/petshop/PetshopServicesPage';
 import PetshopProductsPage from './pages/petshop/PetshopProductsPage';
 import PetshopTeamPage from './pages/petshop/PetshopTeamPage';
 import PetshopCommissionsPage from './pages/petshop/PetshopCommissionsPage';
-import PetshopCommissionRulesPage from './pages/petshop/PetshopCommissionRulesPage';
 import PetClientPortalPage from './pages/petshop/PetClientPortalPage';
 import PetshopMassEditPage from './pages/petshop/PetshopMassEditPage';
 import PetshopStockEntryPage from './pages/petshop/PetshopStockEntryPage';
@@ -218,9 +217,9 @@ function App() {
           <Route path="whatsapp" element={<PetshopWhatsappPage />} />
           <Route path="equipe" element={<PetshopTeamPage />} />
           <Route path="equipe/comissoes" element={<PetshopCommissionsPage />} />
-          <Route path="equipe/comissoes/regras" element={<PetshopCommissionRulesPage />} />
+          <Route path="equipe/comissoes/regras" element={<Navigate to="/petshop/equipe/comissoes" replace />} />
           <Route path="comissoes" element={<PetshopCommissionsPage />} />
-          <Route path="comissoes/regras" element={<PetshopCommissionRulesPage />} />
+          <Route path="comissoes/regras" element={<Navigate to="/petshop/equipe/comissoes" replace />} />
           <Route path="fornecedores" element={<PetshopSuppliersPage />} />
           <Route path="pedidos-compra" element={<PetshopPurchaseOrdersPage />} />
           <Route path="edicao-massa" element={<PetshopMassEditPage />} />
