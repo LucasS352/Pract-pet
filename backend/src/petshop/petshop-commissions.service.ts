@@ -4,6 +4,7 @@ import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { PetshopPricingService } from './petshop-pricing.service';
+import { addonSettingsId, parseAddonSettings, validateAddonSettings } from './service-addon-settings';
 import { pinVersion } from '../auth/operator-session';
 
 const D = (value: Prisma.Decimal.Value) => new Prisma.Decimal(value);
@@ -83,6 +84,11 @@ export class PetshopCommissionsService {
     this.assertAdmin(req);
     const input = this.validateRule(body);
     const db = await this.db();
+
+    if (input.stageKey === 'service_added') {
+      return this.saveAddonRule(req, db, input);
+    }
+
     const stageSettings = await db.tenantSettings.findUnique({ where: { id: 'petshop_stages' } });
     const stages = (stageSettings?.paymentMethodsConfig as any)?.stages || [];
     if (!stages.some((stage: any) => stage.key === input.stageKey && stage.trackProfessional)) throw new BadRequestException('Ative o rastreamento desta etapa antes de configurar comissão.');
@@ -105,6 +111,101 @@ export class PetshopCommissionsService {
         },
       });
       return { ...created, size: input.size };
+    });
+  }
+
+  private async saveAddonRule(
+    req: any,
+    db: any,
+    input: { stageKey: string; serviceId: string | null; operatorId: string | null; size: string; kind: string; value: Prisma.Decimal },
+  ) {
+    if (!input.serviceId) throw new BadRequestException('Selecione o serviço para configurar comissão de adição extra.');
+    if (input.operatorId || input.size !== 'all') throw new BadRequestException('Comissão de serviço adicionado se aplica de forma fixa por serviço, sem filtro de porte ou profissional.');
+    if (input.kind === 'PERCENT') throw new BadRequestException('Comissão ao adicionar serviço extra aceita apenas valor fixo (R$) ou sem comissão.');
+
+    const svc = await db.petService.findUnique({ where: { id: input.serviceId }, select: { id: true, serviceType: true } });
+    if (!svc) throw new BadRequestException('Serviço inválido.');
+    if (svc.serviceType === 'COMBO') throw new BadRequestException('Combos não possuem comissão de adição direta.');
+
+    const settingsKey = addonSettingsId(input.serviceId);
+    const existingSettingsRow = await db.tenantSettings.findUnique({ where: { id: settingsKey }, select: { paymentMethodsConfig: true } });
+    const currentSettings = parseAddonSettings(existingSettingsRow?.paymentMethodsConfig);
+    const nextSettings = validateAddonSettings(
+      {
+        trackAddedBy: input.kind === 'FIXED' ? true : currentSettings.trackAddedBy,
+        commissionOnAdd: input.kind === 'FIXED',
+        commissionAmount: input.kind === 'FIXED' ? Number(input.value) : 0,
+      },
+      currentSettings,
+    );
+
+    const scopeKey = `service_added:${input.serviceId}:*`;
+    const actorId = req.user?.sub || req.user?.id || null;
+
+    return db.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.tenantSettings.upsert({
+        where: { id: settingsKey },
+        update: { paymentMethodsConfig: nextSettings as any },
+        create: { id: settingsKey, paymentMethodsConfig: nextSettings as any },
+      });
+      const latest = await tx.petCommissionRule.findFirst({ where: { scopeKey }, orderBy: { version: 'desc' } });
+      if (latest?.active) await tx.petCommissionRule.update({ where: { id: latest.id }, data: { active: false } });
+      if (nextSettings.commissionOnAdd) {
+        const created = await tx.petCommissionRule.create({
+          data: {
+            scopeKey,
+            stageKey: 'service_added',
+            serviceId: input.serviceId,
+            operatorId: null,
+            kind: 'FIXED',
+            value: new Prisma.Decimal(nextSettings.commissionAmount),
+            version: (latest?.version || 0) + 1,
+            createdById: actorId,
+          },
+        });
+        return { ...created, size: 'all' };
+      }
+      return {
+        id: latest?.id || null,
+        scopeKey,
+        stageKey: 'service_added',
+        serviceId: input.serviceId,
+        operatorId: null,
+        size: 'all',
+        kind: 'NONE',
+        value: '0',
+        active: false,
+        version: latest?.version || 0,
+      };
+    });
+  }
+
+  async deleteRule(req: any, id: string) {
+    this.assertAdmin(req);
+    const db = await this.db();
+    const rule = await db.petCommissionRule.findUnique({ where: { id } });
+    if (!rule) throw new NotFoundException('Regra de comissão não encontrada.');
+
+    return db.$transaction(async tx => {
+      if (rule.active) {
+        await tx.petCommissionRule.update({ where: { id }, data: { active: false } });
+      }
+      if (rule.stageKey === 'service_added' && rule.serviceId) {
+        const settingsKey = addonSettingsId(rule.serviceId);
+        const existingSettingsRow = await tx.tenantSettings.findUnique({ where: { id: settingsKey }, select: { paymentMethodsConfig: true } });
+        const currentSettings = parseAddonSettings(existingSettingsRow?.paymentMethodsConfig);
+        const nextSettings = {
+          ...currentSettings,
+          commissionOnAdd: false,
+          commissionAmount: 0,
+        };
+        await tx.tenantSettings.upsert({
+          where: { id: settingsKey },
+          update: { paymentMethodsConfig: nextSettings as any },
+          create: { id: settingsKey, paymentMethodsConfig: nextSettings as any },
+        });
+      }
+      return { deleted: true, id };
     });
   }
 

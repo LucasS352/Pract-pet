@@ -77,6 +77,7 @@ export class PetshopController {
 
   @Get('commissions/rules') commissionRules(@Req() req: any) { return this.commissions.listRules(req); }
   @Post('commissions/rules') saveCommissionRule(@Req() req: any, @Body() body: any) { return this.commissions.saveRule(req, body); }
+  @Delete('commissions/rules/:id') deleteCommissionRule(@Req() req: any, @Param('id') id: string) { return this.commissions.deleteRule(req, id); }
   @Get('commissions/report') commissionReport(@Req() req: any, @Query() query: any) { return this.commissions.report(req, query); }
   @Get('commissions/closings') commissionClosings(@Req() req: any) { return this.commissions.closings(req); }
   @Post('commissions/closings/:period/approve') approveCommissions(@Req() req: any, @Param('period') period: string) { return this.commissions.approve(req, period); }

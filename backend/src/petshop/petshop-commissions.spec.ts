@@ -98,4 +98,40 @@ describe('PetshopCommissionsService', () => {
     expect(tx.petCommissionClosing.updateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ state: 'APPROVED' }), data: expect.objectContaining({ state: 'PAID', paymentRef: 'pix-123', paidAmount: D('10') }) }));
     expect(tx.petCommission.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ state: 'PAID' }) }));
   });
+
+  it('salva e desativa regra de serviço extra adicionado mantendo settings sincronizados', async () => {
+    const upsertedSettings: any[] = [];
+    const createdRules: any[] = [];
+    const updatedRules: any[] = [];
+    const tx = {
+      tenantSettings: {
+        upsert: jest.fn().mockImplementation(arg => { upsertedSettings.push(arg); }),
+        findUnique: jest.fn().mockResolvedValue({ paymentMethodsConfig: { trackAddedBy: true, commissionOnAdd: true, commissionAmount: 5 } }),
+      },
+      petCommissionRule: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockImplementation(arg => { createdRules.push(arg.data); return { id: 'rule-addon-1', ...arg.data }; }),
+        update: jest.fn().mockImplementation(arg => { updatedRules.push(arg); return { id: arg.where.id, ...arg.data }; }),
+      },
+    } as any;
+    const db = {
+      petService: { findUnique: jest.fn().mockResolvedValue({ id: 'svc-1', serviceType: 'INDIVIDUAL' }) },
+      tenantSettings: { findUnique: jest.fn().mockResolvedValue(null) },
+      petCommissionRule: { findUnique: jest.fn().mockResolvedValue({ id: 'rule-addon-1', stageKey: 'service_added', serviceId: 'svc-1', active: true }) },
+      $transaction: (callback: any) => callback(tx),
+    } as any;
+
+    const target = new PetshopCommissionsService({} as any, {} as any, {} as any, {} as any);
+    (target as any).db = async () => db;
+    const actor = { user: { role: 'admin', id: 'admin' } };
+
+    const saved = await target.saveRule(actor, { stageKey: 'service_added', serviceId: 'svc-1', kind: 'FIXED', value: '7.50' });
+    expect(saved.stageKey).toBe('service_added');
+    expect(upsertedSettings[0]).toEqual(expect.objectContaining({ where: { id: 'petshop_addon:svc-1' } }));
+    expect(createdRules[0]).toEqual(expect.objectContaining({ scopeKey: 'service_added:svc-1:*', kind: 'FIXED', value: D(7.5) }));
+
+    await target.deleteRule(actor, 'rule-addon-1');
+    expect(updatedRules[0]).toEqual({ where: { id: 'rule-addon-1' }, data: { active: false } });
+    expect(upsertedSettings[1].update.paymentMethodsConfig).toEqual(expect.objectContaining({ commissionOnAdd: false, commissionAmount: 0 }));
+  });
 });

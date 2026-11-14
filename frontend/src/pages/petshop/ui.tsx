@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { ChevronLeft, Coins, PawPrint, Search, Users, X, type LucideIcon } from 'lucide-react';
+import { ChevronLeft, Coins, Layers, PawPrint, Search, Users, X, type LucideIcon } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { getFullUrl } from '@/lib/getFullUrl';
 
@@ -307,9 +307,13 @@ export function TeamTabs() {
         <Users size={16} />
         <span>Colaboradores & PINs</span>
       </NavLink>
-      <NavLink to="/petshop/equipe/comissoes" className={tabClass}>
+      <NavLink to="/petshop/equipe/comissoes" end className={tabClass}>
         <Coins size={16} />
         <span>Comissões & Fechamento</span>
+      </NavLink>
+      <NavLink to="/petshop/equipe/comissoes/regras" className={tabClass}>
+        <Layers size={16} />
+        <span>Status & Serviços Mapeados</span>
       </NavLink>
     </nav>
   );

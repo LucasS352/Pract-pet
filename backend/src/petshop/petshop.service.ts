@@ -1056,14 +1056,15 @@ export class PetshopService {
         create: { id: 'petshop_stages', paymentMethodsConfig: { stages: normalized } as any },
       });
       for (const stage of normalized.filter(s => s.trackProfessional)) {
-        const existing = await tx.petCommissionRule.findFirst({ where: { stageKey: stage.key, serviceId: null, operatorId: null, active: true } });
+        const defaultScopeKey = `${stage.key}:*:*`;
+        const existing = await tx.petCommissionRule.findFirst({ where: { scopeKey: defaultScopeKey, active: true } });
         const requested = generalRules.get(stage.key);
         if (existing && requested && (existing.kind !== requested.kind || !existing.value.eq(requested.value))) {
           await tx.petCommissionRule.update({ where: { id: existing.id }, data: { active: false } });
         }
         if (!existing || (requested && (existing.kind !== requested.kind || !existing.value.eq(requested.value)))) {
-          const latest = await tx.petCommissionRule.findFirst({ where: { stageKey: stage.key, serviceId: null, operatorId: null }, orderBy: { version: 'desc' } });
-          await tx.petCommissionRule.create({ data: { scopeKey: `${stage.key}:*:*`, stageKey: stage.key, kind: requested?.kind || 'NONE', value: requested?.value || new Prisma.Decimal(0), version: (latest?.version || 0) + 1, createdById: req.user.id } });
+          const latest = await tx.petCommissionRule.findFirst({ where: { scopeKey: defaultScopeKey }, orderBy: { version: 'desc' } });
+          await tx.petCommissionRule.create({ data: { scopeKey: defaultScopeKey, stageKey: stage.key, kind: requested?.kind || 'NONE', value: requested?.value || new Prisma.Decimal(0), version: (latest?.version || 0) + 1, createdById: req.user.id } });
         }
       }
     });
@@ -2086,7 +2087,7 @@ export class PetshopService {
       }
 
       if (actor && statusChanged && trackedStage) {
-        const execution = await tx.petAppointment.findUnique({ where: { id }, include: { services: { include: { service: true, customerPackageItem: true } } } });
+        const execution = await tx.petAppointment.findUnique({ where: { id }, include: { pet: { select: { size: true } }, services: { include: { service: true, customerPackageItem: true } } } });
         if (execution) await this.commissions.recordExecution(tx, execution, status, actor.id, now);
       }
 

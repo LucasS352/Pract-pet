@@ -13,9 +13,11 @@ import {
   Coins,
   CreditCard,
   Download,
+  Edit3,
   FileText,
   Filter,
   History,
+  Layers,
   PawPrint,
   Percent,
   Plus,
@@ -23,32 +25,19 @@ import {
   Scissors,
   Settings2,
   Tag,
+  Trash2,
   User,
   Users,
   XCircle,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHeader, pageClass, TeamTabs } from './ui';
-
-type Rule = {
-  id: string;
-  stageKey: string;
-  serviceId: string | null;
-  operatorId: string | null;
-  size?: string;
-  kind: string;
-  value: string;
-  version: number;
-};
-
-const sizeLabelMap: Record<string, string> = {
-  all: 'Todos os portes',
-  mini: 'Mini',
-  small: 'Pequeno (P)',
-  medium: 'Médio (M)',
-  large: 'Grande (G)',
-  giant: 'Gigante (GG)',
-};
+import {
+  type CommissionRule as Rule,
+  SIZE_LABEL_MAP as sizeLabelMap,
+  formatCommissionBrl as brl,
+  resolveStageLabel,
+} from './commissionRulesUtils';
 
 type Row = {
   id: string;
@@ -89,9 +78,6 @@ type Report = {
   adjustments: Adjustment[];
   inconsistencies: { commissionId: string; reason: string }[];
 };
-
-const brl = (v: string | number | undefined) =>
-  new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
 
 const stateLabel: Record<string, string> = {
   PENDING: 'Pendente',
@@ -179,14 +165,41 @@ export default function PetshopCommissionsPage() {
       await api.post('/petshop/commissions/rules', {
         ...rule,
         serviceId: rule.serviceId || null,
-        operatorId: rule.operatorId || null,
-        size: rule.size || 'all',
+        operatorId: rule.stageKey === 'service_added' ? null : (rule.operatorId || null),
+        size: rule.stageKey === 'service_added' ? 'all' : (rule.size || 'all'),
       });
       toast.success('Regra de comissão salva.');
       await load();
       setRule({ stageKey: '', serviceId: '', operatorId: '', size: 'all', kind: 'NONE', value: '0' });
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Não foi possível salvar a regra.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const editRuleInForm = (r: Rule) => {
+    setRule({
+      stageKey: r.stageKey,
+      serviceId: r.serviceId || '',
+      operatorId: r.operatorId || '',
+      size: r.size || 'all',
+      kind: r.kind,
+      value: String(Number(r.value || 0)),
+    });
+    setShowRulesConfig(true);
+    toast.info('Regra carregada nos campos acima para edição.');
+  };
+
+  const deleteRule = async (r: Rule) => {
+    if (!window.confirm(`Remover regra ativa de "${resolveStageLabel(r.stageKey, stages)}"?`)) return;
+    setBusy(true);
+    try {
+      await api.delete(`/petshop/commissions/rules/${r.id}`);
+      toast.success('Regra removida.');
+      await load();
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível remover a regra.');
     } finally {
       setBusy(false);
     }
@@ -310,6 +323,15 @@ export default function PetshopCommissionsPage() {
         eyebrow="Equipe"
         title="Comissões"
         description="Conferência de produtividade, regras e pagamentos por período."
+        action={
+          <Link
+            to="/petshop/equipe/comissoes/regras"
+            className="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-[#0d6e5a] px-4 py-2 text-xs font-semibold text-white shadow-2xs transition hover:bg-[#0b5c4b]"
+          >
+            <Layers size={15} />
+            Mapa de Status & Comissões
+          </Link>
+        }
       />
 
       {/* Subnavegação por abas em pílulas */}
@@ -847,6 +869,18 @@ export default function PetshopCommissionsPage() {
 
           {showRulesConfig && (
             <div className="border-t border-zinc-100 p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-200/70 bg-teal-50/50 px-3.5 py-2.5 text-xs">
+                <span className="text-teal-900">
+                  Quer visualizar todos os <strong>status do fluxo e serviços</strong> mapeados com suas comissões e editar direto na tela?
+                </span>
+                <Link
+                  to="/petshop/equipe/comissoes/regras"
+                  className="inline-flex items-center gap-1 rounded-lg bg-[#0d6e5a] px-3 py-1.5 font-semibold text-white transition hover:bg-[#0b5c4b]"
+                >
+                  <Layers size={13} /> Abrir Mapa Completo
+                </Link>
+              </div>
+
               <div className="mb-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Etapa Rastreada</label>
@@ -863,6 +897,7 @@ export default function PetshopCommissionsPage() {
                           {s.label}
                         </option>
                       ))}
+                    <option value="service_added">Serviço Extra Adicionado</option>
                   </select>
                 </div>
 
@@ -885,8 +920,9 @@ export default function PetshopCommissionsPage() {
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Porte do Pet (Opcional)</label>
                   <select
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
-                    value={rule.size}
+                    disabled={rule.stageKey === 'service_added'}
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-60"
+                    value={rule.stageKey === 'service_added' ? 'all' : rule.size}
                     onChange={e => setRule({ ...rule, size: e.target.value })}
                   >
                     <option value="all">Todos os portes</option>
@@ -901,8 +937,9 @@ export default function PetshopCommissionsPage() {
                 <div>
                   <label className="mb-1 block text-xs font-medium text-zinc-600">Profissional (Opcional)</label>
                   <select
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
-                    value={rule.operatorId}
+                    disabled={rule.stageKey === 'service_added'}
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-3 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-60"
+                    value={rule.stageKey === 'service_added' ? '' : rule.operatorId}
                     onChange={e => setRule({ ...rule, operatorId: e.target.value })}
                   >
                     <option value="">Todos os profissionais</option>
@@ -922,7 +959,7 @@ export default function PetshopCommissionsPage() {
                     onChange={e => setRule({ ...rule, kind: e.target.value, value: '0' })}
                   >
                     <option value="NONE">Sem comissão</option>
-                    <option value="PERCENT">Percentual (%)</option>
+                    {rule.stageKey !== 'service_added' && <option value="PERCENT">Percentual (%)</option>}
                     <option value="FIXED">Valor fixo (R$)</option>
                   </select>
                 </div>
@@ -958,21 +995,39 @@ export default function PetshopCommissionsPage() {
                   {rules.map(r => (
                     <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 p-3">
                       <span className="text-zinc-700">
-                        <strong>Etapa: {r.stageKey}</strong> ·{' '}
+                        <strong>{resolveStageLabel(r.stageKey, stages)}</strong>{' '}
+                        <span className="text-[11px] text-zinc-400">({r.stageKey})</span> ·{' '}
                         <span className="rounded-md bg-teal-50 px-1.5 py-0.5 text-[11px] font-semibold text-teal-800">
                           {sizeLabelMap[r.size || 'all'] || 'Todos os portes'}
                         </span>{' '}
                         · {services.find(s => s.id === r.serviceId)?.name || 'Todos os serviços'} ·{' '}
                         {operators.find(o => o.id === r.operatorId)?.name || 'Todos os profissionais'}
                       </span>
-                      <span className="font-semibold text-zinc-900">
-                        {r.kind === 'PERCENT'
-                          ? `${r.value}%`
-                          : r.kind === 'FIXED'
-                          ? brl(r.value)
-                          : 'Sem comissão'}{' '}
-                        <span className="font-normal text-zinc-400">· v{r.version}</span>
-                      </span>
+                      <div className="flex items-center gap-3">
+                        <span className="font-semibold text-zinc-900">
+                          {r.kind === 'PERCENT'
+                            ? `${r.value}%`
+                            : r.kind === 'FIXED'
+                            ? brl(r.value)
+                            : 'Sem comissão'}{' '}
+                          <span className="font-normal text-zinc-400">· v{r.version}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => editRuleInForm(r)}
+                          className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-[#0d6e5a] hover:underline"
+                        >
+                          <Edit3 size={12} /> Editar
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void deleteRule(r)}
+                          className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-rose-600 hover:underline disabled:opacity-50"
+                        >
+                          <Trash2 size={12} /> Remover
+                        </button>
+                      </div>
                     </div>
                   ))}
                   {!rules.length && (
