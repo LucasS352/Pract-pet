@@ -1320,7 +1320,48 @@ export default function PetshopPetsPage() {
           </div>
 
           {/* Tabela Completa do Relatório de Pets & Clientes */}
-          <div className="overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xs">
+          <div className="space-y-2.5 md:hidden">
+            {filteredPets.map(pet => {
+              const { days, lastDateStr } = getDaysSinceLastVisit(pet);
+              const activePkg = pet.petPackages?.[0];
+              const isInactive = days !== null && days >= 15;
+              return (
+                <article key={pet.id} className="rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`h-4 w-[3px] shrink-0 rounded-full ${isInactive ? 'bg-amber-500' : 'bg-[#0d6e5a]'}`} />
+                      <h3 className="truncate text-[15px] font-bold text-zinc-900">{pet.name}</h3>
+                    </div>
+                    <span className="shrink-0 rounded-lg bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-bold text-[#0d6e5a]">
+                      {pet._count?.appointments ?? 0} visitas
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                    <span className="rounded-md bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-semibold text-[#0d6e5a]">
+                      {shortSizeLabel(pet.size)}
+                    </span>
+                    <span>·</span>
+                    <span>{speciesLabel(pet.species)} {pet.breed || 'SRD'}</span>
+                    <span>·</span>
+                    <span>Tutor: {pet.customer?.name || 'Não informado'}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 pt-0.5 text-[11px]">
+                    <span className={isInactive ? 'font-bold text-amber-700' : 'text-zinc-500'}>
+                      {lastDateStr ? `Última: ${lastDateStr}${isInactive ? ` (${days}d)` : ''}` : activePkg ? activePkg.planNameSnapshot : 'Sem histórico'}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/petshop/agenda?new=1&petId=${pet.id}`)}
+                      className="rounded-lg bg-[#0d6e5a] px-3 py-1.5 text-xs font-semibold text-white"
+                    >
+                      + Agendar
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          <div className="hidden md:block overflow-hidden rounded-2xl border border-zinc-200 bg-white shadow-xs">
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs">
                 <thead className="border-b border-zinc-200 bg-zinc-50 text-[11px] font-bold uppercase tracking-wider text-zinc-600">

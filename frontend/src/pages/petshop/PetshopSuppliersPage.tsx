@@ -133,6 +133,29 @@ export default function PetshopSuppliersPage() {
 
   return (
     <div className={pageClass}>
+      <div className="mb-3.5 space-y-3 md:hidden">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-black tracking-tight text-zinc-900">Fornecedores</h1>
+              <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+                {suppliers.length}
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs font-medium text-zinc-500">Distribuidores e catálogos</p>
+          </div>
+          <button
+            type="button"
+            onClick={openNewModal}
+            className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3.5 text-xs font-semibold text-white shadow-xs"
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Novo
+          </button>
+        </div>
+      </div>
+
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Compras e Parcerias"
         title="Fornecedores"
@@ -148,6 +171,8 @@ export default function PetshopSuppliersPage() {
           </button>
         }
       />
+
+      </div>
 
       <CatalogTabs />
 

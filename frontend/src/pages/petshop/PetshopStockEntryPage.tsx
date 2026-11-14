@@ -184,6 +184,39 @@ export default function PetshopStockEntryPage() {
 
   return (
     <div className={pageClass}>
+      <div className="mb-3.5 space-y-3 md:hidden">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900">Entrada / Lotes</h1>
+            <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+              {rows.length} na fila
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-zinc-500">Recebimento de mercadorias e lotes</p>
+        </div>
+
+        <div className="grid grid-cols-[auto_1fr] gap-2.5">
+          <button
+            type="button"
+            onClick={() => setShowPackagingsModal(true)}
+            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 text-xs font-semibold text-zinc-700"
+          >
+            <Box size={15} />
+            Embalagens
+          </button>
+          <button
+            type="button"
+            onClick={confirmAllEntries}
+            disabled={savingAll || rows.length === 0}
+            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs disabled:opacity-50"
+          >
+            <CheckCircle2 size={15} />
+            Confirmar Todas ({rows.length})
+          </button>
+        </div>
+      </div>
+
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Rastreabilidade e Validade"
         title="Entrada de Estoque & Lotes"
@@ -219,6 +252,8 @@ export default function PetshopStockEntryPage() {
           </div>
         }
       />
+
+      </div>
 
       <CatalogTabs />
 

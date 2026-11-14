@@ -819,6 +819,116 @@ export default function PetshopPackagesPage() {
 
   return (
     <div className={pageClass}>
+      {/* ===================================================================== */}
+      {/* VISÃO MOBILE: Cabeçalho, KPI compacto e navegação por pílulas         */}
+      {/* ===================================================================== */}
+      <div className="space-y-3.5 pb-4 md:hidden">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900">Pacotes</h1>
+            <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+              {contracts.length} {contracts.length === 1 ? 'contrato' : 'contratos'}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-zinc-500">
+            Planos recorrentes, saldos e renovações
+          </p>
+        </div>
+
+        {/* Barra de resumo compacta (2 colunas) */}
+        <div className="grid grid-cols-2 divide-x divide-zinc-200/70 rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+              <Wallet size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Pacotes pagos</p>
+              <p className="truncate text-base font-extrabold leading-tight text-zinc-900 tabular-nums">
+                {money(financialOverview?.totals?.totalSoldPaid || 0)}
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+              <Box size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Ativos / Renovar</p>
+              <p className="text-base font-extrabold leading-tight text-zinc-900 tabular-nums">
+                {financialOverview?.totals?.activeContractsCount || 0}{' '}
+                <span className="text-xs font-semibold text-amber-700">
+                  · {financialOverview?.renewalOpportunities?.length || 0}
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* Ações principais compactas */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={handleOpenNewPlan}
+            className="flex h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-[#0d6e5a]/25 bg-[#e8f5ef] px-3 text-xs font-bold text-[#0d6e5a]"
+          >
+            <Layers size={15} />
+            Novo Plano
+          </button>
+          <button
+            type="button"
+            onClick={() => handleOpenNewContract()}
+            className="flex h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs"
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Contratar Pacote
+          </button>
+        </div>
+
+        {/* Pílulas de aba horizontais */}
+        <div className="flex items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button
+            type="button"
+            onClick={() => setActiveTab('contracts')}
+            className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+              activeTab === 'contracts'
+                ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                : 'border-zinc-200 bg-white text-zinc-700'
+            }`}
+          >
+            <PackageCheck size={14} />
+            Contratos ({contracts.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('catalog')}
+            className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+              activeTab === 'catalog'
+                ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                : 'border-zinc-200 bg-white text-zinc-700'
+            }`}
+          >
+            <Layers size={14} />
+            Catálogo ({plans.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('renewals')}
+            className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+              activeTab === 'renewals'
+                ? 'border-amber-600 bg-amber-600 text-white shadow-2xs'
+                : 'border-zinc-200 bg-white text-zinc-700'
+            }`}
+          >
+            <AlertTriangle size={14} />
+            Renovação ({financialOverview?.renewalOpportunities?.length || 0})
+          </button>
+        </div>
+      </div>
+
+      {/* ===================================================================== */}
+      {/* VISÃO DESKTOP: Cabeçalho, 4 KPIs e Abas                              */}
+      {/* ===================================================================== */}
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Recorrência, Fidelização & Controle de Sessões"
         title="Pacotes de Clientes"
@@ -958,6 +1068,8 @@ export default function PetshopPackagesPage() {
           <AlertTriangle size={16} />
           <span>Fila de Renovação ({financialOverview?.renewalOpportunities?.length || 0})</span>
         </button>
+      </div>
+
       </div>
 
       {loading ? (

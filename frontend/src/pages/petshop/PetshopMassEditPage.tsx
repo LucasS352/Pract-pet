@@ -3,7 +3,7 @@ import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import {
   Save, RefreshCw, Search, Loader2, CheckCircle2,
-  Package, Camera, Box, Sparkles
+  Package, Camera, Box, Sparkles, X
 } from 'lucide-react';
 import { CatalogTabs, PageHeader, pageClass, primaryButton, secondaryButton, inputClass } from './ui';
 import { money } from './types';
@@ -157,6 +157,216 @@ export default function PetshopMassEditPage() {
 
   return (
     <div className={pageClass}>
+      {/* ===================================================================== */}
+      {/* VISÃO MOBILE: Edição em lote por cards organizados                    */}
+      {/* ===================================================================== */}
+      <div className="space-y-3.5 pb-6 md:hidden">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900">Edição em Massa</h1>
+            <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+              {products.length} itens
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-zinc-500">
+            Atualize preços, saldos e códigos em lote
+          </p>
+        </div>
+
+        <CatalogTabs />
+
+        <div className="grid grid-cols-2 divide-x divide-zinc-200/70 rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+              <Box size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Exibindo</p>
+              <p className="text-lg font-extrabold leading-tight text-zinc-900">{filtered.length}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${dirtyCount > 0 ? 'bg-amber-50 text-amber-700' : 'bg-[#e8f5ef] text-[#0d6e5a]'}`}>
+              <Save size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Pendentes</p>
+              <p className={`text-lg font-extrabold leading-tight ${dirtyCount > 0 ? 'text-amber-700' : 'text-zinc-900'}`}>{dirtyCount}</p>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-[auto_1fr] gap-2.5">
+          <button
+            type="button"
+            onClick={load}
+            disabled={loading}
+            className="flex h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3.5 text-xs font-semibold text-zinc-700 disabled:opacity-50"
+          >
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+            Atualizar
+          </button>
+          <button
+            type="button"
+            onClick={saveAllDirty}
+            disabled={savingAll || dirtyCount === 0}
+            className="flex h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-4 text-xs font-semibold text-white shadow-xs disabled:opacity-50"
+          >
+            {savingAll ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+            {savingAll ? 'Salvando...' : `Salvar alterações${dirtyCount > 0 ? ` (${dirtyCount})` : ''}`}
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          <button
+            type="button"
+            onClick={() => setFilterCat('')}
+            className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+              filterCat === '' ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white' : 'border-zinc-200 bg-white text-zinc-700'
+            }`}
+          >
+            Todas ({products.length})
+          </button>
+          {categories.map(c => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setFilterCat(c.id)}
+              className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                filterCat === c.id ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white' : 'border-zinc-200 bg-white text-zinc-700'
+              }`}
+            >
+              {c.name}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative flex items-center">
+          <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar produto ou código de barras..."
+            className="h-10 w-full rounded-xl border border-zinc-200 bg-white pr-9 pl-9 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch('')} className="absolute right-2.5 text-zinc-400">
+              <X size={15} />
+            </button>
+          )}
+        </div>
+
+        {loading ? (
+          <div className="flex h-40 items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white text-xs text-zinc-500">
+            <Loader2 size={18} className="animate-spin text-[#0d6e5a]" />
+            Carregando catálogo...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-6 text-center text-xs text-zinc-500">
+            Nenhum produto encontrado.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {filtered.map(row => (
+              <article
+                key={row.id}
+                className={`rounded-2xl border bg-white p-3.5 shadow-2xs space-y-2.5 ${
+                  row.dirty ? 'border-amber-300 bg-amber-50/20' : row.saved ? 'border-emerald-300 bg-emerald-50/20' : 'border-zinc-200/80'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <span className={`h-4 w-[3px] shrink-0 rounded-full ${row.dirty ? 'bg-amber-500' : 'bg-[#0d6e5a]'}`} />
+                  <input
+                    type="text"
+                    value={row.name}
+                    onChange={e => updateField(row.id, 'name', e.target.value)}
+                    className="h-9 min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-2.5 text-xs font-bold text-zinc-900 outline-none focus:border-[#0d6e5a]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void saveRow(row)}
+                    disabled={row.saving || (!row.dirty && !row.saved)}
+                    className={`inline-flex h-9 shrink-0 items-center gap-1 rounded-lg px-2.5 text-xs font-semibold ${
+                      row.saved
+                        ? 'bg-[#e6f4ef] text-[#0d6e5a]'
+                        : row.dirty
+                        ? 'bg-[#0d6e5a] text-white'
+                        : 'border border-zinc-200 bg-zinc-50 text-zinc-400'
+                    }`}
+                  >
+                    {row.saving ? <Loader2 size={13} className="animate-spin" /> : row.saved ? <CheckCircle2 size={13} /> : <Save size={13} />}
+                    {row.saved ? 'Salvo' : 'Salvar'}
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-medium text-zinc-500">Custo (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={row.priceCost}
+                      onChange={e => updateField(row.id, 'priceCost', e.target.value)}
+                      className="h-9 w-full rounded-lg border border-zinc-200 bg-white px-2 text-xs font-medium outline-none focus:border-[#0d6e5a]"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-medium text-zinc-500">Venda (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      inputMode="decimal"
+                      value={row.priceSell}
+                      onChange={e => updateField(row.id, 'priceSell', e.target.value)}
+                      className="h-9 w-full rounded-lg border border-zinc-200 bg-white px-2 text-xs font-bold text-[#0d6e5a] outline-none focus:border-[#0d6e5a]"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-0.5 block text-[10px] font-medium text-zinc-500">Saldo</label>
+                    <input
+                      type="number"
+                      step="1"
+                      inputMode="decimal"
+                      value={row.stock}
+                      onChange={e => updateField(row.id, 'stock', e.target.value)}
+                      className={`h-9 w-full rounded-lg border border-zinc-200 bg-white px-2 text-xs font-bold outline-none focus:border-[#0d6e5a] ${
+                        Number(row.stock) <= 0 ? 'text-rose-600' : 'text-zinc-900'
+                      }`}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={row.categoryId}
+                    onChange={e => updateField(row.id, 'categoryId', e.target.value)}
+                    className="h-9 w-full rounded-lg border border-zinc-200 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-[#0d6e5a]"
+                  >
+                    <option value="">Sem categoria</option>
+                    {categories.map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Cód. barras"
+                    value={row.barcode || ''}
+                    onChange={e => updateField(row.id, 'barcode', e.target.value)}
+                    className="h-9 w-full rounded-lg border border-zinc-200 bg-white px-2 text-xs text-zinc-700 outline-none focus:border-[#0d6e5a]"
+                  />
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ===================================================================== */}
+      {/* VISÃO DESKTOP                                                         */}
+      {/* ===================================================================== */}
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Catálogo compartilhado com o PDV"
         title="Edição em Massa"
@@ -415,6 +625,7 @@ export default function PetshopMassEditPage() {
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 }

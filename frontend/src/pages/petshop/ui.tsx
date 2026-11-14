@@ -278,11 +278,13 @@ export function ListSkeleton({ rows = 4 }: { rows?: number }) {
 
 export function CatalogTabs() {
   const tabClass = ({ isActive }: { isActive: boolean }) =>
-    `flex min-h-10 items-center justify-center rounded-lg px-3.5 text-xs sm:text-sm font-semibold transition whitespace-nowrap ${
-      isActive ? 'bg-[var(--pc-text)] text-white shadow-xs' : 'text-[var(--pc-text-secondary)] hover:bg-white hover:text-[var(--pc-text)]'
+    `flex shrink-0 items-center justify-center whitespace-nowrap font-semibold transition ${
+      isActive
+        ? 'rounded-full border border-[#0d6e5a] bg-[#0d6e5a] px-3.5 py-1.5 text-xs text-white shadow-2xs md:min-h-10 md:rounded-lg md:border-transparent md:bg-[var(--pc-text)] md:text-sm md:shadow-xs'
+        : 'rounded-full border border-zinc-200 bg-white px-3.5 py-1.5 text-xs text-zinc-700 md:min-h-10 md:rounded-lg md:border-transparent md:bg-transparent md:text-[var(--pc-text-secondary)] md:text-sm md:hover:bg-white md:hover:text-[var(--pc-text)]'
     }`;
   return (
-    <nav aria-label="Seções do catálogo e estoque" className="mb-5 flex w-full items-center gap-1.5 overflow-x-auto no-scrollbar rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-1.5">
+    <nav aria-label="Seções do catálogo e estoque" className="mb-4 flex w-full items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:mb-5 md:gap-1.5 md:rounded-xl md:border md:border-[var(--pc-border)] md:bg-[var(--pc-surface-subtle)] md:p-1.5">
       <NavLink to="/petshop/servicos" className={tabClass}>Serviços</NavLink>
       <NavLink to="/petshop/produtos" className={tabClass}>Produtos</NavLink>
       <NavLink to="/petshop/edicao-massa" className={tabClass}>Edição em Massa</NavLink>

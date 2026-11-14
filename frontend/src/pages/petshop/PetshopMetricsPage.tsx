@@ -202,6 +202,150 @@ export default function PetshopMetricsPage() {
 
   return (
     <div className={pageClass}>
+      {/* ===================================================================== */}
+      {/* VISÃO MOBILE: Cabeçalho, Pílulas de Período e KPI Compacto            */}
+      {/* ===================================================================== */}
+      <div className="mb-5 space-y-3.5 md:hidden">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900">Métricas</h1>
+            <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+              {data?.totals.totalTransactions || 0} vendas
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-zinc-500">
+            Faturamento, serviços e horários de pico
+          </p>
+        </div>
+
+        {/* Barra de resumo compacta 2x2 */}
+        <div className="divide-y divide-zinc-200/70 rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <div className="grid grid-cols-2 divide-x divide-zinc-200/70">
+            <div className="flex items-center gap-2.5 px-3.5 py-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+                <DollarSign size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-medium text-zinc-500">Faturamento</p>
+                <p className="truncate text-sm font-extrabold text-zinc-900 tabular-nums">
+                  {data ? money(data.totals.totalRevenue) : 'R$ 0,00'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5 px-3.5 py-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+                <Scissors size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-medium text-zinc-500">Banho & Tosa</p>
+                <p className="truncate text-sm font-extrabold text-zinc-900 tabular-nums">
+                  {data?.totals.appointmentsCount || 0} pets
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-zinc-200/70">
+            <div className="flex items-center gap-2.5 px-3.5 py-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-purple-50 text-purple-700">
+                <Package size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-medium text-zinc-500">Pacotes</p>
+                <p className="truncate text-sm font-extrabold text-zinc-900 tabular-nums">
+                  {data ? money(data.totals.packageSalesRevenue || 0) : 'R$ 0,00'}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2.5 px-3.5 py-3">
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+                <Receipt size={16} />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-medium text-zinc-500">Ticket Médio</p>
+                <p className="truncate text-sm font-extrabold text-zinc-900 tabular-nums">
+                  {data ? money(data.totals.averageTicket) : 'R$ 0,00'}
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Botões Exportar e Atualizar */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={exportMetricsCsv}
+            disabled={!data || loading}
+            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 disabled:opacity-50"
+          >
+            <Download size={14} />
+            Exportar CSV
+          </button>
+          <button
+            type="button"
+            onClick={fetchMetrics}
+            disabled={loading}
+            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Atualizar
+          </button>
+        </div>
+
+        {/* Pílulas de período */}
+        <div className="flex items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {[
+            { key: 'today', label: 'Hoje' },
+            { key: 'yesterday', label: 'Ontem' },
+            { key: 'week', label: '7 dias' },
+            { key: 'month', label: 'Este mês' },
+            { key: 'last_month', label: 'Mês anterior' },
+            { key: 'year', label: 'Este ano' },
+            { key: 'custom', label: 'Personalizado' },
+          ].map(item => (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setPeriod(item.key as typeof period)}
+              className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                period === item.key
+                  ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                  : 'border-zinc-200 bg-white text-zinc-700'
+              }`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+
+        {period === 'custom' && (
+          <div className="grid grid-cols-2 gap-2 rounded-2xl border border-zinc-200/80 bg-white p-3">
+            <input
+              type="date"
+              value={customFrom}
+              onChange={e => setCustomFrom(e.target.value)}
+              className="h-9 rounded-xl border border-zinc-200 px-2.5 text-xs"
+            />
+            <input
+              type="date"
+              value={customTo}
+              onChange={e => setCustomTo(e.target.value)}
+              className="h-9 rounded-xl border border-zinc-200 px-2.5 text-xs"
+            />
+            <button
+              type="button"
+              onClick={fetchMetrics}
+              disabled={loading || !customFrom || !customTo}
+              className="col-span-2 h-9 rounded-xl bg-[#0d6e5a] text-xs font-semibold text-white disabled:opacity-50"
+            >
+              Filtrar Período
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* VISÃO DESKTOP: Cabeçalho, Filtro de Período e 4 KPIs */}
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Área de Atendimento e Gestão"
         title="Métricas do Pet Shop"
@@ -426,6 +570,8 @@ export default function PetshopMetricsPage() {
           </div>
         </div>
       </section>
+
+      </div>
 
       {/* 3. GRÁFICO DOS HORÁRIOS MAIS MOVIMENTADOS DO PET SHOP (AMPLO, CLARO E TONALIDADE DO PET) */}
       <section

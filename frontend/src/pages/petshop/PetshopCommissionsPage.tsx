@@ -9,6 +9,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock,
   Coins,
   CreditCard,
@@ -17,24 +18,32 @@ import {
   FileText,
   Filter,
   History,
+  Layers,
+  List,
   PawPrint,
+  Pencil,
   Percent,
   Plus,
   RotateCcw,
   Scissors,
+  Search,
   Settings2,
   Tag,
   Trash2,
   User,
   Users,
+  Workflow,
+  X,
   XCircle,
 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { PageHeader, pageClass, TeamTabs } from './ui';
 import {
   type CommissionRule as Rule,
+  PET_SIZE_OPTIONS,
   SIZE_LABEL_MAP as sizeLabelMap,
   formatCommissionBrl as brl,
+  formatRuleValue,
   resolveStageLabel,
 } from './commissionRulesUtils';
 
@@ -99,12 +108,19 @@ export default function PetshopCommissionsPage() {
   const [operators, setOperators] = useState<{ id: string; name: string }[]>([]);
   const [services, setServices] = useState<{ id: string; name: string }[]>([]);
   const [stages, setStages] = useState<{ key: string; label: string; trackProfessional?: boolean }[]>([]);
-  const [rule, setRule] = useState({ stageKey: '', serviceId: '', operatorId: '', size: 'all', kind: 'NONE', value: '0' });
+  const [rule, setRule] = useState({ stageKey: '', serviceId: '', operatorId: '', size: 'all', kind: 'FIXED', value: '0' });
+  const [editingRuleId, setEditingRuleId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [showFullExtract, setShowFullExtract] = useState(false);
   const [showRulesConfig, setShowRulesConfig] = useState(false);
   const [showAdjustments, setShowAdjustments] = useState(false);
   const [showClosingsHistory, setShowClosingsHistory] = useState(false);
+  const [mobileFormOpen, setMobileFormOpen] = useState(true);
+  const [mobileMoreOptions, setMobileMoreOptions] = useState(false);
+  const [mobileStageFilter, setMobileStageFilter] = useState('ALL');
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [mobileRuleSearch, setMobileRuleSearch] = useState('');
+  const [mobilePeriodOpen, setMobilePeriodOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -157,19 +173,64 @@ export default function PetshopCommissionsPage() {
     return max > 0 ? max : 1;
   }, [report]);
 
+  const configuredStagesCount = useMemo(() => {
+    return new Set(rules.map(r => r.stageKey)).size;
+  }, [rules]);
+
+  const stageFilterOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const r of rules) {
+      counts.set(r.stageKey, (counts.get(r.stageKey) || 0) + 1);
+    }
+    return Array.from(counts.entries()).map(([key, count]) => ({
+      key,
+      label: resolveStageLabel(key, stages),
+      count,
+    }));
+  }, [rules, stages]);
+
+  const filteredMobileRules = useMemo(() => {
+    const q = mobileRuleSearch.trim().toLowerCase();
+    return rules.filter(r => {
+      if (mobileStageFilter !== 'ALL' && r.stageKey !== mobileStageFilter) return false;
+      if (!q) return true;
+      const stageLabel = resolveStageLabel(r.stageKey, stages).toLowerCase();
+      const sizeText = (sizeLabelMap[r.size || 'all'] || 'Todos os portes').toLowerCase();
+      const serviceText = (services.find(s => s.id === r.serviceId)?.name || 'Todos os serviços').toLowerCase();
+      const operatorText = (operators.find(o => o.id === r.operatorId)?.name || 'Qualquer profissional').toLowerCase();
+      const valueText = formatRuleValue(r.kind, r.value).toLowerCase();
+      return (
+        stageLabel.includes(q) ||
+        sizeText.includes(q) ||
+        serviceText.includes(q) ||
+        operatorText.includes(q) ||
+        valueText.includes(q)
+      );
+    });
+  }, [rules, mobileStageFilter, mobileRuleSearch, stages, services, operators]);
+
+  const resetRuleForm = () => {
+    setEditingRuleId(null);
+    setRule({ stageKey: '', serviceId: '', operatorId: '', size: 'all', kind: 'FIXED', value: '0' });
+  };
+
   const saveRule = async () => {
     if (!rule.stageKey) return toast.error('Selecione a etapa.');
+    const normalizedVal = rule.kind === 'NONE'
+      ? '0'
+      : String(Number(String(rule.value || '0').replace(',', '.')) || 0);
     setBusy(true);
     try {
       await api.post('/petshop/commissions/rules', {
         ...rule,
+        value: normalizedVal,
         serviceId: rule.serviceId || null,
         operatorId: rule.stageKey === 'service_added' ? null : (rule.operatorId || null),
         size: rule.stageKey === 'service_added' ? 'all' : (rule.size || 'all'),
       });
       toast.success('Regra de comissão salva.');
       await load();
-      setRule({ stageKey: '', serviceId: '', operatorId: '', size: 'all', kind: 'NONE', value: '0' });
+      resetRuleForm();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Não foi possível salvar a regra.');
     } finally {
@@ -178,6 +239,7 @@ export default function PetshopCommissionsPage() {
   };
 
   const editRuleInForm = (r: Rule) => {
+    setEditingRuleId(r.id);
     setRule({
       stageKey: r.stageKey,
       serviceId: r.serviceId || '',
@@ -187,6 +249,8 @@ export default function PetshopCommissionsPage() {
       value: String(Number(r.value || 0)),
     });
     setShowRulesConfig(true);
+    setMobileFormOpen(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     toast.info('Regra carregada nos campos acima para edição.');
   };
 
@@ -316,7 +380,576 @@ export default function PetshopCommissionsPage() {
   };
 
   return (
-    <div className={`${pageClass} space-y-5 text-zinc-900`}>
+    <div className={`${pageClass} text-zinc-900`}>
+      {/* ===================================================================== */}
+      {/* VISÃO MOBILE (Padrão organizado com cards, KPI compacto e filtros)    */}
+      {/* ===================================================================== */}
+      <div className="space-y-4 pb-6 md:hidden">
+        {/* Cabeçalho mobile */}
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900">Comissões</h1>
+            <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+              {rules.length} {rules.length === 1 ? 'regra' : 'regras'}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-zinc-500">
+            Regras por etapa, porte e profissional
+          </p>
+        </div>
+
+        {/* Barra de resumo compacta (2 colunas) */}
+        <div className="grid grid-cols-2 divide-x divide-zinc-200/70 rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+              <Layers size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Regras ativas</p>
+              <p className="text-lg font-extrabold leading-tight text-zinc-900">{rules.length}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+              <Workflow size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Etapas configuradas</p>
+              <p className="text-lg font-extrabold leading-tight text-zinc-900">{configuredStagesCount}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Card colapsável: Nova / Editar regra de comissão */}
+        <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setMobileFormOpen(v => !v)}
+            className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left transition active:bg-zinc-50"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0d6e5a] text-white shadow-2xs">
+                <Tag size={18} />
+              </div>
+              <div className="min-w-0">
+                <h2 className="truncate text-[15px] font-bold text-zinc-900">
+                  {editingRuleId ? 'Editar regra de comissão' : 'Nova regra de comissão'}
+                </h2>
+                <p className="truncate text-xs text-zinc-500">Defina quando e quanto pagar</p>
+              </div>
+            </div>
+            {mobileFormOpen ? (
+              <ChevronUp size={18} className="shrink-0 text-zinc-400" />
+            ) : (
+              <ChevronDown size={18} className="shrink-0 text-zinc-400" />
+            )}
+          </button>
+
+          {mobileFormOpen && (
+            <div className="space-y-3 border-t border-zinc-100 px-4 pt-3 pb-4">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">
+                    Etapa <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+                    value={rule.stageKey}
+                    onChange={e => setRule({ ...rule, stageKey: e.target.value })}
+                  >
+                    <option value="">Selecione</option>
+                    {stages
+                      .filter(s => s.trackProfessional)
+                      .map(s => (
+                        <option key={s.key} value={s.key}>
+                          {s.label}
+                        </option>
+                      ))}
+                    <option value="service_added">Serviço Extra Adicionado</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">
+                    Tipo <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+                    value={rule.kind}
+                    onChange={e => setRule({ ...rule, kind: e.target.value, value: e.target.value === 'NONE' ? '0' : rule.value })}
+                  >
+                    <option value="FIXED">Valor fixo</option>
+                    {rule.stageKey !== 'service_added' && <option value="PERCENT">Percentual (%)</option>}
+                    <option value="NONE">Sem comissão</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">Serviço</label>
+                  <select
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+                    value={rule.serviceId}
+                    onChange={e => setRule({ ...rule, serviceId: e.target.value })}
+                  >
+                    <option value="">Todos os serviços</option>
+                    {services.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">Porte</label>
+                  <select
+                    disabled={rule.stageKey === 'service_added'}
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-60"
+                    value={rule.stageKey === 'service_added' ? 'all' : rule.size}
+                    onChange={e => setRule({ ...rule, size: e.target.value })}
+                  >
+                    {PET_SIZE_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">Profissional</label>
+                  <select
+                    disabled={rule.stageKey === 'service_added'}
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-60"
+                    value={rule.stageKey === 'service_added' ? '' : rule.operatorId}
+                    onChange={e => setRule({ ...rule, operatorId: e.target.value })}
+                  >
+                    <option value="">Todos os profissionais</option>
+                    {operators.map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">
+                    Valor da comissão <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative flex items-center">
+                    {rule.kind === 'FIXED' && (
+                      <span className="pointer-events-none absolute left-2.5 text-xs font-semibold text-zinc-500">
+                        R$
+                      </span>
+                    )}
+                    <input
+                      className={`h-10 w-full rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-900 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-50 ${
+                        rule.kind === 'FIXED' ? 'pl-8 pr-2.5' : rule.kind === 'PERCENT' ? 'pl-2.5 pr-7' : 'px-2.5'
+                      }`}
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max={rule.kind === 'PERCENT' ? 100 : undefined}
+                      step="0.01"
+                      disabled={rule.kind === 'NONE'}
+                      placeholder="0,00"
+                      value={rule.value}
+                      onChange={e => setRule({ ...rule, value: e.target.value })}
+                    />
+                    {rule.kind === 'PERCENT' && (
+                      <span className="pointer-events-none absolute right-2.5 text-xs font-semibold text-zinc-500">
+                        %
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMobileMoreOptions(v => !v)}
+                  className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-[#0d6e5a]"
+                >
+                  Mais opções
+                  <ChevronDown size={14} className={`transition ${mobileMoreOptions ? 'rotate-180' : ''}`} />
+                </button>
+                {editingRuleId && (
+                  <button
+                    type="button"
+                    onClick={resetRuleForm}
+                    className="cursor-pointer text-xs font-semibold text-zinc-500 underline"
+                  >
+                    Cancelar edição
+                  </button>
+                )}
+              </div>
+
+              {mobileMoreOptions && (
+                <div className="space-y-2 rounded-xl border border-emerald-100 bg-[#f4fbf8] p-3 text-xs text-zinc-600">
+                  <p className="leading-relaxed">
+                    <strong className="text-[#0d6e5a]">Prioridade automática:</strong> regras específicas por{' '}
+                    <strong>Profissional + Porte + Serviço</strong> têm precedência sobre regras gerais.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={resetRuleForm}
+                      className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700"
+                    >
+                      Limpar formulário
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMobilePeriodOpen(true)}
+                      className="rounded-lg border border-[#0d6e5a]/25 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0d6e5a]"
+                    >
+                      Ver resumo do período
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveRule}
+                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0d6e5a] px-4 text-sm font-semibold text-white shadow-xs transition active:scale-[0.99] disabled:opacity-50"
+              >
+                <Plus size={16} strokeWidth={2.5} />
+                {editingRuleId ? 'Salvar alterações' : 'Salvar regra'}
+              </button>
+            </div>
+          )}
+        </section>
+
+        {/* Seção: Regras cadastradas */}
+        <section className="space-y-3 pt-0.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <List size={18} className="text-[#0d6e5a]" />
+              <h2 className="text-[15px] font-bold text-zinc-900">Regras cadastradas</h2>
+            </div>
+          </div>
+
+          {/* Pills de filtro por etapa + ícone de busca */}
+          <div className="flex items-center gap-2">
+            <div className="flex flex-1 items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileStageFilter('ALL')}
+                className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                  mobileStageFilter === 'ALL'
+                    ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                    : 'border-zinc-200 bg-white text-zinc-700'
+                }`}
+              >
+                Todas ({rules.length})
+              </button>
+              {stageFilterOptions.map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setMobileStageFilter(opt.key)}
+                  className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                    mobileStageFilter === opt.key
+                      ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                      : 'border-zinc-200 bg-white text-zinc-700'
+                  }`}
+                >
+                  {opt.label} ({opt.count})
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileSearchOpen(v => !v)}
+              aria-label="Buscar regra"
+              className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition ${
+                mobileSearchOpen || mobileRuleSearch
+                  ? 'border-[#0d6e5a] bg-[#e6f4ef] text-[#0d6e5a]'
+                  : 'border-zinc-200 bg-white text-zinc-600'
+              }`}
+            >
+              <Search size={16} />
+            </button>
+          </div>
+
+          {mobileSearchOpen && (
+            <div className="relative flex items-center">
+              <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
+              <input
+                type="text"
+                value={mobileRuleSearch}
+                onChange={e => setMobileRuleSearch(e.target.value)}
+                placeholder="Buscar por etapa, porte, serviço ou profissional..."
+                className="h-10 w-full rounded-xl border border-zinc-200 bg-white pr-9 pl-9 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+              />
+              {mobileRuleSearch && (
+                <button
+                  type="button"
+                  onClick={() => setMobileRuleSearch('')}
+                  aria-label="Limpar busca"
+                  className="absolute right-2.5 text-zinc-400 hover:text-zinc-700"
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Lista de cards das regras */}
+          <div className="space-y-2.5">
+            {filteredMobileRules.map(r => {
+              const stageTitle = resolveStageLabel(r.stageKey, stages);
+              const sizeText = r.size && r.size !== 'all' ? (sizeLabelMap[r.size] || r.size) : '';
+              const porteBadge = sizeLabelMap[r.size || 'all'] || 'Todos os portes';
+              const serviceName = services.find(s => s.id === r.serviceId)?.name || 'Todos os serviços';
+              const operatorName = operators.find(o => o.id === r.operatorId)?.name || 'Qualquer profissional';
+
+              return (
+                <article
+                  key={r.id}
+                  className="rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-4 w-[3px] shrink-0 rounded-full bg-[#0d6e5a]" />
+                      <h3 className="truncate text-[15px] font-bold text-zinc-900">
+                        {stageTitle}
+                        {sizeText ? ` — ${sizeText}` : ''}
+                      </h3>
+                    </div>
+                    <span className="shrink-0 rounded-lg bg-[#e6f4ef] px-2.5 py-1 text-xs font-extrabold text-[#0d6e5a]">
+                      {formatRuleValue(r.kind, r.value)}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                    <span className="rounded-md bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-semibold text-[#0d6e5a]">
+                      {porteBadge}
+                    </span>
+                    <span className="text-zinc-400">·</span>
+                    <span className="text-zinc-600">{serviceName}</span>
+                    <span className="text-zinc-400">·</span>
+                    <span className="text-zinc-600">{operatorName}</span>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => editRuleInForm(r)}
+                      className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                    >
+                      <Pencil size={13} />
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => deleteRule(r)}
+                      className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-rose-200 hover:text-rose-600 disabled:opacity-50"
+                    >
+                      <Trash2 size={13} />
+                      Excluir
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+
+            {!filteredMobileRules.length && (
+              <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-6 text-center text-xs text-zinc-500">
+                Nenhuma regra encontrada para o filtro selecionado.
+              </div>
+            )}
+          </div>
+        </section>
+
+        {/* Acordeão mobile: Fechamento & Extrato do Período (colapsado por padrão para preservar visão limpa) */}
+        <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setMobilePeriodOpen(v => !v)}
+            className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <Coins size={18} className="shrink-0 text-[#0d6e5a]" />
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-bold text-zinc-900">Fechamento & Extrato ({period})</h2>
+                <p className="truncate text-[11px] text-zinc-500">
+                  {report ? `Comissões: ${brl(report.totals.generated)}` : 'Conferência e pagamentos do período'}
+                </p>
+              </div>
+            </div>
+            <ChevronDown size={18} className={`shrink-0 text-zinc-400 transition ${mobilePeriodOpen ? 'rotate-180' : ''}`} />
+          </button>
+
+          {mobilePeriodOpen && report && (
+            <div className="space-y-4 border-t border-zinc-100 p-4">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-500">Período</label>
+                  <input
+                    type="month"
+                    value={period}
+                    onChange={e => setPeriod(e.target.value)}
+                    className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-500">Profissional</label>
+                  <select
+                    value={operatorId}
+                    onChange={e => setOperatorId(e.target.value)}
+                    className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
+                  >
+                    <option value="">Todos</option>
+                    {operators.map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-500">Serviço</label>
+                  <select
+                    value={serviceId}
+                    onChange={e => setServiceId(e.target.value)}
+                    className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
+                  >
+                    <option value="">Todos</option>
+                    {services.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-500">Situação</label>
+                  <select
+                    value={state}
+                    onChange={e => setState(e.target.value)}
+                    className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
+                  >
+                    <option value="">Todas</option>
+                    <option value="PENDING">Pendente</option>
+                    <option value="APPROVED">Aprovada</option>
+                    <option value="PAID">Paga</option>
+                    <option value="REVERSED">Estornada</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl bg-zinc-50 p-2.5">
+                  <p className="text-[11px] text-zinc-500">Pago</p>
+                  <p className="text-sm font-extrabold text-zinc-900">{brl(report.totals.paid)}</p>
+                </div>
+                <div className="rounded-xl bg-[#f4fbf8] p-2.5">
+                  <p className="text-[11px] text-[#0d6e5a]">Comissões</p>
+                  <p className="text-sm font-extrabold text-[#0d6e5a]">{brl(report.totals.generated)}</p>
+                </div>
+                <div className="rounded-xl bg-amber-50/70 p-2.5">
+                  <p className="text-[11px] text-amber-800">Pendentes</p>
+                  <p className="text-sm font-extrabold text-amber-900">{brl(report.totals.pending)}</p>
+                </div>
+                <div className="rounded-xl bg-emerald-50/70 p-2.5">
+                  <p className="text-[11px] text-emerald-800">Aprovadas</p>
+                  <p className="text-sm font-extrabold text-emerald-900">{brl(report.totals.approved)}</p>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {(!currentClosing || currentClosing.state === 'OPEN') && (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => act('/petshop/commissions/period/close', { period })}
+                    className="flex-1 rounded-xl bg-[#0d6e5a] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                  >
+                    Fechar período
+                  </button>
+                )}
+                {currentClosing?.state === 'CLOSED' && (
+                  <>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        const paymentRef = window.prompt('Comprovante / Referência (opcional):') || '';
+                        void act('/petshop/commissions/period/pay', { period, paymentRef });
+                      }}
+                      className="flex-1 rounded-xl bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    >
+                      Marcar pago
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        const reason = window.prompt('Motivo da reabertura:');
+                        if (reason) void act('/petshop/commissions/period/reopen', { period, reason });
+                      }}
+                      className="rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700"
+                    >
+                      Reabrir
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={exportCsv}
+                  className="inline-flex items-center gap-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700"
+                >
+                  <Download size={13} /> CSV
+                </button>
+              </div>
+
+              {/* Cards do extrato */}
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-zinc-700">Lançamentos ({report.rows.length})</p>
+                {report.rows.slice(0, showFullExtract ? 50 : 6).map(r => (
+                  <div key={r.id} className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-3 text-xs space-y-1.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-bold text-zinc-900">{r.operator.name}</p>
+                        <p className="truncate text-[11px] text-zinc-500">
+                          {r.appointment.pet.name} · {r.appointmentService.nameSnapshot}
+                        </p>
+                      </div>
+                      <span className="shrink-0 font-extrabold text-[#0d6e5a]">{brl(r.amount)}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-2">
+                      {renderBadge(r.state)}
+                      <span className="text-[11px] text-zinc-500">
+                        {new Date(r.executedAt).toLocaleDateString('pt-BR')} · {resolveStageLabel(r.stageKey, stages)}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+                {report.rows.length > 6 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowFullExtract(v => !v)}
+                    className="w-full rounded-xl border border-zinc-200 py-2 text-xs font-semibold text-zinc-700"
+                  >
+                    {showFullExtract ? 'Ver menos lançamentos' : `Ver todos (${report.rows.length})`}
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+
+      {/* ===================================================================== */}
+      {/* VISÃO DESKTOP                                                         */}
+      {/* ===================================================================== */}
+      <div className="hidden space-y-5 md:block">
       {/* Cabeçalho da página */}
       <PageHeader
         eyebrow="Equipe"
@@ -1103,6 +1736,7 @@ export default function PetshopCommissionsPage() {
             </div>
           )}
         </div>
+      </div>
       </div>
     </div>
   );

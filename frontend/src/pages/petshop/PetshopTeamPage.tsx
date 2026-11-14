@@ -280,6 +280,7 @@ export default function PetshopTeamPage() {
   const [selectedRole, setSelectedRole] = useState<string>('all');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [selectedAccess, setSelectedAccess] = useState<string>('all');
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [sortField, setSortField] = useState<'name' | 'jobTitle' | 'status' | 'isManager' | 'hasOpenRegister' | 'updatedAt'>('name');
   const [sortAsc, setSortAsc] = useState(true);
 
@@ -549,6 +550,225 @@ export default function PetshopTeamPage() {
 
   return (
     <div className={pageClass}>
+      {/* ===================================================================== */}
+      {/* VISÃO MOBILE (Padrão organizado com cards, KPI compacto e filtros)    */}
+      {/* ===================================================================== */}
+      <div className="space-y-4 pb-6 md:hidden">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900">Equipe</h1>
+            <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+              {summary.total} {summary.total === 1 ? 'colaborador' : 'colaboradores'}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-zinc-500">
+            Colaboradores, PINs de atendimento e acessos
+          </p>
+        </div>
+
+        {/* Barra de resumo compacta (2 colunas) */}
+        <div className="grid grid-cols-2 divide-x divide-zinc-200/70 rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+              <Users size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Acessos ativos</p>
+              <p className="text-lg font-extrabold leading-tight text-zinc-900">{summary.active}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 px-3.5 py-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+              <ShieldCheck size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Totais visíveis</p>
+              <p className="text-lg font-extrabold leading-tight text-zinc-900">{summary.managers}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Ações principais compactas */}
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={() => setAccessModalOpen(true)}
+            className="flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-[#0d6e5a]/25 bg-[#e8f5ef] px-3 text-xs font-bold text-[#0d6e5a]"
+          >
+            <KeyRound size={15} />
+            Login Equipe
+          </button>
+          <button
+            type="button"
+            onClick={openNew}
+            className="flex h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs"
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Novo colaborador
+          </button>
+        </div>
+
+        {/* Filtros em pílulas + lupa */}
+        <div className="flex items-center gap-2">
+          <div className="flex flex-1 items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {[
+              { id: 'all', label: `Todos (${summary.total})` },
+              { id: 'active', label: `Ativos (${summary.active})` },
+              { id: 'inactive', label: `Inativos (${summary.total - summary.active})` },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setSelectedStatus(tab.id)}
+                className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                  selectedStatus === tab.id
+                    ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                    : 'border-zinc-200 bg-white text-zinc-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileSearchOpen(v => !v)}
+            aria-label="Buscar colaborador"
+            className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition ${
+              mobileSearchOpen || search
+                ? 'border-[#0d6e5a] bg-[#e6f4ef] text-[#0d6e5a]'
+                : 'border-zinc-200 bg-white text-zinc-600'
+            }`}
+          >
+            <Search size={16} />
+          </button>
+        </div>
+
+        {(mobileSearchOpen || search) && (
+          <div className="relative flex items-center">
+            <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Buscar por nome, cargo ou PIN..."
+              className="h-10 w-full rounded-xl border border-zinc-200 bg-white pr-9 pl-9 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="absolute right-2.5 text-zinc-400"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Lista mobile de colaboradores */}
+        {loading ? (
+          <ListSkeleton rows={4} />
+        ) : filteredItems.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-6 text-center text-xs text-zinc-500">
+            Nenhum colaborador encontrado.
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {filteredItems.map(item => (
+              <article
+                key={item.id}
+                className="rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span
+                      className={`h-4 w-[3px] shrink-0 rounded-full ${
+                        item.active ? 'bg-[#0d6e5a]' : 'bg-zinc-300'
+                      }`}
+                    />
+                    <h3 className="truncate text-[15px] font-bold text-zinc-900">{item.name}</h3>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-lg px-2.5 py-1 text-[11px] font-bold ${
+                      item.active
+                        ? 'bg-[#e6f4ef] text-[#0d6e5a]'
+                        : 'bg-zinc-100 text-zinc-600'
+                    }`}
+                  >
+                    {item.active ? 'Ativo' : 'Inativo'}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                  <span className="rounded-md bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-semibold text-[#0d6e5a]">
+                    {item.jobTitle?.trim() || 'Geral'}
+                  </span>
+                  <span className="text-zinc-400">·</span>
+                  <span>{item.isManager ? 'Totais visíveis' : 'Auditoria cega'}</span>
+                  {pinCache[item.id] && (
+                    <>
+                      <span className="text-zinc-400">·</span>
+                      <span className="font-mono font-semibold text-zinc-700">PIN {pinCache[item.id]}</span>
+                    </>
+                  )}
+                  {item.hasOpenRegister && (
+                    <>
+                      <span className="text-zinc-400">·</span>
+                      <span className="font-semibold text-amber-700">Caixa aberto</span>
+                    </>
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => openEdit(item)}
+                    className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700"
+                  >
+                    <Pencil size={13} />
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPinOperator(item);
+                      setQuickPin('');
+                      setPinModalOpen(true);
+                    }}
+                    className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700"
+                  >
+                    <KeyRound size={13} />
+                    PIN
+                  </button>
+                  <button
+                    type="button"
+                    disabled={updatingId === item.id}
+                    onClick={() => toggleStatus(item)}
+                    className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 disabled:opacity-50"
+                  >
+                    {item.active ? 'Desativar' : 'Reativar'}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={updatingId === item.id}
+                    onClick={() => handleDelete(item)}
+                    className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 hover:border-rose-200 hover:text-rose-600 disabled:opacity-50"
+                  >
+                    <Trash2 size={13} />
+                    Excluir
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ===================================================================== */}
+      {/* VISÃO DESKTOP                                                         */}
+      {/* ===================================================================== */}
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Operação compartilhada"
         title="Equipe"
@@ -957,6 +1177,7 @@ export default function PetshopTeamPage() {
           </div>
         )}
       </section>
+      </div>
 
       {/* Modal de Criação / Edição de Colaborador */}
       {formOpen && (

@@ -446,7 +446,266 @@ export default function PetshopProductsPage() {
     });
   }, [items, search, stockFilter, statusFilter]);
 
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+
   return <div className={`${pageClass} petcare-product-crud`}>
+    {/* Cabeçalho Mobile */}
+    <div className="mb-3.5 md:hidden">
+      <div className="flex items-center gap-2.5">
+        <h1 className="text-2xl font-black tracking-tight text-zinc-900">Produtos</h1>
+        <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+          {summary.active} ativos
+        </span>
+      </div>
+      <p className="mt-0.5 text-xs font-medium text-zinc-500">
+        Mercadorias, estoque e preços no balcão
+      </p>
+    </div>
+
+    <div className="md:hidden">
+      <CatalogTabs />
+    </div>
+
+    {/* ===================================================================== */}
+    {/* VISÃO MOBILE: KPI compacto, regras retráteis, pílulas e cards         */}
+    {/* ===================================================================== */}
+    <div className="space-y-3.5 pb-6 md:hidden">
+      <div className="grid grid-cols-2 divide-x divide-zinc-200/70 rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+        <button
+          type="button"
+          onClick={() => { setStatusFilter('active'); setStockFilter('all'); }}
+          className="flex items-center gap-3 px-3.5 py-3 text-left"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+            <PackageCheck size={18} />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-[11px] font-medium text-zinc-500">Produtos ativos</p>
+            <p className="text-lg font-extrabold leading-tight text-zinc-900">{summary.active}</p>
+          </div>
+        </button>
+        <button
+          type="button"
+          onClick={() => { setStatusFilter('active'); setStockFilter(stockFilter === 'low' ? 'out' : stockFilter === 'out' ? 'all' : 'low'); }}
+          className="flex items-center gap-3 px-3.5 py-3 text-left"
+        >
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+            <TriangleAlert size={18} />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-[11px] font-medium text-zinc-500">Baixo / Zerado</p>
+            <p className="text-lg font-extrabold leading-tight text-zinc-900">
+              {summary.low + summary.out}
+            </p>
+          </div>
+        </button>
+      </div>
+
+      <div className="grid grid-cols-[auto_1fr] gap-2.5">
+        <button
+          type="button"
+          onClick={() => setShowStockSettings(v => !v)}
+          className={`flex h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl border px-3.5 text-xs font-bold ${
+            showStockSettings
+              ? 'border-[#0d6e5a] bg-[#e8f5ef] text-[#0d6e5a]'
+              : 'border-zinc-200 bg-white text-zinc-700'
+          }`}
+        >
+          <SlidersHorizontal size={15} />
+          Regras
+        </button>
+        <button
+          type="button"
+          onClick={() => setAddOpen(true)}
+          className="flex h-11 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-4 text-xs font-semibold text-white shadow-xs"
+        >
+          <Plus size={15} strokeWidth={2.5} />
+          Novo produto
+        </button>
+      </div>
+
+      {showStockSettings && (
+        <div className="space-y-2.5 rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs">
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <p className="text-xs font-bold text-zinc-900">Vender sem estoque</p>
+              <p className="text-[11px] text-zinc-500">
+                {allowNegativeStock ? 'PDV permite saldo negativo' : 'PDV bloqueia saldo zerado'}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleToggleNegativeStock(!allowNegativeStock)}
+              disabled={savingSettings}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                allowNegativeStock ? 'bg-amber-500' : 'bg-zinc-300'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${allowNegativeStock ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+          <div className="flex items-center justify-between gap-2 border-t border-zinc-100 pt-2.5">
+            <div>
+              <p className="text-xs font-bold text-zinc-900">Controle de validade ({expiryAlertDaysInput}d)</p>
+              <p className="text-[11px] text-zinc-500">Alertar lotes perto do vencimento</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleToggleExpiryControl(!enableExpiryControl)}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+                enableExpiryControl ? 'bg-[#0d6e5a]' : 'bg-zinc-300'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${enableExpiryControl ? 'translate-x-6' : 'translate-x-1'}`} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Filtros em pílulas + lupa */}
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {[
+            { id: 'all', label: 'Todos ativos', apply: () => { setStatusFilter('active'); setStockFilter('all'); }, active: statusFilter === 'active' && stockFilter === 'all' },
+            { id: 'low', label: `Baixo (${summary.low})`, apply: () => { setStatusFilter('active'); setStockFilter('low'); }, active: stockFilter === 'low' },
+            { id: 'out', label: `Zerado (${summary.out})`, apply: () => { setStatusFilter('active'); setStockFilter('out'); }, active: stockFilter === 'out' },
+            { id: 'inactive', label: `Inativos (${summary.inactive})`, apply: () => { setStatusFilter('inactive'); setStockFilter('all'); }, active: statusFilter === 'inactive' },
+          ].map(pill => (
+            <button
+              key={pill.id}
+              type="button"
+              onClick={pill.apply}
+              className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                pill.active
+                  ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                  : 'border-zinc-200 bg-white text-zinc-700'
+              }`}
+            >
+              {pill.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setMobileSearchOpen(v => !v)}
+          aria-label="Buscar produto"
+          className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition ${
+            mobileSearchOpen || search
+              ? 'border-[#0d6e5a] bg-[#e6f4ef] text-[#0d6e5a]'
+              : 'border-zinc-200 bg-white text-zinc-600'
+          }`}
+        >
+          <Search size={16} />
+        </button>
+      </div>
+
+      {(mobileSearchOpen || search) && (
+        <div className="relative flex items-center">
+          <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar produto, categoria ou código..."
+            className="h-10 w-full rounded-xl border border-zinc-200 bg-white pr-9 pl-9 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+          />
+          {search && (
+            <button type="button" onClick={() => setSearch('')} className="absolute right-2.5 text-zinc-400">
+              <X size={15} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {loading ? (
+        <ListSkeleton rows={4} />
+      ) : filtered.length === 0 ? (
+        <EmptyState
+          icon={Package}
+          title={items.length ? 'Nenhum produto encontrado' : 'Nenhum produto cadastrado'}
+          description={items.length ? 'Revise a busca ou altere os filtros.' : 'Cadastre os itens vendidos no balcão.'}
+          action={!items.length && <button type="button" onClick={() => setAddOpen(true)} className={`${primaryButton} inline-flex items-center gap-2`}><Plus aria-hidden="true" size={16} />Cadastrar primeiro produto</button>}
+        />
+      ) : (
+        <div className="space-y-2.5">
+          {filtered.map(item => {
+            const stock = numeric(item.stock);
+            const minimum = numeric(item.minStock ?? 5);
+            const isOut = stock <= 0;
+            const isLow = !isOut && stock <= minimum;
+            const isActive = item.active !== false;
+            const barColor = !isActive ? 'bg-zinc-300' : isOut ? 'bg-rose-500' : isLow ? 'bg-amber-500' : 'bg-[#0d6e5a]';
+            const stockBadge = isOut
+              ? 'bg-rose-50 text-rose-700'
+              : isLow
+              ? 'bg-amber-50 text-amber-800'
+              : 'bg-[#e6f4ef] text-[#0d6e5a]';
+
+            return (
+              <article
+                key={item.id}
+                className={`rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2 ${!isActive ? 'opacity-65' : ''}`}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <span className={`h-4 w-[3px] shrink-0 rounded-full ${barColor}`} />
+                    <h2 className="truncate text-[15px] font-bold text-zinc-900">{item.name}</h2>
+                  </div>
+                  <span className="shrink-0 rounded-lg bg-[#e6f4ef] px-2.5 py-1 text-xs font-extrabold text-[#0d6e5a] tabular-nums">
+                    {money(item.priceSell)}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLotsProduct(item)}
+                    className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${stockBadge}`}
+                  >
+                    {stock.toLocaleString('pt-BR')} {item.unit} {isOut ? '· Zerado' : isLow ? '· Baixo' : ''}
+                  </button>
+                  <span className="text-zinc-400">·</span>
+                  <span>{item.category?.name || 'Sem categoria'}</span>
+                  <span className="text-zinc-400">·</span>
+                  <span>Custo {money(item.priceCost)}</span>
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedLotsProduct(item)}
+                    className="inline-flex min-h-[34px] cursor-pointer items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700"
+                  >
+                    Lotes
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditingProduct(item)}
+                    className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700"
+                  >
+                    <Pencil size={13} />
+                    Editar
+                  </button>
+                  <button
+                    type="button"
+                    disabled={togglingId === item.id}
+                    onClick={() => void toggleActive(item)}
+                    className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 disabled:opacity-50"
+                  >
+                    {isActive ? 'Desativar' : 'Ativar'}
+                  </button>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </div>
+
+    {/* ===================================================================== */}
+    {/* VISÃO DESKTOP                                                         */}
+    {/* ===================================================================== */}
+    <div className="hidden md:block">
     <PageHeader eyebrow="Catálogo compartilhado com o PDV" title="Produtos" description="Mercadorias vendidas no balcão, como shampoo, rações e acessórios. Serviços e pacotes ficam nas suas respectivas áreas." action={<button type="button" onClick={() => setAddOpen(true)} className={`${primaryButton} flex items-center justify-center gap-2`}><Plus aria-hidden="true" size={17} />Novo produto</button>} />
 
     <CatalogTabs />
@@ -648,6 +907,8 @@ export default function PetshopProductsPage() {
         </article>;
       })}</div>}
     </section>
+
+    </div>
 
     {addOpen && <AddProductModal isOpen={addOpen} onClose={() => setAddOpen(false)} onSuccess={() => void load()} variant="petshop" />}
     {editingProduct && <EditProductModal isOpen={Boolean(editingProduct)} product={editingProduct as any} onClose={() => setEditingProduct(null)} onSuccess={() => void load()} variant="petshop" />}

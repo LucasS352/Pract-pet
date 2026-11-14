@@ -237,6 +237,42 @@ export default function PetshopPurchaseOrdersPage() {
 
   return (
     <div className={pageClass}>
+      <div className="mb-3.5 space-y-3 md:hidden">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900">Pedidos de Compra</h1>
+            <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+              {counts.all}
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-zinc-500">Reposição e pedidos para fornecedores</p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={() => setShowPackagingsModal(true)}
+            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700"
+          >
+            <Box size={15} />
+            Embalagens
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSelectedSupplier(null);
+              setOrderItems([]);
+              setShowNewModal(true);
+            }}
+            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs"
+          >
+            <Plus size={15} strokeWidth={2.5} />
+            Novo Pedido
+          </button>
+        </div>
+      </div>
+
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Reposição Inteligente"
         title="Pedidos de Compra"
@@ -266,6 +302,8 @@ export default function PetshopPurchaseOrdersPage() {
           </div>
         }
       />
+
+      </div>
 
       <CatalogTabs />
 

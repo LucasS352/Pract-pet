@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { api } from '@/lib/api';
 import {
   CalendarClock, AlertTriangle, CheckCircle2,
-  Package, Search, Download, RefreshCw, Loader2, Truck
+  Package, Search, Download, RefreshCw, Loader2, Truck, X
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { CatalogTabs, PageHeader, pageClass, primaryButton, secondaryButton, inputClass } from './ui';
@@ -51,6 +51,7 @@ export default function PetshopExpiryPage() {
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [searchText, setSearchText] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   const loadLots = async () => {
     setLoading(true);
@@ -142,6 +143,182 @@ export default function PetshopExpiryPage() {
 
   return (
     <div className={pageClass}>
+      {/* ===================================================================== */}
+      {/* VISÃO MOBILE: Cabeçalho, KPI compacto, pílulas e cards de lotes       */}
+      {/* ===================================================================== */}
+      <div className="space-y-3.5 pb-6 md:hidden">
+        <div>
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl font-black tracking-tight text-zinc-900">Validades</h1>
+            <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+              {lots.length} lotes
+            </span>
+          </div>
+          <p className="mt-0.5 text-xs font-medium text-zinc-500">
+            Alerta configurado para até {alertDays} dias do vencimento
+          </p>
+        </div>
+
+        <CatalogTabs />
+
+        <div className="grid grid-cols-2 divide-x divide-zinc-200/70 rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setFilter(filter === 'expired' ? 'all' : 'expired')}
+            className="flex items-center gap-3 px-3.5 py-3 text-left"
+          >
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+              <AlertTriangle size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Vencidos</p>
+              <p className="text-lg font-extrabold leading-tight text-rose-600">{counts.expired}</p>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setFilter(filter === 'warning' ? 'all' : 'warning')}
+            className="flex items-center gap-3 px-3.5 py-3 text-left"
+          >
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-amber-50 text-amber-700">
+              <CalendarClock size={18} />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[11px] font-medium text-zinc-500">Em alerta</p>
+              <p className="text-lg font-extrabold leading-tight text-amber-700">{counts.warning}</p>
+            </div>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5">
+          <button
+            type="button"
+            onClick={loadLots}
+            disabled={loading}
+            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 disabled:opacity-50"
+          >
+            <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+            Atualizar
+          </button>
+          <button
+            type="button"
+            onClick={exportCSV}
+            disabled={filtered.length === 0}
+            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs disabled:opacity-50"
+          >
+            <Download size={14} />
+            Exportar CSV
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <div className="flex flex-1 items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {[
+              { id: 'all' as const, label: `Todos (${lots.length})` },
+              { id: 'expired' as const, label: `Vencidos (${counts.expired})` },
+              { id: 'warning' as const, label: `Alerta (${counts.warning})` },
+              { id: 'ok' as const, label: `Em dia (${counts.ok})` },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setFilter(tab.id)}
+                className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                  filter === tab.id
+                    ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                    : 'border-zinc-200 bg-white text-zinc-700'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileSearchOpen(v => !v)}
+            aria-label="Buscar lote"
+            className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition ${
+              mobileSearchOpen || searchText
+                ? 'border-[#0d6e5a] bg-[#e6f4ef] text-[#0d6e5a]'
+                : 'border-zinc-200 bg-white text-zinc-600'
+            }`}
+          >
+            <Search size={16} />
+          </button>
+        </div>
+
+        {(mobileSearchOpen || searchText) && (
+          <div className="relative flex items-center">
+            <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
+            <input
+              type="search"
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              placeholder="Buscar produto, lote ou fornecedor..."
+              className="h-10 w-full rounded-xl border border-zinc-200 bg-white pr-9 pl-9 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+            />
+            {searchText && (
+              <button type="button" onClick={() => setSearchText('')} className="absolute right-2.5 text-zinc-400">
+                <X size={15} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {loading ? (
+          <div className="flex h-40 items-center justify-center gap-2 rounded-2xl border border-zinc-200 bg-white text-xs text-zinc-500">
+            <Loader2 size={18} className="animate-spin text-[#0d6e5a]" />
+            Carregando lotes...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-6 text-center text-xs text-zinc-500">
+            Nenhum lote encontrado.
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {filtered.map(lot => {
+              const expired = lot.isExpired || (lot.daysUntilExpiry !== null && lot.daysUntilExpiry < 0) || lot.daysUntilExpiry === 0;
+              const warning = !expired && lot.daysUntilExpiry !== null && lot.daysUntilExpiry <= alertDays;
+              const barColor = expired ? 'bg-rose-500' : warning ? 'bg-amber-500' : 'bg-[#0d6e5a]';
+              return (
+                <article key={lot.id} className="rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className={`h-4 w-[3px] shrink-0 rounded-full ${barColor}`} />
+                      <h2 className="truncate text-[15px] font-bold text-zinc-900">{lot.productName}</h2>
+                    </div>
+                    <div className="shrink-0">{getStatusBadge(lot, alertDays)}</div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                    <span className="rounded-md bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-semibold text-[#0d6e5a] tabular-nums">
+                      Saldo: {lot.remaining} {lot.productUnit}
+                    </span>
+                    <span className="text-zinc-400">·</span>
+                    <span>Val: {lot.expiresAt ? new Date(lot.expiresAt).toLocaleDateString('pt-BR') : '—'}</span>
+                    {lot.lotNumber && (
+                      <>
+                        <span className="text-zinc-400">·</span>
+                        <span className="font-mono">Lote {lot.lotNumber}</span>
+                      </>
+                    )}
+                    {lot.supplierName && (
+                      <>
+                        <span className="text-zinc-400">·</span>
+                        <span>{lot.supplierName}</span>
+                      </>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ===================================================================== */}
+      {/* VISÃO DESKTOP                                                         */}
+      {/* ===================================================================== */}
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Segurança e Rastreabilidade"
         title="Painel de Validades"
@@ -330,6 +507,7 @@ export default function PetshopExpiryPage() {
           </div>
         )}
       </section>
+      </div>
     </div>
   );
 }

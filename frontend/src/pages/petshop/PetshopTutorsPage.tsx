@@ -1,6 +1,6 @@
 import { ReceptionRegistrationModal } from './ReceptionRegistrationModal';
 import { FormEvent, useEffect, useState } from 'react';
-import { Bell, BellOff, MapPin, MessageCircle, PackageCheck, PawPrint, Pencil, Phone, Plus, Users } from 'lucide-react';
+import { Bell, BellOff, MapPin, MessageCircle, PackageCheck, PawPrint, Pencil, Phone, Plus, Search, Users, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
@@ -30,6 +30,8 @@ export default function PetshopTutorsPage() {
   const [loading, setLoading] = useState(true);
   const [form, setForm] = useState(emptyTutor);
   const [editingTutor, setEditingTutor] = useState<Tutor | null>(null);
+  const [mobileFilter, setMobileFilter] = useState<'all' | 'package' | 'optin'>('all');
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
 
   const handleOpenNew = () => {
     setEditingTutor(null);
@@ -106,7 +108,202 @@ export default function PetshopTutorsPage() {
     window.open(`https://wa.me/${fullPhone}`, '_blank', 'noopener,noreferrer');
   };
 
+  const withPackagesCount = items.filter(t => (t.petPackages?.length || 0) > 0).length;
+  const optInCount = items.filter(t => t.whatsappOptIn !== false).length;
+  const mobileFilteredTutors = items.filter(t => {
+    if (mobileFilter === 'package') return (t.petPackages?.length || 0) > 0;
+    if (mobileFilter === 'optin') return t.whatsappOptIn !== false;
+    return true;
+  });
+
   return <div className={pageClass}>
+    {/* ===================================================================== */}
+    {/* VISÃO MOBILE (Padrão organizado com cards, KPI compacto e filtros)    */}
+    {/* ===================================================================== */}
+    <div className="space-y-4 pb-6 md:hidden">
+      <div>
+        <div className="flex items-center gap-2.5">
+          <h1 className="text-2xl font-black tracking-tight text-zinc-900">Tutores</h1>
+          <span className="rounded-full bg-[#e6f4ef] px-2.5 py-0.5 text-xs font-bold text-[#0d6e5a]">
+            {items.length} {items.length === 1 ? 'tutor' : 'tutores'}
+          </span>
+        </div>
+        <p className="mt-0.5 text-xs font-medium text-zinc-500">Responsáveis, contatos e endereços</p>
+      </div>
+
+      {/* Barra de resumo compacta (2 colunas) */}
+      <div className="grid grid-cols-2 divide-x divide-zinc-200/70 rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+        <div className="flex items-center gap-3 px-3.5 py-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+            <Users size={18} />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-[11px] font-medium text-zinc-500">Tutores cadastrados</p>
+            <p className="text-lg font-extrabold leading-tight text-zinc-900">{items.length}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 px-3.5 py-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#e8f5ef] text-[#0d6e5a]">
+            <PackageCheck size={18} />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-[11px] font-medium text-zinc-500">Com pacote ativo</p>
+            <p className="text-lg font-extrabold leading-tight text-zinc-900">{withPackagesCount}</p>
+          </div>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={handleOpenNew}
+        className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0d6e5a] px-4 text-sm font-semibold text-white shadow-xs"
+      >
+        <Plus size={16} strokeWidth={2.5} />
+        Novo tutor
+      </button>
+
+      {/* Filtros em pílulas + lupa */}
+      <div className="flex items-center gap-2">
+        <div className="flex flex-1 items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {[
+            { id: 'all' as const, label: `Todos (${items.length})` },
+            { id: 'package' as const, label: `Com pacote (${withPackagesCount})` },
+            { id: 'optin' as const, label: `Auto-WhatsApp (${optInCount})` },
+          ].map(tab => (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => setMobileFilter(tab.id)}
+              className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                mobileFilter === tab.id
+                  ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                  : 'border-zinc-200 bg-white text-zinc-700'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={() => setMobileSearchOpen(v => !v)}
+          aria-label="Buscar tutor"
+          className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition ${
+            mobileSearchOpen || search
+              ? 'border-[#0d6e5a] bg-[#e6f4ef] text-[#0d6e5a]'
+              : 'border-zinc-200 bg-white text-zinc-600'
+          }`}
+        >
+          <Search size={16} />
+        </button>
+      </div>
+
+      {(mobileSearchOpen || search) && (
+        <div className="relative flex items-center">
+          <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
+          <input
+            type="search"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            placeholder="Buscar por nome, telefone ou CPF..."
+            className="h-10 w-full rounded-xl border border-zinc-200 bg-white pr-9 pl-9 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+          />
+          {search && (
+            <button
+              type="button"
+              onClick={() => setSearch('')}
+              className="absolute right-2.5 text-zinc-400"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Lista mobile de tutores */}
+      {loading ? (
+        <ListSkeleton />
+      ) : mobileFilteredTutors.length === 0 ? (
+        <EmptyState
+          icon={Users}
+          title={search ? 'Nenhum tutor encontrado' : 'Nenhum tutor cadastrado'}
+          description={search ? 'Revise o termo pesquisado ou limpe a busca.' : 'Cadastre o primeiro responsável para vincular seus pets.'}
+          action={!search && <button className={primaryButton} onClick={handleOpenNew}><Plus aria-hidden="true" className="mr-1.5 inline" size={16} />Cadastrar tutor</button>}
+        />
+      ) : (
+        <div className="space-y-2.5">
+          {mobileFilteredTutors.map(tutor => (
+            <article key={tutor.id} className="rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="h-4 w-[3px] shrink-0 rounded-full bg-[#0d6e5a]" />
+                  <h2 className="truncate text-[15px] font-bold text-zinc-900">{tutor.name}</h2>
+                </div>
+                {tutor.whatsappOptIn === false ? (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-500">
+                    <BellOff size={11} /> Sem auto
+                  </span>
+                ) : (
+                  <span className="inline-flex shrink-0 items-center gap-1 rounded-lg bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-bold text-[#0d6e5a]">
+                    <Bell size={11} /> Auto-Whats
+                  </span>
+                )}
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                <span className="inline-flex items-center gap-1 font-medium text-zinc-700">
+                  <Phone size={12} className="text-zinc-400" />
+                  {tutor.phone || 'Sem telefone'}
+                </span>
+                <span className="text-zinc-400">·</span>
+                <span className="inline-flex items-center gap-1">
+                  <PawPrint size={12} className="text-zinc-400" />
+                  {tutor.pets?.length || 0} {tutor.pets?.length === 1 ? 'pet' : 'pets'}
+                  {tutor.pets?.length ? ` (${tutor.pets.map(p => p.name).join(', ')})` : ''}
+                </span>
+                {tutor.petPackages && tutor.petPackages.length > 0 && (
+                  <span className="rounded-md bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-semibold text-[#0d6e5a]">
+                    {tutor.petPackages.length} pacote(s)
+                  </span>
+                )}
+              </div>
+
+              {tutor.address && (
+                <p className="flex items-center gap-1.5 truncate text-[11px] text-zinc-500">
+                  <MapPin size={12} className="shrink-0 text-zinc-400" />
+                  <span className="truncate">{tutor.address}</span>
+                </p>
+              )}
+
+              <div className="flex items-center justify-end gap-2 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleOpenEdit(tutor)}
+                  className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700"
+                >
+                  <Pencil size={13} />
+                  Editar
+                </button>
+                <button
+                  type="button"
+                  disabled={!tutor.phone}
+                  onClick={() => openTutorWhatsApp(tutor)}
+                  className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-[#0d6e5a]/25 bg-[#e6f4ef] px-3 py-1.5 text-xs font-semibold text-[#0d6e5a] disabled:opacity-50"
+                >
+                  <MessageCircle size={13} />
+                  WhatsApp
+                </button>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+
+    {/* ===================================================================== */}
+    {/* VISÃO DESKTOP                                                         */}
+    {/* ===================================================================== */}
+    <div className="hidden md:block">
     <PageHeader eyebrow="Relacionamento" title="Tutores" description="Responsáveis e contatos dos pets." action={<button className={primaryButton} onClick={handleOpenNew}><Plus aria-hidden="true" className="mr-1.5 inline" size={17} />Novo tutor</button>} />
 
     <div className="mb-5 max-w-xl"><SearchField value={search} onChange={setSearch} label="Buscar tutores" placeholder="Buscar por nome, telefone ou CPF" /></div>
@@ -154,6 +351,7 @@ export default function PetshopTutorsPage() {
         </div>
       </article>)}</div>}
     </section>
+    </div>
 
     {open && !editingTutor && <ReceptionRegistrationModal onClose={() => setOpen(false)} onSaved={() => { setOpen(false); void load(false); }} />}
     {open && editingTutor && <Modal title="Editar tutor" onClose={() => { setOpen(false); setEditingTutor(null); }} maxWidth="sm:max-w-2xl">

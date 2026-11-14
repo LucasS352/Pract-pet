@@ -479,6 +479,78 @@ export default function PetshopWhatsappPage() {
   return (
     <div className={pageClass}>
       {/* CABEÇALHO PADRÃO PRACT PET */}
+      {/* CABEÇALHO MOBILE COMPACTO + PÍLULAS */}
+      <div className="mb-4 space-y-3 md:hidden">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <div className="flex items-center gap-2">
+              <h1 className="text-2xl font-black tracking-tight text-zinc-900">WhatsApp</h1>
+              <span
+                className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-bold ${
+                  session?.status === 'CONNECTED'
+                    ? 'bg-[#e6f4ef] text-[#0d6e5a]'
+                    : session?.status === 'QR_READY' || session?.status === 'CONNECTING'
+                      ? 'bg-amber-50 text-amber-800'
+                      : 'bg-zinc-100 text-zinc-600'
+                }`}
+              >
+                <span
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    session?.status === 'CONNECTED'
+                      ? 'bg-[#0d6e5a]'
+                      : session?.status === 'QR_READY' || session?.status === 'CONNECTING'
+                        ? 'bg-amber-500'
+                        : 'bg-zinc-400'
+                  }`}
+                />
+                {session?.status === 'CONNECTED' ? 'Conectado' : session?.status === 'QR_READY' ? 'QR Code' : 'Desconectado'}
+              </span>
+            </div>
+            <p className="mt-0.5 text-xs font-medium text-zinc-500">Réguas automáticas e histórico de envios</p>
+          </div>
+          {activeTab === 'automations' && (
+            <button
+              type="button"
+              onClick={() => setNewRuleModalOpen(true)}
+              className="inline-flex h-10 shrink-0 cursor-pointer items-center gap-1 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs"
+            >
+              <Plus size={15} strokeWidth={2.5} />
+              Nova
+            </button>
+          )}
+        </div>
+
+        <div className="flex items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {[
+            { id: 'connection' as const, label: 'Conexão & QR', icon: QrCode },
+            { id: 'automations' as const, label: `Automações (${rules.length})`, icon: Bell },
+            { id: 'history' as const, label: 'Histórico', icon: MessageSquare },
+          ].map(tab => {
+            const Icon = tab.icon;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => {
+                  setActiveTab(tab.id);
+                  if (tab.id === 'history') loadAll(false);
+                }}
+                className={`inline-flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                  activeTab === tab.id
+                    ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                    : 'border-zinc-200 bg-white text-zinc-700'
+                }`}
+              >
+                <Icon size={14} />
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* CABEÇALHO DESKTOP */}
+      <div className="hidden md:block">
       <PageHeader
         eyebrow="Comunicação com Tutores"
         title="Central WhatsApp & Réguas de Automação"
@@ -569,6 +641,8 @@ export default function PetshopWhatsappPage() {
             Nova automação
           </button>
         )}
+      </div>
+
       </div>
 
       {loading ? (
@@ -1204,7 +1278,76 @@ export default function PetshopWhatsappPage() {
               />
             </div>
           ) : (
-            <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">
+            <>
+              <div className="space-y-2.5 md:hidden">
+                {filteredJobs.map(job => {
+                  const statusBar =
+                    job.status === 'SENT'
+                      ? 'bg-[#0d6e5a]'
+                      : job.status === 'PENDING'
+                        ? 'bg-sky-500'
+                        : job.status === 'FAILED'
+                          ? 'bg-rose-500'
+                          : 'bg-zinc-300';
+                  const statusPill =
+                    job.status === 'SENT'
+                      ? 'bg-[#e6f4ef] text-[#0d6e5a]'
+                      : job.status === 'PENDING'
+                        ? 'bg-sky-50 text-sky-700'
+                        : job.status === 'FAILED'
+                          ? 'bg-rose-50 text-rose-700'
+                          : 'bg-zinc-100 text-zinc-600';
+                  const statusLabel =
+                    job.status === 'SENT'
+                      ? 'Enviado'
+                      : job.status === 'PENDING'
+                        ? 'Na Fila'
+                        : job.status === 'FAILED'
+                          ? 'Falha'
+                          : 'Descartado';
+                  return (
+                    <article key={job.id} className="rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className={`h-4 w-[3px] shrink-0 rounded-full ${statusBar}`} />
+                          <h3 className="truncate text-[14px] font-bold text-zinc-900">{job.recipientName}</h3>
+                        </div>
+                        <span className={`shrink-0 rounded-lg px-2 py-0.5 text-[11px] font-bold ${statusPill}`}>
+                          {statusLabel}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-zinc-500">
+                        <span className="font-semibold text-zinc-700">{job.rule?.name || job.triggerType}</span>
+                        <span>·</span>
+                        <span>{dateTime(job.sentAt || job.createdAt)}</span>
+                        {job.petName && (
+                          <>
+                            <span>·</span>
+                            <span>Pet {job.petName}</span>
+                          </>
+                        )}
+                      </div>
+                      <p className="line-clamp-2 text-xs text-zinc-600">{job.messageContent}</p>
+                      {job.lastError && <p className="text-[11px] font-medium text-rose-600">{job.lastError}</p>}
+                      {job.status !== 'SENT' && (
+                        <div className="flex justify-end pt-0.5">
+                          <button
+                            type="button"
+                            disabled={retryingJobId === job.id}
+                            onClick={() => handleRetryJob(job.id)}
+                            className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700"
+                          >
+                            <RotateCcw size={12} />
+                            {retryingJobId === job.id ? 'Reenviando...' : 'Reenviar'}
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+
+              <div className="hidden md:block overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xs">
               <div className="overflow-x-auto">
                 <table className="w-full text-left text-xs">
                   <thead className="border-b border-slate-200 bg-slate-50 text-[11px] font-bold uppercase tracking-wider text-slate-600">
@@ -1289,6 +1432,7 @@ export default function PetshopWhatsappPage() {
                 </table>
               </div>
             </div>
+            </>
           )}
         </div>
       )}
