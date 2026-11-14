@@ -250,9 +250,9 @@ export default function PetshopCommissionsPage() {
       r.appointment.customer?.name || '',
       r.appointment.id,
       r.appointmentService.nameSnapshot,
-      r.stageKey,
+      resolveStageLabel(r.stageKey, stages),
       r.baseAmount,
-      `${r.ruleKind} ${r.ruleValue}`,
+      r.ruleKind === 'PERCENT' ? `${r.ruleValue}%` : r.ruleKind === 'FIXED' ? `R$ ${r.ruleValue}` : 'Sem comissão',
       r.amount,
       stateLabel[r.state] || r.state,
       r.id,
@@ -787,7 +787,7 @@ export default function PetshopCommissionsPage() {
                       <span className="font-semibold text-zinc-800">{r.appointment.pet.name}</span>
                       {r.appointment.pet.size && (
                         <span className="ml-1.5 rounded-md bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">
-                          {sizeLabelMap[r.appointment.pet.size] || r.appointment.pet.size}
+                          {sizeLabelMap[r.appointment.pet.size.toLowerCase()] || r.appointment.pet.size}
                         </span>
                       )}
                       <br />
@@ -801,7 +801,7 @@ export default function PetshopCommissionsPage() {
                     <td className="p-2.5 text-xs text-zinc-700">
                       <span className="font-medium text-zinc-900">{r.appointmentService.nameSnapshot}</span>
                       <br />
-                      <span className="text-zinc-500">{r.stageKey}</span>
+                      <span className="text-zinc-500">{resolveStageLabel(r.stageKey, stages)}</span>
                     </td>
                     <td className="p-2.5 whitespace-nowrap text-xs text-zinc-600">{brl(r.baseAmount)}</td>
                     <td className="p-2.5 text-xs text-zinc-600">
@@ -996,7 +996,7 @@ export default function PetshopCommissionsPage() {
                     <div key={r.id} className="flex flex-wrap items-center justify-between gap-2 p-3">
                       <span className="text-zinc-700">
                         <strong>{resolveStageLabel(r.stageKey, stages)}</strong>{' '}
-                        <span className="text-[11px] text-zinc-400">({r.stageKey})</span> ·{' '}
+                        ·{' '}
                         <span className="rounded-md bg-teal-50 px-1.5 py-0.5 text-[11px] font-semibold text-teal-800">
                           {sizeLabelMap[r.size || 'all'] || 'Todos os portes'}
                         </span>{' '}

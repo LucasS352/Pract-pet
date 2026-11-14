@@ -566,9 +566,6 @@ export default function PetshopCommissionRulesPage() {
                         >
                           {stage.label}
                         </span>
-                        <code className="rounded bg-zinc-100 px-1.5 py-0.5 text-[11px] text-zinc-500">
-                          {stage.key}
-                        </code>
                         {stage.isSystem && (
                           <span className="rounded-md bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-600">
                             Sistema
@@ -806,7 +803,7 @@ export default function PetshopCommissionRulesPage() {
                   <div className="space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-xs font-bold text-amber-800">
-                        <Sparkles size={12} /> Serviço Extra Adicionado (service_added)
+                        <Sparkles size={12} /> Serviço Extra Adicionado
                       </span>
                       <span className="text-xs font-medium text-zinc-600">
                         {addonRules.length} serviço(s) com bônus fixo por inclusão na comanda
@@ -814,7 +811,7 @@ export default function PetshopCommissionRulesPage() {
                     </div>
                     <p className="text-xs text-zinc-500">
                       Quando um colaborador inclui um serviço extra durante o atendimento e o status avança para{' '}
-                      <strong>Entregue (delivered)</strong>, o bônus fixo configurado no serviço é creditado automaticamente.
+                      <strong>Entregue</strong>, o bônus fixo configurado no serviço é creditado automaticamente.
                       Status <strong>Cancelado</strong> ou <strong>Não compareceu</strong> estornam comissões em aberto.
                     </p>
                   </div>

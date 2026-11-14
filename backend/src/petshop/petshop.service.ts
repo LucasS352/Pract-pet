@@ -15,6 +15,14 @@ import { parseTaxiDefaultFee, readTaxiDefaultFee, TAXI_DEFAULT_FEE_SETTINGS_ID }
 import { addonSettingsId, parseAddonSettings, validateAddonSettings } from './service-addon-settings';
 import { recordAddedServiceCommissions } from '../sales/petshop-checkout';
 
+const PET_SIZE_PT_LABELS: Record<string, string> = {
+  mini: 'Mini',
+  small: 'Pequeno',
+  medium: 'Médio',
+  large: 'Grande',
+  giant: 'Gigante',
+};
+
 const APPOINTMENT_STATUSES = new Set([
   'requested', 'scheduled', 'checked_in', 'bathing', 'grooming',
   'finishing', 'ready', 'delivered', 'cancelled', 'no_show',
@@ -1491,7 +1499,7 @@ export class PetshopService {
           }
         }
       } else {
-        const sizeLabel = resolved.matchedRule?.label || (resolved.matchedRule?.size && resolved.matchedRule.size !== 'all' ? `Porte ${resolved.matchedRule.size}` : null);
+        const sizeLabel = resolved.matchedRule?.label || (resolved.matchedRule?.size && resolved.matchedRule.size !== 'all' ? `Porte ${PET_SIZE_PT_LABELS[resolved.matchedRule.size] || resolved.matchedRule.size}` : null);
         const nameWithVariant = sizeLabel ? `${service.name} (${sizeLabel})` : service.name;
         plannedServices.push({
           serviceId: service.id,

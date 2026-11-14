@@ -260,7 +260,7 @@ export default function PetshopExpiryPage() {
             onClick={() => setFilter('all')}
             className="text-xs font-semibold text-[var(--pc-action)] hover:underline"
           >
-            Limpar filtro de status ({filter})
+            Limpar filtro de status ({({ expired: 'Vencidos', warning: 'Vencendo em breve', ok: 'Dentro da validade' } as Record<string, string>)[filter] || filter})
           </button>
         )}
       </div>

@@ -47,7 +47,7 @@ import { getFullUrl } from '@/lib/getFullUrl';
 
 
 import type { Appointment, CustomerPetPackage, Pet, PetService, Tutor } from './types';
-import { money, resolveAppointmentStages, resolveAppointmentSteps, getStageLabel } from './types';
+import { coatLabels, money, resolveAppointmentStages, resolveAppointmentSteps, getStageLabel } from './types';
 import {
   EmptyState,
   inputClass,
@@ -147,7 +147,7 @@ function getEffectiveServicePrice(svc: PetService, pet?: Pet | null): { price: n
   if (match2) return { price: Number(match2.price), duration: match2.durationMinutes || svc.durationMinutes, variantLabel: match2.label || sizeLabel(petSize) };
 
   const match3 = rules.find(r => (!r.size || r.size === 'all') && r.coatType === pet.coatType);
-  if (match3) return { price: Number(match3.price), duration: match3.durationMinutes || svc.durationMinutes, variantLabel: match3.label || `Pelo ${pet.coatType}` };
+  if (match3) return { price: Number(match3.price), duration: match3.durationMinutes || svc.durationMinutes, variantLabel: match3.label || coatLabels[pet.coatType || ''] || 'Pelagem específica' };
 
   return { price: Number(svc.price), duration: svc.durationMinutes };
 }

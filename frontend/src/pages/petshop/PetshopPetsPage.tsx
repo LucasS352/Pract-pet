@@ -2142,10 +2142,10 @@ export default function PetshopPetsPage() {
                 onChange={event => setPetForm({ ...petForm, coatType: event.target.value })}
               >
                 <option value="">Não informada</option>
-                <option value="short">Pelo Curto (short)</option>
-                <option value="medium">Pelo Médio (medium)</option>
-                <option value="long">Pelo Longo (long)</option>
-                <option value="double">Pelagem Dupla / Densa (double)</option>
+                <option value="short">Pelo Curto</option>
+                <option value="medium">Pelo Médio</option>
+                <option value="long">Pelo Longo</option>
+                <option value="double">Pelagem Dupla / Densa</option>
               </select>
             </label>
 
