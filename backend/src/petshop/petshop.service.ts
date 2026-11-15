@@ -375,7 +375,9 @@ export class PetshopService {
       prevEnd = new Date(`${yBr}T23:59:59.999-03:00`);
     }
 
-    // 1. Busca transações do período selecionado
+    const isTodayPeriod = (!period || period === 'today') && !customFrom && !customTo;
+
+    // 1. Busca transações do período selecionado (movimentações de gaveta restritas ao caixa de Hoje)
     const [sales, appointments, soldPackages, customPaymentMethods, cashMovements] = await Promise.all([
       prisma.sale.findMany({
         where: { createdAt: { gte: start, lte: end }, status: { not: 'cancelled' } },
@@ -400,7 +402,7 @@ export class PetshopService {
       prisma.tenantPaymentMethod?.findMany
         ? prisma.tenantPaymentMethod.findMany({ select: { id: true, name: true } }).catch(() => [])
         : Promise.resolve([]),
-      prisma.cashMovement?.findMany
+      isTodayPeriod && prisma.cashMovement?.findMany
         ? prisma.cashMovement
             .findMany({
               where: { createdAt: { gte: start, lte: end } },
@@ -650,13 +652,15 @@ export class PetshopService {
         averageTicket,
       },
       paymentMix,
-      cashDrawer: {
-        cashSalesAmount,
-        totalIn: totalCashIn,
-        totalOut: totalCashOut,
-        netCashBalance,
-        movements: formattedMovements,
-      },
+      cashDrawer: isTodayPeriod
+        ? {
+            cashSalesAmount,
+            totalIn: totalCashIn,
+            totalOut: totalCashOut,
+            netCashBalance,
+            movements: formattedMovements,
+          }
+        : undefined,
       byHour,
       byDayOfWeek: Object.values(byDayOfWeek),
       topServices,
@@ -723,6 +727,13 @@ export class PetshopService {
     const movement = await prisma.cashMovement.findUnique({ where: { id } });
     if (!movement) {
       throw new NotFoundException('Movimentação de caixa não encontrada.');
+    }
+    const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date());
+    const todayStart = new Date(`${todayBr}T00:00:00.000-03:00`);
+    const todayEnd = new Date(`${todayBr}T23:59:59.999-03:00`);
+    const createdAt = new Date(movement.createdAt);
+    if (createdAt < todayStart || createdAt > todayEnd) {
+      throw new BadRequestException('Só é permitido remover movimentações do caixa de hoje.');
     }
     await prisma.cashMovement.delete({ where: { id } });
     return { success: true };

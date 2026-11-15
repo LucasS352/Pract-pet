@@ -755,8 +755,8 @@ export default function PetshopMetricsPage() {
               {paymentMix.map((item) => {
                 const visual = getPaymentMethodVisual(item.key);
                 const pctText = `${item.percentage.toFixed(1).replace('.', ',')}%`;
-                const isDinheiro = item.key === 'dinheiro';
-                const cashDrawer = data?.cashDrawer;
+                const isDinheiroToday = item.key === 'dinheiro' && period === 'today';
+                const cashDrawer = isDinheiroToday ? data?.cashDrawer : undefined;
                 const hasMovements = Boolean(
                   cashDrawer && (cashDrawer.movements.length > 0 || cashDrawer.totalIn > 0 || cashDrawer.totalOut > 0),
                 );
@@ -765,7 +765,7 @@ export default function PetshopMetricsPage() {
                   <div
                     key={item.key}
                     className={`rounded-xl border p-3.5 transition-colors space-y-2.5 ${
-                      isDinheiro
+                      isDinheiroToday
                         ? 'border-amber-200/90 bg-amber-50/25 hover:bg-white hover:border-amber-300'
                         : 'border-zinc-200/80 bg-zinc-50/50 hover:bg-white hover:border-zinc-300/80'
                     }`}
@@ -779,30 +779,30 @@ export default function PetshopMetricsPage() {
                           <div className="text-sm font-semibold text-zinc-900 truncate" title={item.label}>
                             {item.label}
                           </div>
-                          <div className="text-xs text-zinc-500">
+                          <div className="text-xs text-zinc-500 whitespace-nowrap">
                             {item.count} {item.count === 1 ? 'lançamento' : 'lançamentos'}
                           </div>
                         </div>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
-                        {isDinheiro && (
+                        {isDinheiroToday && (
                           <>
                             <button
                               type="button"
                               onClick={() => openMovementModal('IN')}
-                              title="Adicionar valor em dinheiro (Troco / Abertura / Suprimento)"
-                              className="inline-flex items-center gap-0.5 rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer"
+                              title="Adicionar valor no caixa de hoje (Troco / Abertura / Suprimento)"
+                              className="inline-flex items-center gap-0.5 rounded-lg border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer"
                             >
-                              <Plus size={11} strokeWidth={2.6} />
+                              <Plus size={10} strokeWidth={2.6} />
                               Entrada
                             </button>
                             <button
                               type="button"
                               onClick={() => openMovementModal('OUT')}
-                              title="Retirar valor em dinheiro (Sangria / Despesa)"
-                              className="inline-flex items-center gap-0.5 rounded-lg border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-800 hover:bg-rose-100 transition cursor-pointer"
+                              title="Retirar valor do caixa de hoje (Sangria / Despesa)"
+                              className="inline-flex items-center gap-0.5 rounded-lg border border-rose-300 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-800 hover:bg-rose-100 transition cursor-pointer"
                             >
-                              <Minus size={11} strokeWidth={2.6} />
+                              <Minus size={10} strokeWidth={2.6} />
                               Sangria
                             </button>
                           </>
@@ -815,7 +815,7 @@ export default function PetshopMetricsPage() {
 
                     <div className="flex items-baseline justify-between gap-2">
                       <div>
-                        {isDinheiro && (
+                        {isDinheiroToday && (
                           <span className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
                             Vendas em espécie
                           </span>
@@ -824,7 +824,7 @@ export default function PetshopMetricsPage() {
                           {money(item.amount)}
                         </div>
                       </div>
-                      {isDinheiro && cashDrawer && (
+                      {isDinheiroToday && cashDrawer && (
                         <div className="text-right">
                           <span className="block text-[10px] font-semibold uppercase tracking-wide text-amber-800">
                             Saldo na gaveta
@@ -850,7 +850,7 @@ export default function PetshopMetricsPage() {
                       />
                     </div>
 
-                    {isDinheiro && cashDrawer && (
+                    {isDinheiroToday && cashDrawer && (
                       <div className="pt-2 border-t border-amber-200/60 space-y-1.5 text-[11px]">
                         <div className="flex items-center justify-between text-zinc-600">
                           <span>+ Entradas / Abertura:</span>
@@ -866,7 +866,7 @@ export default function PetshopMetricsPage() {
                         </div>
                         <div className="flex items-center justify-between pt-1">
                           <span className="text-[10px] text-zinc-400">
-                            {period === 'today' ? 'Zera às 00:00 (opcional)' : 'Movimentações do período'}
+                            Zera às 00:00 (opcional)
                           </span>
                           {hasMovements && (
                             <button
@@ -887,7 +887,7 @@ export default function PetshopMetricsPage() {
               })}
             </div>
 
-            {data?.cashDrawer && data.cashDrawer.movements.length > 0 && showMovementsList && (
+            {period === 'today' && data?.cashDrawer && data.cashDrawer.movements.length > 0 && showMovementsList && (
               <div className="rounded-xl border border-amber-200/80 bg-amber-50/30 p-3.5 sm:p-4 space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">

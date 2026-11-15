@@ -227,4 +227,20 @@ describe('PetshopService.getMetrics — mix de pagamentos', () => {
       ],
     });
   });
+
+  it('restringe cashDrawer apenas ao filtro Hoje (retorna undefined em Este Mês / outros períodos)', async () => {
+    const prismaMock = {
+      sale: { findMany: jest.fn().mockResolvedValue([]) },
+      petAppointment: { findMany: jest.fn().mockResolvedValue([]) },
+      customerPetPackage: { findMany: jest.fn().mockResolvedValue([]) },
+      tenantPaymentMethod: { findMany: jest.fn().mockResolvedValue([]) },
+      cashMovement: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+
+    const service = createServiceWithPrisma(prismaMock);
+    const resultMonth = await service.getMetrics('month');
+
+    expect(resultMonth.cashDrawer).toBeUndefined();
+    expect(prismaMock.cashMovement.findMany).not.toHaveBeenCalled();
+  });
 });
