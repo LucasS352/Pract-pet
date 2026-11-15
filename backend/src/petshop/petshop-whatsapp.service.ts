@@ -987,6 +987,17 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       const { tenantId, databaseUrl } = this.tenantContext.get();
       const prisma = await this.prisma();
 
+      const totalRules = await prisma.petshopNotificationRule.count();
+      if (totalRules === 0) {
+        try {
+          await prisma.petshopNotificationRule.createMany({
+            data: DEFAULT_NOTIFICATION_RULES,
+          });
+        } catch {
+          // Ignora colisão concorrente na inicialização das regras padrão
+        }
+      }
+
       const rules = await prisma.petshopNotificationRule.findMany({
         where: { triggerType, active: true },
       });
@@ -1045,9 +1056,11 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
           shop: shopMeta.shopName,
         }) || templateContent;
 
+        const startsAtMs = new Date(appointment.startsAt).getTime();
+        const confirmationBaseMs = Math.max(Number.isFinite(startsAtMs) ? startsAtMs : Date.now(), Date.now());
         const expiresAt =
           triggerType === 'APPOINTMENT_CONFIRMED'
-            ? new Date(appointment.startsAt)
+            ? new Date(confirmationBaseMs + 12 * 3600_000)
             : new Date(Date.now() + 12 * 3600_000);
 
         await prisma.petshopNotificationJob.create({
@@ -1643,6 +1656,7 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
           nextAttemptAt: { lte: now },
         },
         include: {
+          rule: { select: { id: true, active: true } },
           appointment: { select: { id: true, status: true, startsAt: true } },
           customer: { select: { id: true, whatsappOptIn: true } },
         },
@@ -1651,6 +1665,17 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
       });
 
       for (const job of pendingJobs) {
+        if (job.rule && job.rule.active === false) {
+          await prisma.petshopNotificationJob.update({
+            where: { id: job.id },
+            data: {
+              status: 'CANCELLED_STALE',
+              lastError: 'Automação desativada antes do disparo.',
+            },
+          });
+          continue;
+        }
+
         // Revalida se o tutor desativou recebimento
         if (job.customer?.whatsappOptIn === false) {
           await prisma.petshopNotificationJob.update({

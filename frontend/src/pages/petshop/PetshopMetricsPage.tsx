@@ -5,7 +5,6 @@ import {
   CalendarDays,
   Clock,
   DollarSign,
-  Download,
   Package,
   Receipt,
   RefreshCw,
@@ -27,7 +26,7 @@ import {
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { money } from './types';
-import { pageClass, PageHeader, primaryButton, secondaryButton } from './ui';
+import { pageClass, PageHeader, primaryButton } from './ui';
 
 interface PaymentMixItem {
   key: string;
@@ -250,49 +249,6 @@ export default function PetshopMetricsPage() {
     return chartData.find(c => c.isPeak && c.value > 0);
   }, [chartData]);
 
-  const exportMetricsCsv = () => {
-    if (!data) return;
-    const lines = [
-      ['Métrica', 'Valor'],
-      ['Faturamento Total (R$)', Number(data.totals.totalRevenue).toFixed(2)],
-      ['Receita de Serviços Banho/Tosa (R$)', Number(data.totals.serviceRevenue).toFixed(2)],
-      ['Receita de Pacotes Contratados (R$)', Number(data.totals.packageSalesRevenue || 0).toFixed(2)],
-      ['Receita de Produtos PDV (R$)', Number(data.totals.productRevenue).toFixed(2)],
-      ['Ticket Médio (R$)', Number(data.totals.averageTicket).toFixed(2)],
-      ['Atendimentos de Banho e Tosa', data.totals.appointmentsCount],
-      ['Sessões Cobertas por Pacote', data.totals.packageCoveredSessionsCount || 0],
-      ['Vendas recebidas no PDV e Pet Shop', data.totals.salesCount],
-      ['Total de Transações', data.totals.totalTransactions],
-      [],
-      ['Serviço', 'Atendimentos agendados', 'Valor agendado (R$)'],
-      ...data.topServices.map(s => [`"${s.name}"`, s.count, Number(s.revenue).toFixed(2)]),
-      [],
-      ['Produto da Loja', 'Unidades Vendidas', 'Faturamento (R$)'],
-      ...data.topProducts.map(p => [`"${p.name}"`, p.quantity, Number(p.revenue).toFixed(2)]),
-      [],
-      ['Profissional', 'Atendimentos agendados', 'Valor agendado (R$)'],
-      ...data.professionals.map(pro => [`"${pro.name}"`, pro.count, Number(pro.revenue).toFixed(2)]),
-      [],
-      ['Forma de Pagamento', 'Lançamentos', 'Faturamento (R$)', 'Participação (%)'],
-      ...(data.paymentMix || []).map(pm => [
-        `"${pm.label}"`,
-        pm.count,
-        Number(pm.amount).toFixed(2),
-        Number(pm.percentage).toFixed(1),
-      ]),
-    ];
-
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + lines.map(r => r.join(',')).join('\n');
-    const encoded = encodeURI(csvContent);
-    const link = document.createElement('a');
-    link.href = encoded;
-    link.download = `metricas-petshop-${period}-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success('Relatório do Pet Shop exportado em CSV com sucesso!');
-  };
-
   const maxServiceRev = data?.topServices?.[0]?.revenue || 1;
   const maxProductRev = data?.topProducts?.[0]?.revenue || 1;
 
@@ -368,22 +324,13 @@ export default function PetshopMetricsPage() {
           </div>
         </div>
 
-        {/* Botões Exportar e Atualizar */}
-        <div className="grid grid-cols-2 gap-2.5">
-          <button
-            type="button"
-            onClick={exportMetricsCsv}
-            disabled={!data || loading}
-            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 disabled:opacity-50"
-          >
-            <Download size={14} />
-            Exportar CSV
-          </button>
+        {/* Botão Atualizar */}
+        <div>
           <button
             type="button"
             onClick={fetchMetrics}
             disabled={loading}
-            className="flex h-10 cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs disabled:opacity-50"
+            className="flex h-10 w-full cursor-pointer items-center justify-center gap-1.5 rounded-xl bg-[#0d6e5a] px-3 text-xs font-semibold text-white shadow-xs disabled:opacity-50"
           >
             <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
             Atualizar
@@ -450,15 +397,6 @@ export default function PetshopMetricsPage() {
         description="Faturamento consolidado, comparativos de desempenho e horários de maior fluxo."
         action={
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={exportMetricsCsv}
-              disabled={!data || loading}
-              className={`${secondaryButton} flex items-center gap-2`}
-            >
-              <Download size={15} />
-              <span>Exportar Relatório</span>
-            </button>
             <button
               type="button"
               onClick={fetchMetrics}

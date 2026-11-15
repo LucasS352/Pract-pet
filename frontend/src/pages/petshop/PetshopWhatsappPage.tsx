@@ -176,7 +176,7 @@ export default function PetshopWhatsappPage() {
   const [selectedRuleId, setSelectedRuleId] = useState<string | null>(null);
   const [ruleSearch, setRuleSearch] = useState('');
   const [ruleTypeFilter, setRuleTypeFilter] = useState('all');
-  const [ruleStatusFilter, setRuleStatusFilter] = useState<'all' | 'active' | 'inactive'>('active');
+  const [ruleStatusFilter, setRuleStatusFilter] = useState<'all' | 'active' | 'inactive'>('all');
 
   // Formulário do Detalhe Selecionado
   const [editorName, setEditorName] = useState('');
@@ -355,6 +355,30 @@ export default function PetshopWhatsappPage() {
       toast.success('Automação atualizada com sucesso!');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao salvar alterações da automação.');
+    } finally {
+      setSavingRule(false);
+    }
+  };
+
+  // Alternar status Ativa / Pausada imediatamente ao clicar no interruptor
+  const handleToggleSelectedRuleActive = async () => {
+    if (!selectedRule || savingRule) return;
+    const nextActive = !editorActive;
+    setEditorActive(nextActive);
+    setSavingRule(true);
+    try {
+      const { data } = await api.patch(`/petshop/whatsapp/rules/${selectedRule.id}`, {
+        active: nextActive,
+      });
+      setRules(curr => curr.map(r => (r.id === selectedRule.id ? data : r)));
+      toast.success(
+        nextActive
+          ? 'Automação ativada! Novos eventos serão enviados automaticamente.'
+          : 'Automação pausada! Nenhuma mensagem será disparada enquanto estiver desativada.',
+      );
+    } catch (err: any) {
+      setEditorActive(!nextActive);
+      toast.error(err.response?.data?.message || 'Erro ao atualizar status da automação.');
     } finally {
       setSavingRule(false);
     }
@@ -873,8 +897,9 @@ export default function PetshopWhatsappPage() {
                             type="button"
                             role="switch"
                             aria-checked={editorActive}
-                            onClick={() => setEditorActive(v => !v)}
-                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                            disabled={savingRule}
+                            onClick={handleToggleSelectedRuleActive}
+                            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none disabled:opacity-60 ${
                               editorActive ? 'bg-emerald-600' : 'bg-slate-300'
                             }`}
                           >
