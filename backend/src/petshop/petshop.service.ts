@@ -23,6 +23,39 @@ const PET_SIZE_PT_LABELS: Record<string, string> = {
   giant: 'Gigante',
 };
 
+const STANDARD_PAYMENT_MIX_METHODS: ReadonlyArray<{ key: string; label: string }> = [
+  { key: 'pix', label: 'Pix' },
+  { key: 'credito', label: 'Cartão de Crédito' },
+  { key: 'debito', label: 'Cartão de Débito' },
+  { key: 'dinheiro', label: 'Dinheiro' },
+];
+
+const PAYMENT_MIX_ALIASES: Record<string, { key: string; label: string }> = {
+  pix: { key: 'pix', label: 'Pix' },
+  '17': { key: 'pix', label: 'Pix' },
+  credito: { key: 'credito', label: 'Cartão de Crédito' },
+  credit: { key: 'credito', label: 'Cartão de Crédito' },
+  crédito: { key: 'credito', label: 'Cartão de Crédito' },
+  cartao_credito: { key: 'credito', label: 'Cartão de Crédito' },
+  'cartao de credito': { key: 'credito', label: 'Cartão de Crédito' },
+  'cartão de crédito': { key: 'credito', label: 'Cartão de Crédito' },
+  credit_card: { key: 'credito', label: 'Cartão de Crédito' },
+  debito: { key: 'debito', label: 'Cartão de Débito' },
+  debit: { key: 'debito', label: 'Cartão de Débito' },
+  débito: { key: 'debito', label: 'Cartão de Débito' },
+  cartao_debito: { key: 'debito', label: 'Cartão de Débito' },
+  'cartao de debito': { key: 'debito', label: 'Cartão de Débito' },
+  'cartão de débito': { key: 'debito', label: 'Cartão de Débito' },
+  debit_card: { key: 'debito', label: 'Cartão de Débito' },
+  dinheiro: { key: 'dinheiro', label: 'Dinheiro' },
+  cash: { key: 'dinheiro', label: 'Dinheiro' },
+  especie: { key: 'dinheiro', label: 'Dinheiro' },
+  espécie: { key: 'dinheiro', label: 'Dinheiro' },
+  consumo_funcionario: { key: 'consumo_funcionario', label: 'Consumo Equipe' },
+  'consumo equipe': { key: 'consumo_funcionario', label: 'Consumo Equipe' },
+  'consumo funcionário': { key: 'consumo_funcionario', label: 'Consumo Equipe' },
+};
+
 const APPOINTMENT_STATUSES = new Set([
   'requested', 'scheduled', 'checked_in', 'bathing', 'grooming',
   'finishing', 'ready', 'delivered', 'cancelled', 'no_show',
@@ -136,6 +169,54 @@ export class PetshopService {
     return { metrics: { pets, tutors, products, services: servicesCount, today, inProgress, vaccinesDue }, nextAppointments };
   }
 
+  private resolvePaymentMixBucket(
+    rawMethod: unknown,
+    rawLabel: unknown,
+    rawTPag: unknown,
+    customMethods: Map<string, { id: string; name: string }>,
+  ): { key: string; label: string } {
+    const methodText = String(rawMethod ?? '').trim();
+    const labelText = String(rawLabel ?? '').trim();
+    const tPagText = String(rawTPag ?? '').trim();
+    const normalizedMethod = methodText.toLowerCase();
+    const normalizedLabel = labelText.toLowerCase();
+
+    // Match explicit custom payment method IDs before generic code aliases.
+    const cleanCustomId = normalizedMethod.startsWith('custom:') ? methodText.slice(7).trim() : methodText;
+    const customMatch = customMethods.get(cleanCustomId) || customMethods.get(cleanCustomId.toLowerCase());
+    if (customMatch) {
+      return { key: `custom:${customMatch.id}`, label: customMatch.name };
+    }
+
+    if (PAYMENT_MIX_ALIASES[normalizedMethod]) {
+      return PAYMENT_MIX_ALIASES[normalizedMethod];
+    }
+    if (normalizedLabel && PAYMENT_MIX_ALIASES[normalizedLabel]) {
+      return PAYMENT_MIX_ALIASES[normalizedLabel];
+    }
+
+    if (!normalizedMethod || normalizedMethod === 'outros' || normalizedMethod === 'other' || normalizedMethod === 'outro') {
+      if (tPagText === '01') return { key: 'dinheiro', label: 'Dinheiro' };
+      if (tPagText === '03') return { key: 'credito', label: 'Cartão de Crédito' };
+      if (tPagText === '04') return { key: 'debito', label: 'Cartão de Débito' };
+      if (tPagText === '17') return { key: 'pix', label: 'Pix' };
+    }
+
+    if (labelText && normalizedLabel !== 'outros' && normalizedLabel !== 'outro' && normalizedLabel !== 'other') {
+      const fallbackKey =
+        normalizedMethod && normalizedMethod !== 'outros' && normalizedMethod !== 'other' && normalizedMethod !== 'outro'
+          ? normalizedMethod
+          : `label:${normalizedLabel}`;
+      return { key: fallbackKey, label: labelText };
+    }
+
+    if (methodText && normalizedMethod !== 'outros' && normalizedMethod !== 'other' && normalizedMethod !== 'outro') {
+      return { key: `method:${normalizedMethod}`, label: methodText };
+    }
+
+    return { key: 'outros', label: 'Outros' };
+  }
+
   async getMetrics(period: string = 'today', customFrom?: string, customTo?: string) {
     const prisma = await this.prisma();
     const now = new Date();
@@ -207,10 +288,13 @@ export class PetshopService {
     }
 
     // 1. Busca transações do período selecionado
-    const [sales, appointments, soldPackages] = await Promise.all([
+    const [sales, appointments, soldPackages, customPaymentMethods] = await Promise.all([
       prisma.sale.findMany({
         where: { createdAt: { gte: start, lte: end }, status: { not: 'cancelled' } },
-        include: { items: { include: { product: { select: { id: true, name: true } } } } },
+        include: {
+          items: { include: { product: { select: { id: true, name: true } } } },
+          payments: { select: { method: true, label: true, tPag: true, value: true, troco: true } },
+        },
       }),
       prisma.petAppointment.findMany({
         where: { startsAt: { gte: start, lte: end }, status: { notIn: ['cancelled', 'no_show'] } },
@@ -223,8 +307,11 @@ export class PetshopService {
           paymentStatus: 'paid',
           saleId: null,
         },
-        select: { finalPrice: true },
+        select: { finalPrice: true, paymentMethod: true },
       }).catch(() => []),
+      prisma.tenantPaymentMethod?.findMany
+        ? prisma.tenantPaymentMethod.findMany({ select: { id: true, name: true } }).catch(() => [])
+        : Promise.resolve([]),
     ]);
 
     // 2. Busca totais do período anterior para o comparativo
@@ -254,12 +341,52 @@ export class PetshopService {
     let serviceRevenue = 0;
     const productMap = new Map<string, { name: string; quantity: number; revenue: number }>();
 
+    const customMethodMap = new Map<string, { id: string; name: string }>();
+    for (const cm of Array.isArray(customPaymentMethods) ? customPaymentMethods : []) {
+      if (cm?.id && cm?.name) {
+        customMethodMap.set(cm.id, cm);
+        customMethodMap.set(cm.id.toLowerCase(), cm);
+      }
+    }
+
+    const paymentMixMap = new Map<string, { key: string; label: string; amount: number; count: number }>();
+    for (const std of STANDARD_PAYMENT_MIX_METHODS) {
+      paymentMixMap.set(std.key, { key: std.key, label: std.label, amount: 0, count: 0 });
+    }
+    const addPaymentMixEntry = (key: string, label: string, amount: number) => {
+      if (amount <= 0) return;
+      const current = paymentMixMap.get(key) || { key, label, amount: 0, count: 0 };
+      current.amount += amount;
+      current.count += 1;
+      paymentMixMap.set(key, current);
+    };
+
     for (const sale of sales) {
+      const saleTotal = Number(sale.total || 0);
+      const payments = Array.isArray((sale as any).payments) ? (sale as any).payments : [];
+      if (payments.length === 0) {
+        if (saleTotal > 0) {
+          addPaymentMixEntry('outros', 'Outros', saleTotal);
+        }
+      } else {
+        const rawPaymentsSum = payments.reduce((sum: number, p: any) => sum + Number(p?.value || 0), 0);
+        // Demo seeds stored tendered cash (total + troco) inside Payment.value, while PDV stores net applied value.
+        const deductTroco = rawPaymentsSum > saleTotal + 0.01;
+        for (const p of payments) {
+          const rawVal = Number(p?.value || 0);
+          const trocoVal = deductTroco ? Number(p?.troco || 0) : 0;
+          const netAmount = Math.max(0, rawVal - trocoVal);
+          if (netAmount <= 0) continue;
+          const bucket = this.resolvePaymentMixBucket(p?.method, p?.label, p?.tPag, customMethodMap);
+          addPaymentMixEntry(bucket.key, bucket.label, netAmount);
+        }
+      }
+
       if (sale.source === 'petshop') {
-        serviceRevenue += Number(sale.total || 0);
+        serviceRevenue += saleTotal;
         continue;
       }
-      productRevenue += Number(sale.total || 0);
+      productRevenue += saleTotal;
       for (const item of sale.items) {
         const pName = item.product?.name || item.productName || 'Produto';
         const current = productMap.get(pName) || { name: pName, quantity: 0, revenue: 0 };
@@ -301,7 +428,12 @@ export class PetshopService {
     // Receita de pacotes contratados e pagos no período
     let packageRevenue = 0;
     for (const p of soldPackages) {
-      packageRevenue += Number(p.finalPrice || 0);
+      const pkgVal = Number(p.finalPrice || 0);
+      packageRevenue += pkgVal;
+      if (pkgVal > 0) {
+        const bucket = this.resolvePaymentMixBucket((p as any).paymentMethod, undefined, undefined, customMethodMap);
+        addPaymentMixEntry(bucket.key, bucket.label, pkgVal);
+      }
     }
 
     const totalRevenue = productRevenue + serviceRevenue + packageRevenue;
@@ -367,6 +499,19 @@ export class PetshopService {
     const professionals = Array.from(proMap.values())
       .sort((a, b) => b.count - a.count);
 
+    const standardKeys = new Set(STANDARD_PAYMENT_MIX_METHODS.map((m) => m.key));
+    const mixTotalRaw = Array.from(paymentMixMap.values()).reduce((sum, entry) => sum + entry.amount, 0);
+    const paymentMix = Array.from(paymentMixMap.values())
+      .filter((entry) => entry.amount > 0 || entry.count > 0 || standardKeys.has(entry.key))
+      .map((entry) => ({
+        key: entry.key,
+        label: entry.label,
+        amount: Number(entry.amount.toFixed(2)),
+        count: entry.count,
+        percentage: mixTotalRaw > 0 ? Number(((entry.amount / mixTotalRaw) * 100).toFixed(1)) : 0,
+      }))
+      .sort((a, b) => b.amount - a.amount);
+
     return {
       period,
       start: start.toISOString(),
@@ -388,6 +533,7 @@ export class PetshopService {
         totalTransactions,
         averageTicket,
       },
+      paymentMix,
       byHour,
       byDayOfWeek: Object.values(byDayOfWeek),
       topServices,

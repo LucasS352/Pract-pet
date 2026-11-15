@@ -29,6 +29,95 @@ import { api } from '@/lib/api';
 import { money } from './types';
 import { pageClass, PageHeader, primaryButton, secondaryButton } from './ui';
 
+interface PaymentMixItem {
+  key: string;
+  label: string;
+  amount: number;
+  count: number;
+  percentage: number;
+}
+
+const PAYMENT_METHOD_VISUALS: Record<string, { barColor: string; badgeBg: string; iconBg: string }> = {
+  pix: {
+    barColor: '#0d9488',
+    badgeBg: 'bg-teal-50 text-teal-700 border-teal-200/80',
+    iconBg: 'bg-teal-50 text-teal-600',
+  },
+  credito: {
+    barColor: '#4f46e5',
+    badgeBg: 'bg-indigo-50 text-indigo-700 border-indigo-200/80',
+    iconBg: 'bg-indigo-50 text-indigo-600',
+  },
+  debito: {
+    barColor: '#0284c7',
+    badgeBg: 'bg-sky-50 text-sky-700 border-sky-200/80',
+    iconBg: 'bg-sky-50 text-sky-600',
+  },
+  dinheiro: {
+    barColor: '#d97706',
+    badgeBg: 'bg-amber-50 text-amber-700 border-amber-200/80',
+    iconBg: 'bg-amber-50 text-amber-600',
+  },
+  consumo_funcionario: {
+    barColor: '#64748b',
+    badgeBg: 'bg-slate-100 text-slate-700 border-slate-200',
+    iconBg: 'bg-slate-100 text-slate-600',
+  },
+  outros: {
+    barColor: '#7c3aed',
+    badgeBg: 'bg-violet-50 text-violet-700 border-violet-200/80',
+    iconBg: 'bg-violet-50 text-violet-600',
+  },
+};
+
+function getPaymentMethodVisual(key: string) {
+  return PAYMENT_METHOD_VISUALS[key] || PAYMENT_METHOD_VISUALS.outros;
+}
+
+function renderPaymentMethodIcon(key: string) {
+  if (key === 'pix') {
+    return (
+      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <rect width="5" height="5" x="3" y="3" rx="1" />
+        <rect width="5" height="5" x="16" y="3" rx="1" />
+        <rect width="5" height="5" x="3" y="16" rx="1" />
+        <path d="M21 16h-3a2 2 0 0 0-2 2v3" />
+        <path d="M21 21v.01" />
+        <path d="M12 7v3a2 2 0 0 1-2 2H7" />
+        <path d="M3 12h.01" />
+        <path d="M12 3h.01" />
+        <path d="M12 16v.01" />
+        <path d="M16 12h1" />
+        <path d="M21 12v.01" />
+        <path d="M12 21v-1" />
+      </svg>
+    );
+  }
+  if (key === 'credito' || key === 'debito') {
+    return (
+      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <rect width="20" height="14" x="2" y="5" rx="2" />
+        <line x1="2" x2="22" y1="10" y2="10" />
+      </svg>
+    );
+  }
+  if (key === 'dinheiro') {
+    return (
+      <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+        <rect width="20" height="12" x="2" y="6" rx="2" />
+        <circle cx="12" cy="12" r="2" />
+        <path d="M6 12h.01M18 12h.01" />
+      </svg>
+    );
+  }
+  return (
+    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1" />
+      <path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4" />
+    </svg>
+  );
+}
+
 interface MetricsData {
   period: string;
   start: string;
@@ -50,6 +139,7 @@ interface MetricsData {
     totalTransactions: number;
     averageTicket: number;
   };
+  paymentMix?: PaymentMixItem[];
   byHour?: Record<string | number, number>;
   byDayOfWeek?: Array<{ day: string; count: number; revenue: number }>;
   topServices: Array<{ name: string; count: number; revenue: number }>;
@@ -182,6 +272,14 @@ export default function PetshopMetricsPage() {
       [],
       ['Profissional', 'Atendimentos agendados', 'Valor agendado (R$)'],
       ...data.professionals.map(pro => [`"${pro.name}"`, pro.count, Number(pro.revenue).toFixed(2)]),
+      [],
+      ['Forma de Pagamento', 'Lançamentos', 'Faturamento (R$)', 'Participação (%)'],
+      ...(data.paymentMix || []).map(pm => [
+        `"${pm.label}"`,
+        pm.count,
+        Number(pm.amount).toFixed(2),
+        Number(pm.percentage).toFixed(1),
+      ]),
     ];
 
     const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + lines.map(r => r.join(',')).join('\n');
@@ -572,6 +670,114 @@ export default function PetshopMetricsPage() {
       </section>
 
       </div>
+
+      {/* 2B. MIX DE PAGAMENTOS (PDV, SERVIÇOS E PACOTES) */}
+      {(() => {
+        const paymentMix = data?.paymentMix || [
+          { key: 'pix', label: 'Pix', amount: 0, count: 0, percentage: 0 },
+          { key: 'credito', label: 'Cartão de Crédito', amount: 0, count: 0, percentage: 0 },
+          { key: 'debito', label: 'Cartão de Débito', amount: 0, count: 0, percentage: 0 },
+          { key: 'dinheiro', label: 'Dinheiro', amount: 0, count: 0, percentage: 0 },
+        ];
+        const mixTotal = paymentMix.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+        const activeMix = paymentMix.filter((item) => Number(item.amount || 0) > 0);
+        const leadingMethod = activeMix[0];
+
+        return (
+          <section
+            aria-label="Mix de pagamentos"
+            className="mb-6 rounded-2xl border border-zinc-200/90 bg-white p-4 sm:p-6 shadow-xs space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5">
+              <div>
+                <h2 className="text-base font-extrabold text-zinc-900">Mix de Pagamentos</h2>
+                <p className="text-xs sm:text-sm text-zinc-500">
+                  Distribuição do faturamento recebido por forma de pagamento no período
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                {leadingMethod && (
+                  <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold ${getPaymentMethodVisual(leadingMethod.key).badgeBg}`}>
+                    Principal: {leadingMethod.label} ({leadingMethod.percentage.toFixed(1).replace('.', ',')}%)
+                  </span>
+                )}
+                <span className="inline-flex items-center rounded-full bg-zinc-100 px-3 py-1 text-xs font-semibold text-zinc-700 tabular-nums">
+                  Total recebido: {money(mixTotal)}
+                </span>
+              </div>
+            </div>
+
+            {mixTotal > 0 ? (
+              <div className="h-3 w-full rounded-full bg-zinc-100 overflow-hidden flex gap-0.5 p-0.5">
+                {activeMix.map((item) => {
+                  const visual = getPaymentMethodVisual(item.key);
+                  return (
+                    <div
+                      key={item.key}
+                      title={`${item.label}: ${money(item.amount)} (${item.percentage.toFixed(1).replace('.', ',')}%)`}
+                      className="h-full first:rounded-l-full last:rounded-r-full transition-all duration-300"
+                      style={{
+                        width: `${Math.max(item.percentage, 2)}%`,
+                        backgroundColor: visual.barColor,
+                      }}
+                    />
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-xl bg-zinc-50 border border-dashed border-zinc-200 px-4 py-3 text-xs sm:text-sm text-zinc-500">
+                Nenhum recebimento registrado neste período ainda.
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              {paymentMix.map((item) => {
+                const visual = getPaymentMethodVisual(item.key);
+                const pctText = `${item.percentage.toFixed(1).replace('.', ',')}%`;
+                return (
+                  <div
+                    key={item.key}
+                    className="rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-3.5 hover:bg-white hover:border-zinc-300/80 transition-colors space-y-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${visual.iconBg}`}>
+                          {renderPaymentMethodIcon(item.key)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="text-sm font-semibold text-zinc-900 truncate" title={item.label}>
+                            {item.label}
+                          </div>
+                          <div className="text-xs text-zinc-500">
+                            {item.count} {item.count === 1 ? 'lançamento' : 'lançamentos'}
+                          </div>
+                        </div>
+                      </div>
+                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-bold tabular-nums ${visual.badgeBg}`}>
+                        {pctText}
+                      </span>
+                    </div>
+
+                    <div className="text-base sm:text-lg font-extrabold text-zinc-900 tabular-nums">
+                      {money(item.amount)}
+                    </div>
+
+                    <div className="h-1.5 w-full rounded-full bg-zinc-200/70 overflow-hidden">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.max(0, item.percentage))}%`,
+                          backgroundColor: visual.barColor,
+                        }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })()}
 
       {/* 3. GRÁFICO DOS HORÁRIOS MAIS MOVIMENTADOS DO PET SHOP (AMPLO, CLARO E TONALIDADE DO PET) */}
       <section
