@@ -5,13 +5,17 @@ import {
   CalendarDays,
   Clock,
   DollarSign,
+  Minus,
   Package,
+  Plus,
   Receipt,
   RefreshCw,
   Scissors,
   ShoppingBag,
   Sparkles,
+  Trash2,
   UserCheck,
+  Wallet,
 } from 'lucide-react';
 import {
   BarChart,
@@ -26,7 +30,7 @@ import {
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { money } from './types';
-import { pageClass, PageHeader, primaryButton } from './ui';
+import { Modal, pageClass, PageHeader, primaryButton } from './ui';
 
 interface PaymentMixItem {
   key: string;
@@ -117,6 +121,22 @@ function renderPaymentMethodIcon(key: string) {
   );
 }
 
+interface CashMovementItem {
+  id: string;
+  type: 'IN' | 'OUT';
+  value: number;
+  reason: string;
+  createdAt: string;
+}
+
+interface CashDrawerData {
+  cashSalesAmount: number;
+  totalIn: number;
+  totalOut: number;
+  netCashBalance: number;
+  movements: CashMovementItem[];
+}
+
 interface MetricsData {
   period: string;
   start: string;
@@ -139,6 +159,7 @@ interface MetricsData {
     averageTicket: number;
   };
   paymentMix?: PaymentMixItem[];
+  cashDrawer?: CashDrawerData;
   byHour?: Record<string | number, number>;
   byDayOfWeek?: Array<{ day: string; count: number; revenue: number }>;
   topServices: Array<{ name: string; count: number; revenue: number }>;
@@ -154,6 +175,68 @@ export default function PetshopMetricsPage() {
 
   const [data, setData] = useState<MetricsData | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const [movementModalOpen, setMovementModalOpen] = useState(false);
+  const [movementType, setMovementType] = useState<'IN' | 'OUT'>('IN');
+  const [movementValue, setMovementValue] = useState('');
+  const [movementReason, setMovementReason] = useState('');
+  const [savingMovement, setSavingMovement] = useState(false);
+  const [deletingMovementId, setDeletingMovementId] = useState<string | null>(null);
+  const [showMovementsList, setShowMovementsList] = useState(false);
+
+  const openMovementModal = (type: 'IN' | 'OUT') => {
+    setMovementType(type);
+    setMovementValue('');
+    setMovementReason('');
+    setMovementModalOpen(true);
+  };
+
+  const handleSaveMovement = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const numericVal = Number(String(movementValue).replace(',', '.'));
+    if (!Number.isFinite(numericVal) || numericVal <= 0) {
+      toast.error('Informe um valor válido maior que zero.');
+      return;
+    }
+    if (!movementReason.trim()) {
+      toast.error('Informe uma observação para registrar a movimentação.');
+      return;
+    }
+    setSavingMovement(true);
+    try {
+      await api.post('/petshop/cash-movements', {
+        type: movementType,
+        value: numericVal,
+        reason: movementReason.trim(),
+      });
+      toast.success(
+        movementType === 'IN'
+          ? 'Entrada / abertura registrada no caixa em dinheiro.'
+          : 'Sangria / retirada registrada no caixa em dinheiro.',
+      );
+      setMovementModalOpen(false);
+      setShowMovementsList(true);
+      await fetchMetrics();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Não foi possível registrar a movimentação.');
+    } finally {
+      setSavingMovement(false);
+    }
+  };
+
+  const handleDeleteMovement = async (id: string) => {
+    if (deletingMovementId) return;
+    setDeletingMovementId(id);
+    try {
+      await api.delete(`/petshop/cash-movements/${id}`);
+      toast.success('Movimentação removida.');
+      await fetchMetrics();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Não foi possível remover a movimentação.');
+    } finally {
+      setDeletingMovementId(null);
+    }
+  };
 
   // Inicializa datas customizadas com o mês atual caso queira filtrar
   useEffect(() => {
@@ -672,10 +755,20 @@ export default function PetshopMetricsPage() {
               {paymentMix.map((item) => {
                 const visual = getPaymentMethodVisual(item.key);
                 const pctText = `${item.percentage.toFixed(1).replace('.', ',')}%`;
+                const isDinheiro = item.key === 'dinheiro';
+                const cashDrawer = data?.cashDrawer;
+                const hasMovements = Boolean(
+                  cashDrawer && (cashDrawer.movements.length > 0 || cashDrawer.totalIn > 0 || cashDrawer.totalOut > 0),
+                );
+
                 return (
                   <div
                     key={item.key}
-                    className="rounded-xl border border-zinc-200/80 bg-zinc-50/50 p-3.5 hover:bg-white hover:border-zinc-300/80 transition-colors space-y-2.5"
+                    className={`rounded-xl border p-3.5 transition-colors space-y-2.5 ${
+                      isDinheiro
+                        ? 'border-amber-200/90 bg-amber-50/25 hover:bg-white hover:border-amber-300'
+                        : 'border-zinc-200/80 bg-zinc-50/50 hover:bg-white hover:border-zinc-300/80'
+                    }`}
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex items-center gap-2.5 min-w-0">
@@ -691,13 +784,60 @@ export default function PetshopMetricsPage() {
                           </div>
                         </div>
                       </div>
-                      <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-bold tabular-nums ${visual.badgeBg}`}>
-                        {pctText}
-                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {isDinheiro && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openMovementModal('IN')}
+                              title="Adicionar valor em dinheiro (Troco / Abertura / Suprimento)"
+                              className="inline-flex items-center gap-0.5 rounded-lg border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800 hover:bg-emerald-100 transition cursor-pointer"
+                            >
+                              <Plus size={11} strokeWidth={2.6} />
+                              Entrada
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => openMovementModal('OUT')}
+                              title="Retirar valor em dinheiro (Sangria / Despesa)"
+                              className="inline-flex items-center gap-0.5 rounded-lg border border-rose-300 bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-800 hover:bg-rose-100 transition cursor-pointer"
+                            >
+                              <Minus size={11} strokeWidth={2.6} />
+                              Sangria
+                            </button>
+                          </>
+                        )}
+                        <span className={`shrink-0 rounded-full border px-2 py-0.5 text-xs font-bold tabular-nums ${visual.badgeBg}`}>
+                          {pctText}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="text-base sm:text-lg font-extrabold text-zinc-900 tabular-nums">
-                      {money(item.amount)}
+                    <div className="flex items-baseline justify-between gap-2">
+                      <div>
+                        {isDinheiro && (
+                          <span className="block text-[10px] font-semibold uppercase tracking-wide text-zinc-500">
+                            Vendas em espécie
+                          </span>
+                        )}
+                        <div className="text-base sm:text-lg font-extrabold text-zinc-900 tabular-nums">
+                          {money(item.amount)}
+                        </div>
+                      </div>
+                      {isDinheiro && cashDrawer && (
+                        <div className="text-right">
+                          <span className="block text-[10px] font-semibold uppercase tracking-wide text-amber-800">
+                            Saldo na gaveta
+                          </span>
+                          <div
+                            className={`text-sm sm:text-base font-extrabold tabular-nums ${
+                              cashDrawer.netCashBalance < 0 ? 'text-rose-600' : 'text-emerald-700'
+                            }`}
+                          >
+                            {money(cashDrawer.netCashBalance)}
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     <div className="h-1.5 w-full rounded-full bg-zinc-200/70 overflow-hidden">
@@ -709,10 +849,140 @@ export default function PetshopMetricsPage() {
                         }}
                       />
                     </div>
+
+                    {isDinheiro && cashDrawer && (
+                      <div className="pt-2 border-t border-amber-200/60 space-y-1.5 text-[11px]">
+                        <div className="flex items-center justify-between text-zinc-600">
+                          <span>+ Entradas / Abertura:</span>
+                          <strong className="font-bold text-emerald-700 tabular-nums">
+                            +{money(cashDrawer.totalIn)}
+                          </strong>
+                        </div>
+                        <div className="flex items-center justify-between text-zinc-600">
+                          <span>- Sangrias / Retiradas:</span>
+                          <strong className="font-bold text-rose-600 tabular-nums">
+                            -{money(cashDrawer.totalOut)}
+                          </strong>
+                        </div>
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-[10px] text-zinc-400">
+                            {period === 'today' ? 'Zera às 00:00 (opcional)' : 'Movimentações do período'}
+                          </span>
+                          {hasMovements && (
+                            <button
+                              type="button"
+                              onClick={() => setShowMovementsList((prev) => !prev)}
+                              className="text-[11px] font-bold text-amber-800 underline hover:text-amber-950 cursor-pointer"
+                            >
+                              {showMovementsList
+                                ? 'Ocultar extrato'
+                                : `Ver extrato (${cashDrawer.movements.length})`}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
+
+            {data?.cashDrawer && data.cashDrawer.movements.length > 0 && showMovementsList && (
+              <div className="rounded-xl border border-amber-200/80 bg-amber-50/30 p-3.5 sm:p-4 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="grid h-7 w-7 place-items-center rounded-lg bg-amber-100 text-amber-800">
+                      <Wallet size={15} />
+                    </span>
+                    <div>
+                      <h3 className="text-xs sm:text-sm font-bold text-zinc-900">
+                        Extrato de Caixa em Dinheiro (Abertura, Troco e Sangrias)
+                      </h3>
+                      <p className="text-[11px] text-zinc-500">
+                        Vendas em dinheiro ({money(data.cashDrawer.cashSalesAmount)}) + Entradas ({money(data.cashDrawer.totalIn)}) - Sangrias ({money(data.cashDrawer.totalOut)}) ={' '}
+                        <strong className="text-zinc-900">{money(data.cashDrawer.netCashBalance)} na gaveta</strong>
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => openMovementModal('IN')}
+                      className="inline-flex items-center gap-1 rounded-lg border border-emerald-300 bg-white px-2.5 py-1 text-xs font-bold text-emerald-800 hover:bg-emerald-50 cursor-pointer"
+                    >
+                      <Plus size={12} /> Nova Entrada
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openMovementModal('OUT')}
+                      className="inline-flex items-center gap-1 rounded-lg border border-rose-300 bg-white px-2.5 py-1 text-xs font-bold text-rose-800 hover:bg-rose-50 cursor-pointer"
+                    >
+                      <Minus size={12} /> Nova Sangria
+                    </button>
+                  </div>
+                </div>
+
+                <div className="divide-y divide-amber-200/60 rounded-xl border border-amber-200/70 bg-white">
+                  {data.cashDrawer.movements.map((mov) => {
+                    const isIn = mov.type === 'IN';
+                    const dt = new Date(mov.createdAt);
+                    const formattedDate = Number.isNaN(dt.getTime())
+                      ? ''
+                      : dt.toLocaleString('pt-BR', {
+                          day: '2-digit',
+                          month: '2-digit',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        });
+                    return (
+                      <div
+                        key={mov.id}
+                        className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-xs"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span
+                            className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-extrabold uppercase ${
+                              isIn
+                                ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                : 'bg-rose-100 text-rose-800 border border-rose-200'
+                            }`}
+                          >
+                            {isIn ? '+ Entrada' : '- Sangria'}
+                          </span>
+                          <div className="min-w-0">
+                            <p className="font-semibold text-zinc-900 truncate" title={mov.reason}>
+                              {mov.reason || (isIn ? 'Entrada / Troco' : 'Sangria / Retirada')}
+                            </p>
+                            {formattedDate && (
+                              <p className="text-[10px] text-zinc-400 tabular-nums">{formattedDate}</p>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2.5 shrink-0">
+                          <strong
+                            className={`font-extrabold tabular-nums ${
+                              isIn ? 'text-emerald-700' : 'text-rose-600'
+                            }`}
+                          >
+                            {isIn ? `+${money(mov.value)}` : `-${money(mov.value)}`}
+                          </strong>
+                          <button
+                            type="button"
+                            disabled={deletingMovementId === mov.id}
+                            onClick={() => handleDeleteMovement(mov.id)}
+                            title="Remover lançamento"
+                            className="rounded-lg p-1 text-zinc-400 hover:bg-rose-50 hover:text-rose-600 transition cursor-pointer disabled:opacity-40"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </section>
         );
       })()}
@@ -999,6 +1269,126 @@ export default function PetshopMetricsPage() {
           )}
         </div>
       </section>
+
+      {movementModalOpen && (
+        <Modal
+          title={
+            movementType === 'IN'
+              ? 'Adicionar Dinheiro no Caixa (Abertura / Troco)'
+              : 'Registrar Sangria / Retirada do Caixa'
+          }
+          subtitle="A abertura de caixa não é obrigatória e o saldo diário reinicia automaticamente às 00:00."
+          onClose={() => {
+            if (!savingMovement) setMovementModalOpen(false);
+          }}
+          maxWidth="sm:max-w-md"
+        >
+          <form onSubmit={handleSaveMovement} className="space-y-4">
+            <div className="grid grid-cols-2 gap-2 rounded-xl bg-zinc-100 p-1">
+              <button
+                type="button"
+                onClick={() => setMovementType('IN')}
+                className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-bold transition cursor-pointer ${
+                  movementType === 'IN'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'text-zinc-600 hover:text-zinc-900'
+                }`}
+              >
+                <Plus size={14} />
+                Entrada / Abertura
+              </button>
+              <button
+                type="button"
+                onClick={() => setMovementType('OUT')}
+                className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-bold transition cursor-pointer ${
+                  movementType === 'OUT'
+                    ? 'bg-rose-600 text-white shadow-xs'
+                    : 'text-zinc-600 hover:text-zinc-900'
+                }`}
+              >
+                <Minus size={14} />
+                Sangria / Retirada
+              </button>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-700 mb-1">
+                Valor em Dinheiro (R$) *
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                required
+                autoFocus
+                placeholder="Ex: 50,00"
+                value={movementValue}
+                onChange={(e) => setMovementValue(e.target.value)}
+                className="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-sm font-bold text-zinc-900 outline-none focus:border-teal-700 focus:ring-1 focus:ring-teal-700"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-zinc-700 mb-1">
+                Observação / Motivo *
+              </label>
+              <input
+                type="text"
+                required
+                placeholder={
+                  movementType === 'IN'
+                    ? 'Ex: Troco inicial do dia, reforço de caixa...'
+                    : 'Ex: Sangria para o cofre, compra de insumo/limpeza...'
+                }
+                value={movementReason}
+                onChange={(e) => setMovementReason(e.target.value)}
+                className="w-full rounded-xl border border-zinc-300 bg-white px-3.5 py-2.5 text-xs font-medium text-zinc-900 outline-none focus:border-teal-700 focus:ring-1 focus:ring-teal-700"
+              />
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {(movementType === 'IN'
+                  ? ['Abertura de caixa (Troco)', 'Reforço de troco']
+                  : ['Sangria para o cofre', 'Despesa rápida / Insumos', 'Retirada']
+                ).map((preset) => (
+                  <button
+                    key={preset}
+                    type="button"
+                    onClick={() => setMovementReason(preset)}
+                    className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 cursor-pointer"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-100">
+              <button
+                type="button"
+                disabled={savingMovement}
+                onClick={() => setMovementModalOpen(false)}
+                className="rounded-xl border border-zinc-200 bg-zinc-100 px-4 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={savingMovement}
+                className={`rounded-xl px-4 py-2 text-xs font-bold text-white shadow-xs transition cursor-pointer disabled:opacity-50 ${
+                  movementType === 'IN'
+                    ? 'bg-emerald-600 hover:bg-emerald-700'
+                    : 'bg-rose-600 hover:bg-rose-700'
+                }`}
+              >
+                {savingMovement
+                  ? 'Salvando...'
+                  : movementType === 'IN'
+                    ? 'Confirmar Entrada'
+                    : 'Confirmar Sangria'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
     </div>
   );
 }

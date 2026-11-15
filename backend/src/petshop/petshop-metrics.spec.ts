@@ -172,5 +172,59 @@ describe('PetshopService.getMetrics — mix de pagamentos', () => {
     expect(result.totals.totalRevenue).toBe(0);
     expect(result.paymentMix.map((m) => m.key)).toEqual(['pix', 'credito', 'debito', 'dinheiro']);
     expect(result.paymentMix.every((m) => m.amount === 0 && m.percentage === 0 && m.count === 0)).toBe(true);
+    expect(result.cashDrawer).toEqual({
+      cashSalesAmount: 0,
+      totalIn: 0,
+      totalOut: 0,
+      netCashBalance: 0,
+      movements: [],
+    });
+  });
+
+  it('calcula saldo da gaveta (vendas em dinheiro + entradas/abertura - sangrias) sem distorcer o faturamento bruto', async () => {
+    const now = new Date('2026-11-15T14:00:00.000Z');
+    const prismaMock = {
+      sale: {
+        findMany: jest
+          .fn()
+          .mockResolvedValueOnce([
+            {
+              id: 's-cash',
+              source: 'petshop',
+              total: 120,
+              createdAt: now,
+              items: [],
+              payments: [{ method: 'dinheiro', label: 'Dinheiro', tPag: '01', value: 120, troco: 0 }],
+            },
+          ])
+          .mockResolvedValueOnce([]),
+      },
+      petAppointment: { findMany: jest.fn().mockResolvedValue([]) },
+      customerPetPackage: { findMany: jest.fn().mockResolvedValue([]) },
+      tenantPaymentMethod: { findMany: jest.fn().mockResolvedValue([]) },
+      cashMovement: {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'm1', type: 'IN', value: 100, reason: 'Troco abertura', createdAt: now },
+          { id: 'm2', type: 'OUT', value: 35, reason: 'Sangria produtos limpeza', createdAt: now },
+        ]),
+      },
+    };
+
+    const service = createServiceWithPrisma(prismaMock);
+    const result = await service.getMetrics('today');
+
+    // Faturamento bruto permanece exatamente R$ 120,00 (sem inflar com o troco de R$ 100)
+    expect(result.totals.totalRevenue).toBe(120);
+    // Saldo da gaveta = 120 (vendas dinheiro) + 100 (entrada) - 35 (sangria) = 185
+    expect(result.cashDrawer).toEqual({
+      cashSalesAmount: 120,
+      totalIn: 100,
+      totalOut: 35,
+      netCashBalance: 185,
+      movements: [
+        { id: 'm1', type: 'IN', value: 100, reason: 'Troco abertura', createdAt: now },
+        { id: 'm2', type: 'OUT', value: 35, reason: 'Sangria produtos limpeza', createdAt: now },
+      ],
+    });
   });
 });

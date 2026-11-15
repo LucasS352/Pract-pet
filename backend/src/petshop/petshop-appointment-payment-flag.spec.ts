@@ -44,6 +44,57 @@ describe('PetshopService — flag isPaid / paidAmount na listagem e overview', (
     expect(result[1]).toMatchObject({ id: 'app-unpaid', isPaid: false, paidAmount: null, paidAt: null });
   });
 
+  it('marca isPaid=true automaticamente quando o atendimento está 100% coberto por pacote pago', async () => {
+    const prismaMock = {
+      petAppointment: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'app-pkg-paid',
+            status: 'scheduled',
+            checkInNotes: null,
+            services: [
+              {
+                coverageStatus: 'reserved',
+                priceSnapshot: 60,
+                coveredAmount: 60,
+                customerPackage: { id: 'pkg-1', paymentStatus: 'paid', status: 'active' },
+              },
+            ],
+          },
+          {
+            id: 'app-pkg-with-extra-unpaid',
+            status: 'scheduled',
+            checkInNotes: null,
+            services: [
+              {
+                coverageStatus: 'reserved',
+                priceSnapshot: 60,
+                coveredAmount: 60,
+                customerPackage: { id: 'pkg-1', paymentStatus: 'paid', status: 'active' },
+              },
+              {
+                coverageStatus: 'none',
+                priceSnapshot: 25,
+                coveredAmount: 0,
+                customerPackage: null,
+              },
+            ],
+          },
+        ]),
+      },
+      comanda: {
+        findMany: jest.fn().mockResolvedValue([]),
+      },
+    };
+
+    const service = createServiceWithPrisma(prismaMock);
+    const result = await service.listAppointments();
+
+    expect(result).toHaveLength(2);
+    expect(result[0]).toMatchObject({ id: 'app-pkg-paid', isPaid: true });
+    expect(result[1]).toMatchObject({ id: 'app-pkg-with-extra-unpaid', isPaid: false });
+  });
+
   it('propaga isPaid e paidAmount para nextAppointments em overview()', async () => {
     const paidAt = new Date('2026-11-15T15:35:00.000Z');
     const prismaMock = {

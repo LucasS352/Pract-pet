@@ -385,6 +385,7 @@ export class CashRegistersService {
   async findAll() {
     const prisma = await this.getPrisma();
     const registers = await prisma.cashRegister.findMany({
+      where: { id: { not: 'petshop_cash_box' } },
       orderBy: { openingTime: 'desc' },
       include: {
         operator: { select: { id: true, name: true, isManager: true } },

@@ -161,7 +161,18 @@ export class PetshopService {
       prisma.petVaccination.count({ where: { nextDueAt: { lte: vaccineLimit }, status: { not: 'waived' } } }),
       prisma.petAppointment.findMany({
         where: { startsAt: { gte: start, lte: end }, status: { in: activeStatuses } },
-        include: { pet: true, customer: true, professional: { select: { id: true, name: true } }, services: true },
+        include: {
+          pet: true,
+          customer: true,
+          professional: { select: { id: true, name: true } },
+          services: {
+            include: {
+              customerPackage: {
+                select: { id: true, planNameSnapshot: true, expiresAt: true, status: true, paymentStatus: true },
+              },
+            },
+          },
+        },
         orderBy: { startsAt: 'asc' },
         take: 12,
       }),
@@ -174,50 +185,74 @@ export class PetshopService {
   }
 
   private async attachPaymentStatus(prisma: any, appointments: any[]) {
-    if (!Array.isArray(appointments) || appointments.length === 0 || !prisma?.comanda?.findMany) {
+    if (!Array.isArray(appointments) || appointments.length === 0) {
       return appointments;
     }
 
     const paymentByAppId = new Map<string, { id: string; total: number; createdAt: Date }>();
     const ids = appointments.map((apt: any) => apt.id).filter(Boolean);
 
-    try {
-      for (let i = 0; i < ids.length; i += 50) {
-        const chunk = ids.slice(i, i + 50);
-        const closedComandas = await prisma.comanda.findMany({
-          where: {
-            status: 'closed',
-            sale: { is: { status: 'completed' } },
-            OR: chunk.map((id: string) => ({ notes: { contains: id } })),
-          },
-          select: {
-            notes: true,
-            sale: { select: { id: true, total: true, createdAt: true } },
-          },
-        });
+    if (prisma?.comanda?.findMany && ids.length > 0) {
+      try {
+        for (let i = 0; i < ids.length; i += 50) {
+          const chunk = ids.slice(i, i + 50);
+          const closedComandas = await prisma.comanda.findMany({
+            where: {
+              status: 'closed',
+              sale: { is: { status: 'completed' } },
+              OR: chunk.map((id: string) => ({ notes: { contains: id } })),
+            },
+            select: {
+              notes: true,
+              sale: { select: { id: true, total: true, createdAt: true } },
+            },
+          });
 
-        for (const cmd of closedComandas) {
-          if (!cmd?.sale || !cmd.notes) continue;
-          for (const id of chunk) {
-            if (cmd.notes.includes(id) && !paymentByAppId.has(id)) {
-              paymentByAppId.set(id, {
-                id: cmd.sale.id,
-                total: Number(cmd.sale.total || 0),
-                createdAt: cmd.sale.createdAt,
-              });
+          for (const cmd of closedComandas) {
+            if (!cmd?.sale || !cmd.notes) continue;
+            for (const id of chunk) {
+              if (cmd.notes.includes(id) && !paymentByAppId.has(id)) {
+                paymentByAppId.set(id, {
+                  id: cmd.sale.id,
+                  total: Number(cmd.sale.total || 0),
+                  createdAt: cmd.sale.createdAt,
+                });
+              }
             }
           }
         }
+      } catch {
+        // Falha silenciosa para manter listagem resiliente caso consulta auxiliar falhe
       }
-    } catch {
-      // Falha silenciosa para manter listagem resiliente caso consulta auxiliar falhe
     }
 
     return appointments.map((apt: any) => {
       const paidSale = paymentByAppId.get(apt.id) || null;
+      const topServices = Array.isArray(apt.services)
+        ? apt.services.filter((s: any) => !s?.comboParentId)
+        : [];
+      const hasPaidPackageCoverage =
+        topServices.length > 0 &&
+        topServices.some(
+          (s: any) =>
+            ['reserved', 'consumed'].includes(s?.coverageStatus) &&
+            s?.customerPackage?.paymentStatus !== 'pending' &&
+            s?.customerPackage?.paymentStatus !== 'cancelled',
+        );
+      const hasUncoveredService = topServices.some(
+        (s: any) =>
+          !['reserved', 'consumed'].includes(s?.coverageStatus) &&
+          Number(s?.priceSnapshot || 0) > Number(s?.coveredAmount || 0),
+      );
+      const transport = apt.transport ?? parseAppointmentTransport(apt.checkInNotes);
+      const hasUncoveredTaxi = Boolean(
+        transport?.enabled && !transport?.coveredByPackage && Number(transport?.fee || 0) > 0,
+      );
+      const isPaidByPackage = hasPaidPackageCoverage && !hasUncoveredService && !hasUncoveredTaxi;
+
       return {
         ...apt,
-        isPaid: Boolean(paidSale),
+        isPaid: Boolean(paidSale) || isPaidByPackage,
         paidAmount: paidSale ? paidSale.total : null,
         paidAt: paidSale ? paidSale.createdAt : null,
       };
@@ -281,23 +316,23 @@ export class PetshopService {
     let prevEnd: Date;
 
     if (customFrom && customTo) {
-      start = new Date(`${customFrom}T00:00:00`);
-      end = new Date(`${customTo}T23:59:59.999`);
+      start = new Date(`${customFrom}T00:00:00.000-03:00`);
+      end = new Date(`${customTo}T23:59:59.999-03:00`);
       const durationMs = end.getTime() - start.getTime();
       prevEnd = new Date(start.getTime() - 1);
       prevStart = new Date(prevEnd.getTime() - durationMs);
     } else if (period === 'yesterday') {
-      const y = new Date(now.getTime() - 86_400_000);
-      start = new Date(y);
-      start.setHours(0, 0, 0, 0);
-      end = new Date(y);
-      end.setHours(23, 59, 59, 999);
+      const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(now);
+      const todayStart = new Date(`${todayBr}T00:00:00.000-03:00`);
+      const yDate = new Date(todayStart.getTime() - 12 * 3_600_000);
+      const yBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(yDate);
+      start = new Date(`${yBr}T00:00:00.000-03:00`);
+      end = new Date(`${yBr}T23:59:59.999-03:00`);
 
-      const beforeY = new Date(now.getTime() - 2 * 86_400_000);
-      prevStart = new Date(beforeY);
-      prevStart.setHours(0, 0, 0, 0);
-      prevEnd = new Date(beforeY);
-      prevEnd.setHours(23, 59, 59, 999);
+      const beforeYDate = new Date(start.getTime() - 12 * 3_600_000);
+      const beforeYBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(beforeYDate);
+      prevStart = new Date(`${beforeYBr}T00:00:00.000-03:00`);
+      prevEnd = new Date(`${beforeYBr}T23:59:59.999-03:00`);
     } else if (period === 'last_month') {
       start = new Date(now.getFullYear(), now.getMonth() - 1, 1, 0, 0, 0, 0);
       end = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
@@ -329,21 +364,19 @@ export class PetshopService {
       prevEnd = new Date(now.getTime() - 7 * 86_400_000);
       prevEnd.setHours(23, 59, 59, 999);
     } else {
-      // today
-      start = new Date(now);
-      start.setHours(0, 0, 0, 0);
-      end = new Date(now);
-      end.setHours(23, 59, 59, 999);
+      // today (reseta exatamente às 00:00 no fuso America/Sao_Paulo)
+      const todayBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(now);
+      start = new Date(`${todayBr}T00:00:00.000-03:00`);
+      end = new Date(`${todayBr}T23:59:59.999-03:00`);
 
-      const y = new Date(now.getTime() - 86_400_000);
-      prevStart = new Date(y);
-      prevStart.setHours(0, 0, 0, 0);
-      prevEnd = new Date(y);
-      prevEnd.setHours(23, 59, 59, 999);
+      const yDate = new Date(start.getTime() - 12 * 3_600_000);
+      const yBr = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(yDate);
+      prevStart = new Date(`${yBr}T00:00:00.000-03:00`);
+      prevEnd = new Date(`${yBr}T23:59:59.999-03:00`);
     }
 
     // 1. Busca transações do período selecionado
-    const [sales, appointments, soldPackages, customPaymentMethods] = await Promise.all([
+    const [sales, appointments, soldPackages, customPaymentMethods, cashMovements] = await Promise.all([
       prisma.sale.findMany({
         where: { createdAt: { gte: start, lte: end }, status: { not: 'cancelled' } },
         include: {
@@ -366,6 +399,14 @@ export class PetshopService {
       }).catch(() => []),
       prisma.tenantPaymentMethod?.findMany
         ? prisma.tenantPaymentMethod.findMany({ select: { id: true, name: true } }).catch(() => [])
+        : Promise.resolve([]),
+      prisma.cashMovement?.findMany
+        ? prisma.cashMovement
+            .findMany({
+              where: { createdAt: { gte: start, lte: end } },
+              orderBy: { createdAt: 'desc' },
+            })
+            .catch(() => [])
         : Promise.resolve([]),
     ]);
 
@@ -567,6 +608,26 @@ export class PetshopService {
       }))
       .sort((a, b) => b.amount - a.amount);
 
+    const cashSalesAmount = Number((paymentMixMap.get('dinheiro')?.amount || 0).toFixed(2));
+    let totalCashIn = 0;
+    let totalCashOut = 0;
+    const formattedMovements = (Array.isArray(cashMovements) ? cashMovements : []).map((m: any) => {
+      const val = Number(m?.value || 0);
+      const movType = m?.type === 'OUT' ? 'OUT' : 'IN';
+      if (movType === 'IN') totalCashIn += val;
+      else totalCashOut += val;
+      return {
+        id: m.id,
+        type: movType as 'IN' | 'OUT',
+        value: Number(val.toFixed(2)),
+        reason: m.reason || '',
+        createdAt: m.createdAt,
+      };
+    });
+    totalCashIn = Number(totalCashIn.toFixed(2));
+    totalCashOut = Number(totalCashOut.toFixed(2));
+    const netCashBalance = Number((cashSalesAmount + totalCashIn - totalCashOut).toFixed(2));
+
     return {
       period,
       start: start.toISOString(),
@@ -589,12 +650,82 @@ export class PetshopService {
         averageTicket,
       },
       paymentMix,
+      cashDrawer: {
+        cashSalesAmount,
+        totalIn: totalCashIn,
+        totalOut: totalCashOut,
+        netCashBalance,
+        movements: formattedMovements,
+      },
       byHour,
       byDayOfWeek: Object.values(byDayOfWeek),
       topServices,
       topProducts,
       professionals,
     };
+  }
+
+  async addCashMovement(body: any, req?: any) {
+    const prisma = await this.prisma();
+    const rawType = String(body?.type ?? '').trim().toUpperCase();
+    if (rawType !== 'IN' && rawType !== 'OUT') {
+      throw new BadRequestException('Tipo de movimentação inválido. Use IN (entrada/abertura) ou OUT (sangria/retirada).');
+    }
+    const val = Number(body?.value);
+    if (!Number.isFinite(val) || val <= 0) {
+      throw new BadRequestException('Informe um valor maior que zero.');
+    }
+    const cleanReason = requiredText(body?.reason, 'Observação');
+
+    let actorName: string | null = null;
+    try {
+      const actor = req?.headers?.['x-operator-token'] ? await this.commissions.sessionOperator(req) : null;
+      actorName = actor?.name || req?.user?.name || null;
+    } catch {
+      actorName = req?.user?.name || null;
+    }
+
+    const finalReason = actorName && !cleanReason.includes(`(${actorName})`)
+      ? `${cleanReason} · ${actorName}`
+      : cleanReason;
+
+    const registerId = 'petshop_cash_box';
+    await prisma.cashRegister.upsert({
+      where: { id: registerId },
+      update: {},
+      create: {
+        id: registerId,
+        status: 'closed',
+        openingValue: new Prisma.Decimal(0),
+      },
+    });
+
+    const created = await prisma.cashMovement.create({
+      data: {
+        cashRegisterId: registerId,
+        type: rawType,
+        value: new Prisma.Decimal(val.toFixed(2)),
+        reason: finalReason,
+      },
+    });
+
+    return {
+      id: created.id,
+      type: created.type as 'IN' | 'OUT',
+      value: Number(created.value),
+      reason: created.reason || '',
+      createdAt: created.createdAt,
+    };
+  }
+
+  async removeCashMovement(id: string) {
+    const prisma = await this.prisma();
+    const movement = await prisma.cashMovement.findUnique({ where: { id } });
+    if (!movement) {
+      throw new NotFoundException('Movimentação de caixa não encontrada.');
+    }
+    await prisma.cashMovement.delete({ where: { id } });
+    return { success: true };
   }
 
   async listTutors(search?: string) {
@@ -1571,7 +1702,7 @@ export class PetshopService {
           include: {
             service: true,
             customerPackage: {
-              select: { id: true, planNameSnapshot: true, expiresAt: true, status: true },
+              select: { id: true, planNameSnapshot: true, expiresAt: true, status: true, paymentStatus: true },
             },
             customerPackageItem: {
               select: {
@@ -2055,7 +2186,7 @@ export class PetshopService {
           include: {
             service: true,
             customerPackage: {
-              select: { id: true, planNameSnapshot: true, expiresAt: true, status: true },
+              select: { id: true, planNameSnapshot: true, expiresAt: true, status: true, paymentStatus: true },
             },
             customerPackageItem: {
               select: {

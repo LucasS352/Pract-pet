@@ -21,6 +21,8 @@ export class PetshopController {
 
   @Get('overview') overview() { return this.petshop.overview(); }
   @Get('metrics') getMetrics(@Query('period') period?: string, @Query('from') from?: string, @Query('to') to?: string) { return this.petshop.getMetrics(period, from, to); }
+  @Post('cash-movements') addCashMovement(@Body() body: any, @Req() req: any) { return this.petshop.addCashMovement(body, req); }
+  @Delete('cash-movements/:id') removeCashMovement(@Param('id') id: string) { return this.petshop.removeCashMovement(id); }
 
   @Post('uploads/photo')
   @UseInterceptors(ImageUploadAdmissionInterceptor, FileInterceptor('file', {
