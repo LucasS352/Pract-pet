@@ -166,7 +166,62 @@ export class PetshopService {
         take: 12,
       }),
     ]);
-    return { metrics: { pets, tutors, products, services: servicesCount, today, inProgress, vaccinesDue }, nextAppointments };
+    const appointmentsWithPayment = await this.attachPaymentStatus(prisma, nextAppointments);
+    return {
+      metrics: { pets, tutors, products, services: servicesCount, today, inProgress, vaccinesDue },
+      nextAppointments: appointmentsWithPayment,
+    };
+  }
+
+  private async attachPaymentStatus(prisma: any, appointments: any[]) {
+    if (!Array.isArray(appointments) || appointments.length === 0 || !prisma?.comanda?.findMany) {
+      return appointments;
+    }
+
+    const paymentByAppId = new Map<string, { id: string; total: number; createdAt: Date }>();
+    const ids = appointments.map((apt: any) => apt.id).filter(Boolean);
+
+    try {
+      for (let i = 0; i < ids.length; i += 50) {
+        const chunk = ids.slice(i, i + 50);
+        const closedComandas = await prisma.comanda.findMany({
+          where: {
+            status: 'closed',
+            sale: { is: { status: 'completed' } },
+            OR: chunk.map((id: string) => ({ notes: { contains: id } })),
+          },
+          select: {
+            notes: true,
+            sale: { select: { id: true, total: true, createdAt: true } },
+          },
+        });
+
+        for (const cmd of closedComandas) {
+          if (!cmd?.sale || !cmd.notes) continue;
+          for (const id of chunk) {
+            if (cmd.notes.includes(id) && !paymentByAppId.has(id)) {
+              paymentByAppId.set(id, {
+                id: cmd.sale.id,
+                total: Number(cmd.sale.total || 0),
+                createdAt: cmd.sale.createdAt,
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // Falha silenciosa para manter listagem resiliente caso consulta auxiliar falhe
+    }
+
+    return appointments.map((apt: any) => {
+      const paidSale = paymentByAppId.get(apt.id) || null;
+      return {
+        ...apt,
+        isPaid: Boolean(paidSale),
+        paidAmount: paidSale ? paidSale.total : null,
+        paidAt: paidSale ? paidSale.createdAt : null,
+      };
+    });
   }
 
   private resolvePaymentMixBucket(
@@ -1536,11 +1591,15 @@ export class PetshopService {
       take: 1000,
     });
 
-    return appointments.map((apt: any) => ({
-      ...apt,
-      transport: parseAppointmentTransport(apt.checkInNotes),
-      resolvedStages: this.pricing.resolveAppointmentStages(apt),
-    }));
+    const enriched = await this.attachPaymentStatus(
+      prisma,
+      appointments.map((apt: any) => ({
+        ...apt,
+        transport: parseAppointmentTransport(apt.checkInNotes),
+        resolvedStages: this.pricing.resolveAppointmentStages(apt),
+      })),
+    );
+    return enriched;
   }
 
   async listOverduePickups(before?: string) {

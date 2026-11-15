@@ -1187,6 +1187,26 @@ export default function PetshopAgendaPage() {
     }
   };
 
+  // Badge visual de pagamento confirmado nos cards
+  const renderPaidBadge = (appointment?: Appointment, compact = true) => {
+    if (!appointment?.isPaid) return null;
+    const paidTitle =
+      appointment.paidAmount != null
+        ? `Pagamento registrado: ${money(appointment.paidAmount)}`
+        : 'Pagamento registrado';
+    return (
+      <span
+        title={paidTitle}
+        className={`inline-flex items-center gap-0.5 rounded-md bg-emerald-600 font-extrabold text-white shadow-2xs shrink-0 ${
+          compact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'
+        }`}
+      >
+        <CheckCircle2 size={compact ? 9 : 10} strokeWidth={2.6} />
+        Pago
+      </span>
+    );
+  };
+
   // Badge visual de status dos cards
   const renderStatusBadge = (status: string, appointment?: Appointment) => {
     switch (status) {
@@ -1862,7 +1882,11 @@ export default function PetshopAgendaPage() {
                             <article
                               key={item.id}
                               onClick={() => setSelectedAppointment(item)}
-                              className={`group relative rounded-xl border border-zinc-200/90 bg-white p-2.5 shadow-2xs hover:shadow-md transition cursor-pointer select-none ${getCardBorderStripe(
+                              className={`group relative rounded-xl border p-2.5 shadow-2xs hover:shadow-md transition cursor-pointer select-none ${
+                                item.isPaid
+                                  ? 'border-emerald-300/90 bg-emerald-50/25'
+                                  : 'border-zinc-200/90 bg-white'
+                              } ${getCardBorderStripe(
                                 item.status,
                               )}`}
                             >
@@ -1919,6 +1943,7 @@ export default function PetshopAgendaPage() {
                                 <div className="flex items-center justify-between pt-1 border-t border-zinc-100 gap-1">
                                   <div className="flex items-center gap-1 flex-wrap">
                                     {renderStatusBadge(item.status, item)}
+                                    {renderPaidBadge(item, true)}
                                     {item.services?.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && (
                                       <span
                                         title="Serviço coberto por pacote de cliente"
@@ -2173,6 +2198,7 @@ export default function PetshopAgendaPage() {
                           )}
                           <span className="text-xs text-zinc-500">Tutor: {item.customer?.name}</span>
                           {renderStatusBadge(item.status, item)}
+                          {renderPaidBadge(item, false)}
                         </div>
 
                         <p className="mt-1 text-xs text-zinc-600 truncate">
@@ -2352,6 +2378,7 @@ export default function PetshopAgendaPage() {
                             {item.services[0]?.nameSnapshot}
                           </span>
                           {renderStatusBadge(item.status, item)}
+                          {renderPaidBadge(item, true)}
                         </button>
                       ))}
                     </div>
@@ -2406,7 +2433,10 @@ export default function PetshopAgendaPage() {
                           <p className="text-[11px] text-zinc-500 truncate mb-1">
                             {item.services.map(s => s.nameSnapshot).join(', ')}
                           </p>
-                          {renderStatusBadge(item.status, item)}
+                          <div className="flex flex-wrap items-center gap-1">
+                            {renderStatusBadge(item.status, item)}
+                            {renderPaidBadge(item, true)}
+                          </div>
                         </div>
                       ))
                     )}
@@ -3153,6 +3183,7 @@ export default function PetshopAgendaPage() {
             try {
               await api.post(`/petshop/appointments/${selectedAppointment.id}/reverse-payment`, { reason: reverseReason.trim() });
               setAppointmentPayment(null);
+              setSelectedAppointment(curr => (curr ? { ...curr, isPaid: false, paidAmount: null, paidAt: null } : null));
               setReversePaymentOpen(false);
               setReverseReason('');
               await loadAppointments(false);

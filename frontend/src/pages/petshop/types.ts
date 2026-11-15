@@ -489,6 +489,9 @@ export type Appointment = {
   professionalId?: string | null;
   professional?: { id: string; name: string } | null;
   services: AppointmentServiceItem[];
+  isPaid?: boolean;
+  paidAmount?: number | null;
+  paidAt?: string | null;
 };
 
 export type PetPackagePricingRule = {

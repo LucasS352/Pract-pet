@@ -617,23 +617,33 @@ export default function PetshopDashboardPage() {
                           </div>
                         </div>
 
-                        <span
-                          className={`inline-flex shrink-0 items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
-                            isReady
-                              ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span
+                            className={`inline-flex shrink-0 items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+                              isReady
+                                ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
+                                : isInProgress
+                                ? 'bg-sky-50 text-sky-700 border-sky-200'
+                                : statusInfo.badgeClass
+                            }`}
+                          >
+                            {isReady && item.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(item.transport.mode)
+                              ? '✓ Pronto p/ levar'
+                              : isReady
+                              ? '✓ Pronto p/ busca'
                               : isInProgress
-                              ? 'bg-sky-50 text-sky-700 border-sky-200'
-                              : statusInfo.badgeClass
-                          }`}
-                        >
-                          {isReady && item.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(item.transport.mode)
-                            ? '✓ Pronto p/ levar'
-                            : isReady
-                            ? '✓ Pronto p/ busca'
-                            : isInProgress
-                            ? 'Em atendimento'
-                            : statusInfo.label}
-                        </span>
+                              ? 'Em atendimento'
+                              : statusInfo.label}
+                          </span>
+                          {item.isPaid && (
+                            <span
+                              title={item.paidAmount != null ? `Pagamento registrado: R$ ${Number(item.paidAmount).toFixed(2)}` : 'Pagamento registrado'}
+                              className="inline-flex items-center gap-0.5 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-extrabold text-white shadow-2xs"
+                            >
+                              ✓ Pago
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       {/* Middle Row: Service Details Bar */}
@@ -826,14 +836,24 @@ export default function PetshopDashboardPage() {
 
                         {/* Status */}
                         <td className="py-3 px-3 whitespace-nowrap">
-                          <span
-                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${statusInfo.badgeClass}`}
-                          >
-                            {['bathing', 'grooming', 'finishing', 'checked_in'].includes(item.status) && (
-                              <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-semibold border ${statusInfo.badgeClass}`}
+                            >
+                              {['bathing', 'grooming', 'finishing', 'checked_in'].includes(item.status) && (
+                                <span className="h-1.5 w-1.5 rounded-full bg-sky-500 animate-pulse" />
+                              )}
+                              {item.status === 'ready' && item.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(item.transport.mode) ? 'Pronto p/ levar' : statusInfo.label}
+                            </span>
+                            {item.isPaid && (
+                              <span
+                                title={item.paidAmount != null ? `Pagamento registrado: R$ ${Number(item.paidAmount).toFixed(2)}` : 'Pagamento registrado'}
+                                className="inline-flex items-center gap-0.5 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-extrabold text-white shadow-2xs"
+                              >
+                                ✓ Pago
+                              </span>
                             )}
-                            {item.status === 'ready' && item.transport?.enabled && ['round_trip', 'both', 'dropoff_only', 'dropoff'].includes(item.transport.mode) ? 'Pronto p/ levar' : statusInfo.label}
-                          </span>
+                          </div>
                         </td>
 
                         {/* Ações */}
@@ -1160,6 +1180,11 @@ export default function PetshopDashboardPage() {
                     <span className="font-semibold text-zinc-800 truncate">{item.pet?.name}</span>
                     <span className="text-zinc-300">•</span>
                     <span className="text-zinc-500 truncate">{item.services[0]?.nameSnapshot || 'Serviço'}</span>
+                    {item.isPaid && (
+                      <span className="ml-auto shrink-0 rounded-full bg-emerald-600 px-1.5 py-0.2 text-[9px] font-extrabold text-white">
+                        ✓ Pago
+                      </span>
+                    )}
                   </div>
                 ))}
               </div>
