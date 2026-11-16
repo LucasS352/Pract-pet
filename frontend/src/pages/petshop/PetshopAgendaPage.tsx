@@ -367,71 +367,6 @@ export default function PetshopAgendaPage() {
   });
   const [savingStage, setSavingStage] = useState(false);
 
-  // Conclusão rápida e mapeamento de comissões por etapa (para agendamentos já ocorridos / retroativos)
-  const [createCompleted, setCreateCompleted] = useState(false);
-  const [createStageOperators, setCreateStageOperators] = useState<{
-    bathing: string;
-    grooming: string;
-    finishing: string;
-  }>({ bathing: '', grooming: '', finishing: '' });
-  const [detailStageOperators, setDetailStageOperators] = useState<{
-    bathing: string;
-    grooming: string;
-    finishing: string;
-  }>({ bathing: '', grooming: '', finishing: '' });
-  const [savingBatchStages, setSavingBatchStages] = useState(false);
-
-  useEffect(() => {
-    if (operators.length === 0) return;
-    const banhista = operators.find(o => (o.jobTitle || '').toLowerCase().includes('banh')) || operators[0];
-    const tosador = operators.find(o => (o.jobTitle || '').toLowerCase().includes('tosa')) || operators[0];
-    setCreateStageOperators(prev => ({
-      bathing: prev.bathing || banhista?.id || '',
-      grooming: prev.grooming || tosador?.id || '',
-      finishing: prev.finishing || banhista?.id || '',
-    }));
-  }, [operators]);
-
-  useEffect(() => {
-    if (!selectedAppointment || operators.length === 0) return;
-    const banhista = operators.find(o => (o.jobTitle || '').toLowerCase().includes('banh')) || operators[0];
-    const tosador = operators.find(o => (o.jobTitle || '').toLowerCase().includes('tosa')) || operators[0];
-    const hist = Array.isArray(selectedAppointment.stageHistory) ? (selectedAppointment.stageHistory as any[]) : [];
-    const findOpInHistory = (stKey: string) => {
-      const entry = [...hist].reverse().find(h => h.status === stKey && !h.skipped && (h.userId || h.userName));
-      if (!entry) return '';
-      const matched = operators.find(o => o.id === entry.userId || o.name.toLowerCase() === String(entry.userName || '').toLowerCase());
-      return matched?.id || '';
-    };
-    setDetailStageOperators({
-      bathing: findOpInHistory('bathing') || selectedAppointment.professionalId || banhista?.id || '',
-      grooming: findOpInHistory('grooming') || tosador?.id || '',
-      finishing: findOpInHistory('finishing') || selectedAppointment.professionalId || banhista?.id || '',
-    });
-  }, [selectedAppointment, operators]);
-
-  const handleBatchCompleteAndCommissions = async (item: Appointment) => {
-    if (savingBatchStages) return;
-    setSavingBatchStages(true);
-    try {
-      const { data: updated } = await api.patch(`/petshop/appointments/${item.id}/status`, {
-        status: 'delivered',
-        directComplete: true,
-        stageOperators: detailStageOperators,
-      });
-      setItems(curr => curr.map(row => (row.id === item.id ? updated : row)));
-      setSelectedAppointment(updated);
-      toast.success('Atendimento concluído e comissões registradas!', {
-        description: `As comissões de ${item.pet?.name || 'pet'} foram registradas na data do atendimento.`,
-      });
-      loadAppointments(false);
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Erro ao concluir e registrar comissões.');
-    } finally {
-      setSavingBatchStages(false);
-    }
-  };
-
   // Formulário de novo agendamento
   const [form, setForm] = useState({
     petId: '',
@@ -931,8 +866,6 @@ export default function PetshopAgendaPage() {
         professionalId: form.professionalId || undefined,
         serviceIds: form.serviceIds,
         notes: form.notes,
-        completed: createCompleted || undefined,
-        stageOperators: createCompleted ? createStageOperators : undefined,
         packageSelections: Object.keys(activeSelections).length > 0 ? activeSelections : undefined,
         saveAddressToCustomer: form.saveAddressToCustomer,
         customerAddress: fullAddress || undefined,
@@ -962,9 +895,8 @@ export default function PetshopAgendaPage() {
       }
       toast.success('Agendamento criado com sucesso!');
       setOpenNew(false);
-      if (chargeNow && created) void handleChargeAppointment(created, !createCompleted);
+      if (chargeNow && created) void handleChargeAppointment(created, true);
       setChargeNow(false);
-      setCreateCompleted(false);
       transportEdited.current = false;
       setForm({
         petId: '',
@@ -3148,90 +3080,6 @@ export default function PetshopAgendaPage() {
               </div>
             )}
 
-            {/* Conclusão Rápida e Mapeamento Direto de Comissões por Etapa */}
-            {selectedAppointment.status !== 'cancelled' && operators.length > 0 && (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-3.5 space-y-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <span className="text-xs font-bold text-emerald-950 block">
-                      ⚡ Mapear Quem Executou & Concluir Atendimento (Gera Comissões)
-                    </span>
-                    <span className="text-[11px] text-emerald-800">
-                      Defina de uma só vez quem realizou cada etapa sem precisar trocar de PIN a cada clique:
-                    </span>
-                  </div>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                  <div>
-                    <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
-                      Banho
-                    </label>
-                    <select
-                      value={detailStageOperators.bathing}
-                      onChange={e => setDetailStageOperators(prev => ({ ...prev, bathing: e.target.value }))}
-                      className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs font-semibold text-zinc-800"
-                    >
-                      <option value="">Sem comissão de Banho</option>
-                      {operators.map(op => (
-                        <option key={op.id} value={op.id}>
-                          {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
-                      Tosa (Se aplicável)
-                    </label>
-                    <select
-                      value={detailStageOperators.grooming}
-                      onChange={e => setDetailStageOperators(prev => ({ ...prev, grooming: e.target.value }))}
-                      className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs font-semibold text-zinc-800"
-                    >
-                      <option value="">Sem comissão de Tosa</option>
-                      {operators.map(op => (
-                        <option key={op.id} value={op.id}>
-                          {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
-                      Finalização
-                    </label>
-                    <select
-                      value={detailStageOperators.finishing}
-                      onChange={e => setDetailStageOperators(prev => ({ ...prev, finishing: e.target.value }))}
-                      className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1.5 text-xs font-semibold text-zinc-800"
-                    >
-                      <option value="">Sem comissão de Finalização</option>
-                      {operators.map(op => (
-                        <option key={op.id} value={op.id}>
-                          {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="flex justify-end pt-1">
-                  <button
-                    type="button"
-                    disabled={savingBatchStages}
-                    onClick={() => handleBatchCompleteAndCommissions(selectedAppointment)}
-                    className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 px-3.5 py-2 text-xs font-bold text-white shadow-xs transition cursor-pointer disabled:opacity-50"
-                  >
-                    {savingBatchStages ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                    <span>
-                      {selectedAppointment.status === 'delivered'
-                        ? 'Atualizar Comissões deste Atendimento'
-                        : 'Concluir Atendimento & Gerar Comissões'}
-                    </span>
-                  </button>
-                </div>
-              </div>
-            )}
-
             {/* Botões de Ação */}
             {/* Rodapé de Ações do Modal de Detalhes */}
             <div className={`flex flex-wrap items-center gap-2 pt-2 border-t border-zinc-200 ${selectedAppointment.status === 'ready' ? '' : 'justify-between'}`}>
@@ -3685,18 +3533,7 @@ export default function PetshopAgendaPage() {
                   type="datetime-local"
                   className={inputClass}
                   value={form.startsAt}
-                  onChange={e => {
-                    const nextVal = e.target.value;
-                    setForm({ ...form, startsAt: nextVal });
-                    if (nextVal) {
-                      const chosenDate = new Date(nextVal);
-                      const todayStart = new Date();
-                      todayStart.setHours(0, 0, 0, 0);
-                      if (!Number.isNaN(chosenDate.getTime()) && chosenDate < todayStart) {
-                        setCreateCompleted(true);
-                      }
-                    }
-                  }}
+                  onChange={e => setForm({ ...form, startsAt: e.target.value })}
                 />
               </label>
 
@@ -4048,78 +3885,7 @@ export default function PetshopAgendaPage() {
               />
             </label>
 
-            {/* 10. OPÇÃO DE ATENDIMENTO JÁ REALIZADO (PARA LANÇAMENTO DE HISTÓRICO / COMISSÕES) */}
-            <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-3 space-y-2.5">
-              <label className="flex cursor-pointer items-center gap-2.5 text-xs sm:text-sm font-bold text-teal-950">
-                <input
-                  type="checkbox"
-                  checked={createCompleted}
-                  onChange={e => setCreateCompleted(e.target.checked)}
-                  className="h-4 w-4 accent-[#0d6e5a]"
-                />
-                <span>
-                  ✓ Atendimento já realizado (concluir agora, gerar comissões e não enviar ao Táxi Dog)
-                </span>
-              </label>
-
-              {createCompleted && operators.length > 0 && (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1 border-t border-teal-200/70">
-                  <div>
-                    <label className="block text-[10px] font-bold text-teal-900 mb-0.5">
-                      Quem fez o Banho
-                    </label>
-                    <select
-                      value={createStageOperators.bathing}
-                      onChange={e => setCreateStageOperators(prev => ({ ...prev, bathing: e.target.value }))}
-                      className="w-full rounded-lg border border-teal-300 bg-white px-2 py-1.5 text-xs font-semibold text-zinc-800"
-                    >
-                      <option value="">Sem comissão de Banho</option>
-                      {operators.map(op => (
-                        <option key={op.id} value={op.id}>
-                          {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-teal-900 mb-0.5">
-                      Quem fez a Tosa (Se houver)
-                    </label>
-                    <select
-                      value={createStageOperators.grooming}
-                      onChange={e => setCreateStageOperators(prev => ({ ...prev, grooming: e.target.value }))}
-                      className="w-full rounded-lg border border-teal-300 bg-white px-2 py-1.5 text-xs font-semibold text-zinc-800"
-                    >
-                      <option value="">Sem comissão de Tosa</option>
-                      {operators.map(op => (
-                        <option key={op.id} value={op.id}>
-                          {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-teal-900 mb-0.5">
-                      Quem fez a Finalização
-                    </label>
-                    <select
-                      value={createStageOperators.finishing}
-                      onChange={e => setCreateStageOperators(prev => ({ ...prev, finishing: e.target.value }))}
-                      className="w-full rounded-lg border border-teal-300 bg-white px-2 py-1.5 text-xs font-semibold text-zinc-800"
-                    >
-                      <option value="">Sem comissão de Finalização</option>
-                      {operators.map(op => (
-                        <option key={op.id} value={op.id}>
-                          {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 11. BOTÃO DE CONFIRMAR AGENDAMENTO */}
+            {/* 10. BOTÃO DE CONFIRMAR AGENDAMENTO */}
             <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm font-semibold text-emerald-900">
               <input type="checkbox" checked={chargeNow} onChange={event => setChargeNow(event.target.checked)} className="h-5 w-5 accent-[#0d6e5a]" />
               Cobrar agora após criar o agendamento

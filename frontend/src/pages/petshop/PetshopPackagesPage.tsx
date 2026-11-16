@@ -740,16 +740,21 @@ export default function PetshopPackagesPage() {
 
     setSavingContract(true);
     try {
+      const now = new Date();
+      const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
       const formattedSessions =
         contractForm.scheduleRecurring && contractForm.petId
           ? scheduledSessions
               .filter(s => s.date && s.time)
-              .map(s => ({
-                startsAt: new Date(`${s.date}T${s.time}:00`).toISOString(),
-                serviceIds: s.serviceId ? [s.serviceId] : undefined,
-                completed: Boolean(s.completed),
-                stageOperators: s.completed ? s.stageOperators : undefined,
-              }))
+              .map(s => {
+                const isPast = Boolean(s.date && s.date < todayYMD);
+                return {
+                  startsAt: new Date(`${s.date}T${s.time}:00`).toISOString(),
+                  serviceIds: s.serviceId ? [s.serviceId] : undefined,
+                  completed: isPast,
+                  stageOperators: isPast ? s.stageOperators : undefined,
+                };
+              })
           : [];
 
       const { data: created } = await api.post('/petshop/packages/contracts', {
@@ -2580,98 +2585,104 @@ export default function PetshopPackagesPage() {
                       </div>
                     </div>
 
-                    {scheduledSessions.some(s => s.completed) && operators.length > 0 && (
-                      <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-2.5 space-y-2">
-                        <div className="flex flex-wrap items-center justify-between gap-1">
-                          <span className="text-[11px] font-bold text-emerald-950">
-                            ✓ Sessões passadas (já realizadas): atribua os colaboradores para gerar comissão e abater saldo automaticamente
-                          </span>
+                    {(() => {
+                      const now = new Date();
+                      const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                      const hasPastSessions = scheduledSessions.some(s => Boolean(s.date && s.date < todayYMD));
+                      if (!hasPastSessions || operators.length === 0) return null;
+                      return (
+                        <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-2.5 space-y-2">
+                          <div className="flex flex-wrap items-center justify-between gap-1">
+                            <span className="text-[11px] font-bold text-emerald-950">
+                              ✓ Sessões passadas (já realizadas): atribua os colaboradores para gerar comissão e abater saldo automaticamente
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                            <div>
+                              <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
+                                Quem fez o Banho (Padrão)
+                              </label>
+                              <select
+                                value={defaultPastOperators.bathing}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setDefaultPastOperators(prev => ({ ...prev, bathing: val }));
+                                  setScheduledSessions(prev =>
+                                    prev.map(s =>
+                                      s.date && s.date < todayYMD
+                                        ? { ...s, stageOperators: { ...s.stageOperators, bathing: val } }
+                                        : s,
+                                    ),
+                                  );
+                                }}
+                                className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
+                              >
+                                <option value="">Sem comissão de Banho</option>
+                                {operators.map(op => (
+                                  <option key={op.id} value={op.id}>
+                                    {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
+                                Quem fez a Tosa (Se houver)
+                              </label>
+                              <select
+                                value={defaultPastOperators.grooming}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setDefaultPastOperators(prev => ({ ...prev, grooming: val }));
+                                  setScheduledSessions(prev =>
+                                    prev.map(s =>
+                                      s.date && s.date < todayYMD
+                                        ? { ...s, stageOperators: { ...s.stageOperators, grooming: val } }
+                                        : s,
+                                    ),
+                                  );
+                                }}
+                                className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
+                              >
+                                <option value="">Sem comissão de Tosa</option>
+                                {operators.map(op => (
+                                  <option key={op.id} value={op.id}>
+                                    {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
+                                Quem fez a Finalização (Padrão)
+                              </label>
+                              <select
+                                value={defaultPastOperators.finishing}
+                                onChange={e => {
+                                  const val = e.target.value;
+                                  setDefaultPastOperators(prev => ({ ...prev, finishing: val }));
+                                  setScheduledSessions(prev =>
+                                    prev.map(s =>
+                                      s.date && s.date < todayYMD
+                                        ? { ...s, stageOperators: { ...s.stageOperators, finishing: val } }
+                                        : s,
+                                    ),
+                                  );
+                                }}
+                                className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
+                              >
+                                <option value="">Sem comissão de Finalização</option>
+                                {operators.map(op => (
+                                  <option key={op.id} value={op.id}>
+                                    {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
                         </div>
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          <div>
-                            <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
-                              Quem fez o Banho (Padrão)
-                            </label>
-                            <select
-                              value={defaultPastOperators.bathing}
-                              onChange={e => {
-                                const val = e.target.value;
-                                setDefaultPastOperators(prev => ({ ...prev, bathing: val }));
-                                setScheduledSessions(prev =>
-                                  prev.map(s =>
-                                    s.completed
-                                      ? { ...s, stageOperators: { ...s.stageOperators, bathing: val } }
-                                      : s,
-                                  ),
-                                );
-                              }}
-                              className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
-                            >
-                              <option value="">Sem comissão de Banho</option>
-                              {operators.map(op => (
-                                <option key={op.id} value={op.id}>
-                                  {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
-                              Quem fez a Tosa (Se houver)
-                            </label>
-                            <select
-                              value={defaultPastOperators.grooming}
-                              onChange={e => {
-                                const val = e.target.value;
-                                setDefaultPastOperators(prev => ({ ...prev, grooming: val }));
-                                setScheduledSessions(prev =>
-                                  prev.map(s =>
-                                    s.completed
-                                      ? { ...s, stageOperators: { ...s.stageOperators, grooming: val } }
-                                      : s,
-                                  ),
-                                );
-                              }}
-                              className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
-                            >
-                              <option value="">Sem comissão de Tosa</option>
-                              {operators.map(op => (
-                                <option key={op.id} value={op.id}>
-                                  {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
-                              Quem fez a Finalização (Padrão)
-                            </label>
-                            <select
-                              value={defaultPastOperators.finishing}
-                              onChange={e => {
-                                const val = e.target.value;
-                                setDefaultPastOperators(prev => ({ ...prev, finishing: val }));
-                                setScheduledSessions(prev =>
-                                  prev.map(s =>
-                                    s.completed
-                                      ? { ...s, stageOperators: { ...s.stageOperators, finishing: val } }
-                                      : s,
-                                  ),
-                                );
-                              }}
-                              className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
-                            >
-                              <option value="">Sem comissão de Finalização</option>
-                              {operators.map(op => (
-                                <option key={op.id} value={op.id}>
-                                  {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {scheduledSessions.length > 0 && (
                       <div className="space-y-2 rounded-xl border border-teal-200/80 bg-white p-2.5">
@@ -2683,12 +2694,13 @@ export default function PetshopPackagesPage() {
                               : '';
                           const now = new Date();
                           const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                          const isPastSession = Boolean(sess.date && sess.date < todayYMD);
 
                           return (
                             <div
                               key={idx}
                               className={`space-y-2 rounded-lg border p-2 text-xs ${
-                                sess.completed
+                                isPastSession
                                   ? 'border-emerald-300 bg-emerald-50/40'
                                   : sess.customEdited
                                     ? 'border-amber-300 bg-amber-50/40'
@@ -2707,7 +2719,7 @@ export default function PetshopPackagesPage() {
                                     </span>
                                   )}
                                 </div>
-                                <div className="sm:col-span-4">
+                                <div className="sm:col-span-5">
                                   <input
                                     type="date"
                                     value={sess.date}
@@ -2734,7 +2746,7 @@ export default function PetshopPackagesPage() {
                                     className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
                                   />
                                 </div>
-                                <div className="sm:col-span-2">
+                                <div className="sm:col-span-3">
                                   <input
                                     type="time"
                                     value={sess.time}
@@ -2750,36 +2762,9 @@ export default function PetshopPackagesPage() {
                                     className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
                                   />
                                 </div>
-                                <div className="sm:col-span-2 flex justify-end">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const next = [...scheduledSessions];
-                                      const nextCompleted = !next[idx].completed;
-                                      next[idx] = {
-                                        ...next[idx],
-                                        completed: nextCompleted,
-                                        stageOperators: next[idx].stageOperators || {
-                                          bathing: defaultPastOperators.bathing,
-                                          grooming: defaultPastOperators.grooming,
-                                          finishing: defaultPastOperators.finishing,
-                                        },
-                                      };
-                                      setScheduledSessions(next);
-                                    }}
-                                    title="Marcar se esta sessão já aconteceu (abate do saldo, gera comissão e não envia para Táxi Dog)"
-                                    className={`w-full rounded-lg border px-2 py-1.5 text-[10px] font-bold transition cursor-pointer ${
-                                      sess.completed
-                                        ? 'border-emerald-400 bg-emerald-600 text-white shadow-2xs'
-                                        : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100'
-                                    }`}
-                                  >
-                                    {sess.completed ? '✓ Realizado' : 'Agendado'}
-                                  </button>
-                                </div>
                               </div>
 
-                              {sess.completed && operators.length > 0 && (
+                              {isPastSession && operators.length > 0 && (
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-1 border-t border-emerald-200/70">
                                   <div className="flex items-center gap-1">
                                     <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Banho:</span>
