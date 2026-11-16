@@ -779,7 +779,9 @@ export default function PetshopCommissionsPage() {
               <div className="min-w-0">
                 <h2 className="truncate text-sm font-bold text-zinc-900">Fechamento & Extrato ({period})</h2>
                 <p className="truncate text-[11px] text-zinc-500">
-                  {report ? `Comissões: ${brl(report.totals.generated)}` : 'Conferência e pagamentos do período'}
+                  {report
+                    ? `${brl(report.totals.generated)} · ${report.procedures ?? 0} procedimentos · Pendente ${brl(report.totals.pending)}`
+                    : 'Conferência e pagamentos do período'}
                 </p>
               </div>
             </div>
@@ -788,6 +790,7 @@ export default function PetshopCommissionsPage() {
 
           {mobilePeriodOpen && report && (
             <div className="space-y-4 border-t border-zinc-100 p-4">
+              {/* Filtros (Período, Funcionário, Serviço, Estado) */}
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
                   <label className="mb-1 block text-[11px] font-medium text-zinc-500">Período</label>
@@ -799,7 +802,7 @@ export default function PetshopCommissionsPage() {
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-zinc-500">Profissional</label>
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-500">Funcionário</label>
                   <select
                     value={operatorId}
                     onChange={e => setOperatorId(e.target.value)}
@@ -829,109 +832,285 @@ export default function PetshopCommissionsPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="mb-1 block text-[11px] font-medium text-zinc-500">Situação</label>
+                  <label className="mb-1 block text-[11px] font-medium text-zinc-500">Estado</label>
                   <select
                     value={state}
                     onChange={e => setState(e.target.value)}
                     className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
                   >
-                    <option value="">Todas</option>
-                    <option value="PENDING">Pendente</option>
-                    <option value="APPROVED">Aprovada</option>
-                    <option value="PAID">Paga</option>
-                    <option value="REVERSED">Estornada</option>
+                    <option value="">Todos</option>
+                    {Object.entries(stateLabel).map(([key, label]) => (
+                      <option key={key} value={key}>
+                        {label}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
 
+              {/* 6 KPIs iguais aos da versão computador */}
               <div className="grid grid-cols-2 gap-2">
-                <div className="rounded-xl bg-zinc-50 p-2.5">
-                  <p className="text-[11px] text-zinc-500">Pago</p>
-                  <p className="text-sm font-extrabold text-zinc-900">{brl(report.totals.paid)}</p>
-                </div>
                 <div className="rounded-xl bg-[#f4fbf8] p-2.5">
-                  <p className="text-[11px] text-[#0d6e5a]">Comissões</p>
+                  <p className="text-[11px] text-[#0d6e5a]">Gerado</p>
                   <p className="text-sm font-extrabold text-[#0d6e5a]">{brl(report.totals.generated)}</p>
                 </div>
                 <div className="rounded-xl bg-amber-50/70 p-2.5">
-                  <p className="text-[11px] text-amber-800">Pendentes</p>
+                  <p className="text-[11px] text-amber-800">Pendente</p>
                   <p className="text-sm font-extrabold text-amber-900">{brl(report.totals.pending)}</p>
                 </div>
                 <div className="rounded-xl bg-emerald-50/70 p-2.5">
-                  <p className="text-[11px] text-emerald-800">Aprovadas</p>
+                  <p className="text-[11px] text-emerald-800">Aprovado</p>
                   <p className="text-sm font-extrabold text-emerald-900">{brl(report.totals.approved)}</p>
+                </div>
+                <div className="rounded-xl bg-sky-50/70 p-2.5">
+                  <p className="text-[11px] text-sky-800">Pago</p>
+                  <p className="text-sm font-extrabold text-sky-900">{brl(report.totals.paid)}</p>
+                </div>
+                <div className="rounded-xl bg-purple-50/70 p-2.5">
+                  <p className="text-[11px] text-purple-800">Procedimentos</p>
+                  <p className="text-sm font-extrabold text-purple-900">{report.procedures ?? 0}</p>
+                </div>
+                <div className="rounded-xl bg-teal-50/70 p-2.5">
+                  <p className="text-[11px] text-teal-800">Comissionáveis</p>
+                  <p className="text-sm font-extrabold text-teal-900">{report.commissionableProcedures ?? 0}</p>
                 </div>
               </div>
 
-              <div className="flex flex-wrap gap-2">
-                {(!currentClosing || currentClosing.state === 'OPEN') && (
+              {/* Fechamento mensal (Estado, Regras e Ações equivalentes ao desktop) */}
+              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-zinc-900">Fechamento mensal</span>
+                  <span className="inline-flex items-center rounded-full border border-emerald-200/80 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700">
+                    {currentClosing?.state === 'PAID'
+                      ? 'Pago'
+                      : currentClosing?.state === 'APPROVED'
+                      ? 'Aprovado'
+                      : 'Em conferência'}
+                  </span>
+                </div>
+                <p className="text-[11px] leading-relaxed text-zinc-500">
+                  {!periodEnded
+                    ? 'O fechamento fica disponível após o fim do mês.'
+                    : currentClosing?.state === 'PAID'
+                    ? 'Período quitado com registro auditável.'
+                    : 'Período encerrado e elegível para homologação.'}
+                </p>
+
+                {Boolean(report.inconsistencies?.length) && (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-2.5 text-[11px] text-amber-900 space-y-0.5">
+                    <strong className="block font-semibold">
+                      {report.inconsistencies.length} inconsistência(s) impedem a aprovação:
+                    </strong>
+                    {report.inconsistencies.map(item => (
+                      <p key={item.commissionId}>
+                        • Atendimento {item.commissionId.slice(0, 8)}: {item.reason}
+                      </p>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
-                    disabled={busy}
-                    onClick={() => act('/petshop/commissions/period/close', { period })}
-                    className="flex-1 rounded-xl bg-[#0d6e5a] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
+                    disabled={
+                      busy || !periodEnded || Boolean(report.inconsistencies.length) || currentClosing?.state === 'PAID'
+                    }
+                    onClick={() => act(`/petshop/commissions/closings/${period}/approve`)}
+                    className="inline-flex flex-1 min-w-[100px] items-center justify-center gap-1 rounded-xl bg-[#0d6e5a] px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
                   >
-                    Fechar período
+                    <Check size={14} strokeWidth={2.5} /> Aprovar
                   </button>
-                )}
-                {currentClosing?.state === 'CLOSED' && (
-                  <>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        const paymentRef = window.prompt('Comprovante / Referência (opcional):') || '';
-                        void act('/petshop/commissions/period/pay', { period, paymentRef });
-                      }}
-                      className="flex-1 rounded-xl bg-sky-700 px-3 py-2 text-xs font-semibold text-white disabled:opacity-50"
-                    >
-                      Marcar pago
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => {
-                        const reason = window.prompt('Motivo da reabertura:');
-                        if (reason) void act('/petshop/commissions/period/reopen', { period, reason });
-                      }}
-                      className="rounded-xl border border-zinc-200 px-3 py-2 text-xs font-semibold text-zinc-700"
-                    >
-                      Reabrir
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={exportCsv}
-                  className="inline-flex items-center gap-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700"
-                >
-                  <Download size={13} /> CSV
-                </button>
+                  <button
+                    type="button"
+                    disabled={busy || !periodEnded || currentClosing?.state !== 'APPROVED'}
+                    onClick={() => {
+                      const reference = window.prompt('Referência do pagamento (ex: Pix E2E, Comprovante bancário):');
+                      if (reference) void act(`/petshop/commissions/closings/${period}/pay`, { reference });
+                    }}
+                    className="inline-flex flex-1 min-w-[130px] items-center justify-center gap-1 rounded-xl border border-[#0d6e5a] bg-white px-3 py-2 text-xs font-semibold text-[#0d6e5a] disabled:opacity-50"
+                  >
+                    <CreditCard size={13} /> Registrar pagamento
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportCsv}
+                    className="inline-flex items-center justify-center gap-1 rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700"
+                  >
+                    <Download size={13} /> CSV
+                  </button>
+                </div>
               </div>
 
-              {/* Cards do extrato */}
+              {/* Produtividade por profissional */}
+              <div className="rounded-xl border border-zinc-200/80 bg-white p-3 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <User size={15} className="text-[#0d6e5a]" />
+                  <div>
+                    <h3 className="text-xs font-bold text-zinc-900">Produtividade por profissional</h3>
+                    <p className="text-[11px] text-zinc-500">Procedimentos e comissões geradas no período.</p>
+                  </div>
+                </div>
+                <div className="divide-y divide-zinc-100">
+                  {report.byOperator.map(o => {
+                    const percent = Math.min(
+                      100,
+                      Math.max(12, Math.round((Number(o.amount) / maxOperatorAmount) * 100)),
+                    );
+                    return (
+                      <div key={o.id} className="py-2 first:pt-1 last:pb-0 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="font-semibold text-zinc-800 truncate">{o.name}</span>
+                          <div className="flex items-center gap-2.5 shrink-0">
+                            <span className="text-[11px] text-zinc-500">{o.procedures} proc.</span>
+                            <span className="font-extrabold text-zinc-900">{brl(o.amount)}</span>
+                          </div>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+                          <div className="h-full rounded-full bg-[#0d6e5a]" style={{ width: `${percent}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!report.byOperator.length && (
+                    <p className="py-2 text-center text-[11px] text-zinc-500">
+                      Nenhum procedimento registrado no período.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Por serviço */}
+              <div className="rounded-xl border border-zinc-200/80 bg-white p-3 space-y-2.5">
+                <div className="flex items-center gap-2">
+                  <Tag size={15} className="text-[#0d6e5a]" />
+                  <div>
+                    <h3 className="text-xs font-bold text-zinc-900">Por serviço</h3>
+                    <p className="text-[11px] text-zinc-500">Comissões geradas por serviço no período.</p>
+                  </div>
+                </div>
+                <div className="divide-y divide-zinc-100">
+                  {report.byService.map(s => {
+                    const percent = Math.min(
+                      100,
+                      Math.max(12, Math.round((Number(s.amount) / maxServiceAmount) * 100)),
+                    );
+                    return (
+                      <div key={s.serviceId} className="py-2 first:pt-1 last:pb-0 space-y-1.5">
+                        <div className="flex items-center justify-between gap-2 text-xs">
+                          <span className="font-semibold text-zinc-800 truncate" title={s.name}>
+                            {s.name}
+                          </span>
+                          <div className="flex items-center gap-2.5 shrink-0">
+                            <span className="text-[11px] text-zinc-500">{s.procedures} proc.</span>
+                            <span className="font-extrabold text-zinc-900">{brl(s.amount)}</span>
+                          </div>
+                        </div>
+                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-zinc-100">
+                          <div className="h-full rounded-full bg-[#0d6e5a]" style={{ width: `${percent}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {!report.byService.length && (
+                    <p className="py-2 text-center text-[11px] text-zinc-500">
+                      Nenhum serviço comissionado no período.
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              {/* Cards do extrato / Lançamentos recentes e detalhados */}
               <div className="space-y-2">
-                <p className="text-xs font-bold text-zinc-700">Lançamentos ({report.rows.length})</p>
-                {report.rows.slice(0, showFullExtract ? 50 : 6).map(r => (
-                  <div key={r.id} className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-3 text-xs space-y-1.5">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-zinc-800">Lançamentos ({report.rows.length})</p>
+                  {report.rows.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setShowFullExtract(v => !v)}
+                      className="text-[11px] font-semibold text-[#0d6e5a]"
+                    >
+                      {showFullExtract ? 'Modo compacto' : 'Ver detalhes e ações'}
+                    </button>
+                  )}
+                </div>
+                {(showFullExtract ? report.rows : report.rows.slice(0, 8)).map(r => (
+                  <div key={r.id} className="rounded-xl border border-zinc-200/70 bg-zinc-50/70 p-3 text-xs space-y-1.5">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <p className="truncate font-bold text-zinc-900">{r.operator.name}</p>
-                        <p className="truncate text-[11px] text-zinc-500">
-                          {r.appointment.pet.name} · {r.appointmentService.nameSnapshot}
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="truncate font-bold text-zinc-900">{r.operator.name}</p>
+                          <span className="text-zinc-400">·</span>
+                          <span className="font-semibold text-zinc-700">{r.appointment.pet.name}</span>
+                          {r.appointment.pet.size && (
+                            <span className="rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">
+                              {sizeLabelMap[r.appointment.pet.size.toLowerCase()] || r.appointment.pet.size}
+                            </span>
+                          )}
+                        </div>
+                        <p className="truncate text-[11px] text-zinc-600 mt-0.5">
+                          {r.appointmentService.nameSnapshot} · {resolveStageLabel(r.stageKey, stages)}
                         </p>
                       </div>
                       <span className="shrink-0 font-extrabold text-[#0d6e5a]">{brl(r.amount)}</span>
                     </div>
-                    <div className="flex items-center justify-between gap-2">
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-zinc-500">
+                      <span>
+                        Base: <strong className="text-zinc-700">{brl(r.baseAmount)}</strong> · Regra:{' '}
+                        <strong className="text-zinc-700">
+                          {r.ruleKind === 'PERCENT'
+                            ? `${r.ruleValue}%`
+                            : r.ruleKind === 'FIXED'
+                            ? brl(r.ruleValue)
+                            : 'Sem comissão'}
+                        </strong>
+                      </span>
+                      <Link
+                        className="font-mono text-[#0d6e5a] underline"
+                        to={`/petshop/agenda?appointment=${r.appointment.id}&date=${r.appointment.startsAt.slice(0, 10)}`}
+                      >
+                        #{r.appointment.id.slice(0, 8)}
+                      </Link>
+                    </div>
+
+                    <div className="flex items-center justify-between gap-2 pt-0.5">
                       {renderBadge(r.state)}
                       <span className="text-[11px] text-zinc-500">
-                        {new Date(r.executedAt).toLocaleDateString('pt-BR')} · {resolveStageLabel(r.stageKey, stages)}
+                        {new Date(r.executedAt).toLocaleString('pt-BR')}
                       </span>
                     </div>
+
+                    {showFullExtract && r.state !== 'REVERSED' && (
+                      <div className="flex items-center justify-end gap-3 border-t border-zinc-200/70 pt-2">
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => correct(r.id)}
+                          className="text-[11px] font-semibold text-[#0d6e5a] underline disabled:opacity-50"
+                        >
+                          Corrigir
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => {
+                            const reason = window.prompt('Motivo do estorno desta comissão:');
+                            if (reason) void act(`/petshop/commissions/${r.id}/reverse`, { reason });
+                          }}
+                          className="text-[11px] font-semibold text-rose-600 underline disabled:opacity-50"
+                        >
+                          Estornar
+                        </button>
+                      </div>
+                    )}
                   </div>
                 ))}
-                {report.rows.length > 6 && (
+                {!report.rows.length && (
+                  <p className="py-3 text-center text-[11px] text-zinc-500">
+                    Nenhum lançamento recente encontrado para os filtros selecionados.
+                  </p>
+                )}
+                {report.rows.length > 8 && (
                   <button
                     type="button"
                     onClick={() => setShowFullExtract(v => !v)}
@@ -941,6 +1120,103 @@ export default function PetshopCommissionsPage() {
                   </button>
                 )}
               </div>
+            </div>
+          )}
+        </section>
+
+        {/* Acordeão mobile: Ajustes Auditáveis do Período */}
+        <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setShowAdjustments(v => !v)}
+            className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <RotateCcw size={18} className="shrink-0 text-[#0d6e5a]" />
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-bold text-zinc-900">
+                  Ajustes Auditáveis ({report?.adjustments?.length ?? 0})
+                </h2>
+                <p className="truncate text-[11px] text-zinc-500">
+                  Correções manuais e estornos registrados no período
+                </p>
+              </div>
+            </div>
+            <ChevronDown size={18} className={`shrink-0 text-zinc-400 transition ${showAdjustments ? 'rotate-180' : ''}`} />
+          </button>
+
+          {showAdjustments && (
+            <div className="border-t border-zinc-100 p-4 space-y-2">
+              {report?.adjustments.map(a => (
+                <div key={a.id} className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-2.5 text-xs space-y-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-bold text-zinc-900 truncate">
+                      {a.commission.operator.name} · {a.commission.appointment.pet.name}
+                    </span>
+                    <span className="shrink-0 font-extrabold text-zinc-900">{brl(a.amount)}</span>
+                  </div>
+                  <p className="text-[11px] text-zinc-600">{a.commission.appointmentService.nameSnapshot}</p>
+                  <p className="text-[11px] italic text-zinc-500">"{a.reason}"</p>
+                  <div className="flex items-center justify-between text-[10px] text-zinc-400">
+                    <span>{new Date(a.createdAt).toLocaleString('pt-BR')}</span>
+                    <span className="font-semibold text-zinc-600">{stateLabel[a.state] || a.state}</span>
+                  </div>
+                </div>
+              ))}
+              {!report?.adjustments?.length && (
+                <p className="py-2 text-center text-[11px] text-zinc-500">
+                  Nenhum ajuste auditável registrado neste período.
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+
+        {/* Acordeão mobile: Histórico de Fechamentos Anteriores */}
+        <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setShowClosingsHistory(v => !v)}
+            className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <History size={18} className="shrink-0 text-[#0d6e5a]" />
+              <div className="min-w-0">
+                <h2 className="truncate text-sm font-bold text-zinc-900">
+                  Histórico de Fechamentos ({closings.length})
+                </h2>
+                <p className="truncate text-[11px] text-zinc-500">
+                  Períodos homologados e comprovantes de quitação
+                </p>
+              </div>
+            </div>
+            <ChevronDown size={18} className={`shrink-0 text-zinc-400 transition ${showClosingsHistory ? 'rotate-180' : ''}`} />
+          </button>
+
+          {showClosingsHistory && (
+            <div className="border-t border-zinc-100 divide-y divide-zinc-100 px-4 py-1">
+              {closings.map(c => (
+                <button
+                  key={c.period}
+                  type="button"
+                  onClick={() => {
+                    setPeriod(c.period);
+                    setMobilePeriodOpen(true);
+                  }}
+                  className="flex min-h-10 w-full cursor-pointer items-center justify-between py-2.5 text-left text-xs"
+                >
+                  <span className="font-semibold text-zinc-800">Período: {c.period}</span>
+                  <span className="text-zinc-600">
+                    {stateLabel[c.state] || c.state}
+                    {c.paymentRef ? ` · Ref: ${c.paymentRef}` : ''}
+                  </span>
+                </button>
+              ))}
+              {!closings.length && (
+                <p className="py-3 text-center text-[11px] text-zinc-500">
+                  Nenhum fechamento registrado no histórico.
+                </p>
+              )}
             </div>
           )}
         </section>
