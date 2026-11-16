@@ -2363,9 +2363,9 @@ export default function PetshopPackagesPage() {
                 return (
                   <div className="space-y-3 pt-1">
                     {/* Linha 1: Modalidade + Valor */}
-                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end">
                       <div>
-                        <label className="mb-1 block text-[11px] font-semibold text-amber-950">
+                        <label className="mb-1 block text-[11px] font-semibold text-amber-950 whitespace-nowrap">
                           Modalidade de Transporte *
                         </label>
                         <select
@@ -2376,7 +2376,7 @@ export default function PetshopPackagesPage() {
                               transportMode: e.target.value as any,
                             })
                           }
-                          className={inputClass}
+                          className={`${inputClass} h-11`}
                         >
                           <option value="round_trip">Buscar e Levar (Ida e Volta)</option>
                           <option value="pickup_only">Apenas Buscar (Leva por conta)</option>
@@ -2384,8 +2384,8 @@ export default function PetshopPackagesPage() {
                         </select>
                       </div>
                       <div>
-                        <label className="mb-1 block text-[11px] font-semibold text-amber-950">
-                          Taxa de Transporte no Pacote (R$ - Fixo ou Personalizado)
+                        <label className="mb-1 block text-[11px] font-semibold text-amber-950 whitespace-nowrap">
+                          Taxa de Transporte (R$) *
                         </label>
                         <input
                           type="number"
@@ -2396,13 +2396,13 @@ export default function PetshopPackagesPage() {
                             setContractForm({ ...contractForm, transportFee: e.target.value })
                           }
                           placeholder="Ex: 40.00"
-                          className={inputClass}
+                          className={`${inputClass} h-11`}
                         />
                       </div>
                     </div>
 
                     {/* Linha 2: Rua/Número + Bairro */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
                       <div className="sm:col-span-2">
                         <label className="mb-1 block text-[11px] font-semibold text-amber-950">
                           Endereço (Rua, Av. e Número) *
@@ -2415,7 +2415,7 @@ export default function PetshopPackagesPage() {
                             setContractForm({ ...contractForm, customerStreet: e.target.value })
                           }
                           placeholder="Ex: R. Hipólito Lopes, 103"
-                          className={inputClass}
+                          className={`${inputClass} h-11`}
                         />
                       </div>
                       <div>
@@ -2430,13 +2430,13 @@ export default function PetshopPackagesPage() {
                             setContractForm({ ...contractForm, customerNeighborhood: e.target.value })
                           }
                           placeholder="Ex: Vila Leozina"
-                          className={inputClass}
+                          className={`${inputClass} h-11`}
                         />
                       </div>
                     </div>
 
                     {/* Linha 3: Ponto de Referência + Observação do Transporte */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:items-end">
                       <div>
                         <label className="mb-1 block text-[11px] font-semibold text-amber-950">
                           Ponto de Referência / Compl.
@@ -2448,7 +2448,7 @@ export default function PetshopPackagesPage() {
                             setContractForm({ ...contractForm, customerReference: e.target.value })
                           }
                           placeholder="Ex: Próximo ao Campo Orlandão, Ap 12"
-                          className={inputClass}
+                          className={`${inputClass} h-11`}
                         />
                       </div>
                       <div>
@@ -2462,7 +2462,7 @@ export default function PetshopPackagesPage() {
                             setContractForm({ ...contractForm, transportNotes: e.target.value })
                           }
                           placeholder="Ex: Interfone estragado, chamar no portão..."
-                          className={inputClass}
+                          className={`${inputClass} h-11`}
                         />
                       </div>
                     </div>
