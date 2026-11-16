@@ -213,6 +213,7 @@ export default function PetshopPackagesPage() {
   >([]);
   const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
   const [multiPetMode, setMultiPetMode] = useState<'shared' | 'per_pet'>('per_pet');
+  const [activeSchedulePetId, setActiveSchedulePetId] = useState<string>('all');
   const [perPetCustomPrices, setPerPetCustomPrices] = useState<Record<string, string>>({});
   const [perPetOverrides, setPerPetOverrides] = useState<
     Record<
@@ -851,6 +852,7 @@ export default function PetshopPackagesPage() {
     });
     setSelectedPetIds([]);
     setMultiPetMode('per_pet');
+    setActiveSchedulePetId('all');
     setPerPetCustomPrices({});
     setPerPetOverrides({});
     setTutorSearchQuery('');
@@ -3125,8 +3127,8 @@ export default function PetshopPackagesPage() {
             {/* Agendamento Recorrente Semanal com Exceções por Semana e Clonagem Multi-Pet */}
             {(selectedPetIds.length > 0 || contractForm.petId) && (
               <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-3.5 space-y-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label className="flex cursor-pointer items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-950">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="flex min-w-0 cursor-pointer items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-950">
                     <input
                       type="checkbox"
                       checked={contractForm.scheduleRecurring}
@@ -3136,15 +3138,15 @@ export default function PetshopPackagesPage() {
                           scheduleRecurring: e.target.checked,
                         }))
                       }
-                      className="h-4 w-4 rounded border-teal-400 text-teal-700"
+                      className="h-4 w-4 shrink-0 rounded border-teal-400 text-teal-700"
                     />
-                    <span>📅 Agendar Sessões Automaticamente (Dia e Horário Fixo na Semana)</span>
+                    <span>📅 Agendar Sessões Automaticamente</span>
                   </label>
                   {contractForm.scheduleRecurring && (
-                    <span className="rounded-full bg-teal-100 px-2.5 py-0.5 text-[11px] font-bold text-teal-900">
+                    <span className="shrink-0 rounded-full bg-teal-100 px-2.5 py-0.5 text-[11px] font-bold text-teal-900">
                       {selectedPetIds.length >= 2 && multiPetMode === 'per_pet'
                         ? `${scheduledSessions.length}×${selectedPetIds.length} = ${scheduledSessions.length * selectedPetIds.length} sessões`
-                        : `${scheduledSessions.length} sessões programadas`}
+                        : `${scheduledSessions.length} sessões`}
                     </span>
                   )}
                 </div>
@@ -3188,19 +3190,58 @@ export default function PetshopPackagesPage() {
                 )}
 
                 {contractForm.scheduleRecurring && selectedPetIds.length >= 2 && multiPetMode === 'per_pet' && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-teal-200 bg-white/90 px-3 py-2 text-[11px] text-teal-900">
-                    <span>
-                      <strong>Clonagem flexível:</strong> todas as semanas abaixo já replicam automaticamente para os {selectedPetIds.length} pets. Se quiser, ajuste o horário ou dia de um pet específico em qualquer semana.
-                    </span>
-                    {Object.keys(perPetOverrides).length > 0 && (
+                  <div className="rounded-xl border border-teal-200 bg-white p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                      <span className="font-bold text-teal-950">
+                        🐾 Selecione o pet para visualizar ou personalizar os agendamentos ({selectedPetsList.length} pets):
+                      </span>
+                      {Object.keys(perPetOverrides).length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setPerPetOverrides({})}
+                          className="cursor-pointer font-bold text-[#0d6e5a] underline"
+                        >
+                          Reclonar padrão p/ todos
+                        </button>
+                      )}
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
                       <button
                         type="button"
-                        onClick={() => setPerPetOverrides({})}
-                        className="cursor-pointer font-bold text-[#0d6e5a] underline"
+                        onClick={() => setActiveSchedulePetId('all')}
+                        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                          activeSchedulePetId === 'all' || !selectedPetIds.includes(activeSchedulePetId)
+                            ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                            : 'border-teal-200 bg-teal-50/40 text-teal-900 hover:bg-teal-50'
+                        }`}
                       >
-                        Reclonar padrão p/ todos
+                        <span>Todos (Padrão)</span>
+                        <span className={`text-[10px] ${activeSchedulePetId === 'all' || !selectedPetIds.includes(activeSchedulePetId) ? 'text-emerald-100' : 'text-zinc-500'}`}>
+                          ({scheduledSessions.length})
+                        </span>
                       </button>
-                    )}
+                      {selectedPetsList.map(p => {
+                        const isActive = activeSchedulePetId === p.id;
+                        const hasCustom = Boolean(perPetOverrides[p.id] && Object.keys(perPetOverrides[p.id]).length > 0);
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => setActiveSchedulePetId(p.id)}
+                            className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                              isActive
+                                ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                                : 'border-teal-200 bg-white text-teal-900 hover:bg-teal-50'
+                            }`}
+                          >
+                            <span>{p.name}</span>
+                            <span className={`text-[10px] ${isActive ? 'text-emerald-100' : 'text-zinc-500'}`}>
+                              ({scheduledSessions.length}){hasCustom ? ' · ✏️' : ''}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 )}
 
@@ -3370,243 +3411,295 @@ export default function PetshopPackagesPage() {
                       );
                     })()}
 
-                    {scheduledSessions.length > 0 && (
-                      <div className="space-y-2 rounded-xl border border-teal-200/80 bg-white p-2.5">
-                        {scheduledSessions.map((sess, idx) => {
-                          const dObj = sess.date ? new Date(`${sess.date}T12:00:00`) : null;
-                          const weekdayLabel =
-                            dObj && !Number.isNaN(dObj.getTime())
-                              ? new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(dObj)
-                              : '';
-                          const now = new Date();
-                          const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-                          const isPastSession = Boolean(sess.date && sess.date < todayYMD);
+                    {scheduledSessions.length > 0 && (() => {
+                      const isPerPetMode = selectedPetIds.length >= 2 && multiPetMode === 'per_pet';
+                      const focusedPetObj = isPerPetMode && activeSchedulePetId !== 'all'
+                        ? selectedPetsList.find(p => p.id === activeSchedulePetId) || null
+                        : null;
 
-                          return (
-                            <div
-                              key={idx}
-                              className={`space-y-2 rounded-lg border p-2 text-xs ${
-                                isPastSession
-                                  ? 'border-emerald-300 bg-emerald-50/40'
-                                  : sess.customEdited
-                                    ? 'border-amber-300 bg-amber-50/40'
-                                    : 'border-slate-200 bg-slate-50/60'
-                              }`}
-                            >
-                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
-                                <div className="sm:col-span-4 flex items-center gap-1.5 font-semibold text-slate-800">
-                                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-700 text-[10px] font-bold text-white">
-                                    {idx + 1}ª
-                                  </span>
-                                  <span>Semana {idx + 1}</span>
-                                  {weekdayLabel && (
-                                    <span className="rounded bg-white px-1.5 py-0.5 text-[10px] uppercase text-teal-800 border border-slate-200">
-                                      {weekdayLabel}
-                                    </span>
-                                  )}
-                                </div>
-                                <div className="sm:col-span-5">
-                                  <input
-                                    type="date"
-                                    value={sess.date}
-                                    onChange={e => {
-                                      const nextDate = e.target.value;
-                                      const isPastDate = Boolean(nextDate && nextDate < todayYMD);
-                                      const next = [...scheduledSessions];
-                                      next[idx] = {
-                                        ...next[idx],
-                                        date: nextDate,
-                                        customEdited: true,
-                                        completed: isPastDate,
-                                        stageOperators: next[idx].stageOperators || {
-                                          bathing: defaultPastOperators.bathing,
-                                          grooming: defaultPastOperators.grooming,
-                                          finishing: defaultPastOperators.finishing,
-                                        },
-                                      };
-                                      setScheduledSessions(next);
-                                      if (idx === 0 && nextDate && nextDate < contractForm.startDate) {
-                                        setContractForm(prev => ({ ...prev, startDate: nextDate }));
-                                      }
-                                    }}
-                                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
-                                  />
-                                </div>
-                                <div className="sm:col-span-3">
-                                  <input
-                                    type="time"
-                                    value={sess.time}
-                                    onChange={e => {
-                                      const next = [...scheduledSessions];
-                                      next[idx] = {
-                                        ...next[idx],
-                                        time: e.target.value,
-                                        customEdited: true,
-                                      };
-                                      setScheduledSessions(next);
-                                    }}
-                                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
-                                  />
-                                </div>
-                              </div>
-
-                              {selectedPetIds.length >= 2 && multiPetMode === 'shared' && (
-                                <div className="flex items-center gap-2 rounded-lg border border-sky-200/80 bg-white px-2.5 py-1.5">
-                                  <span className="text-[11px] font-bold text-sky-900 shrink-0">
-                                    Pet desta sessão:
-                                  </span>
-                                  <select
-                                    value={sess.petId || selectedPetIds[idx % selectedPetIds.length] || ''}
-                                    onChange={e => {
-                                      const next = [...scheduledSessions];
-                                      next[idx] = {
-                                        ...next[idx],
-                                        petId: e.target.value,
-                                        customEdited: true,
-                                      };
-                                      setScheduledSessions(next);
-                                    }}
-                                    className="min-w-0 flex-1 rounded border border-sky-200 bg-sky-50/40 px-2 py-1 text-xs font-semibold text-zinc-800"
+                      return (
+                        <div className="space-y-2 rounded-xl border border-teal-200/80 bg-white p-2.5">
+                          {focusedPetObj && (
+                            <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-teal-100 bg-teal-50/60 px-2.5 py-1.5 text-[11px] text-teal-950">
+                              <span>
+                                Agendamentos de <strong>{focusedPetObj.name}</strong> ({scheduledSessions.length}{' '}
+                                {scheduledSessions.length === 1 ? 'sessão' : 'sessões'})
+                              </span>
+                              <div className="flex items-center gap-2">
+                                {Boolean(perPetOverrides[focusedPetObj.id] && Object.keys(perPetOverrides[focusedPetObj.id]).length > 0) && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setPerPetOverrides(prev => {
+                                        const next = { ...prev };
+                                        delete next[focusedPetObj.id];
+                                        return next;
+                                      })
+                                    }
+                                    className="cursor-pointer font-semibold text-amber-800 underline"
                                   >
-                                    {selectedPetsList.map(p => (
-                                      <option key={p.id} value={p.id}>
-                                        {p.name} ({SIZE_LABELS[p.size || ''] || p.size || 'P'})
-                                      </option>
-                                    ))}
-                                  </select>
-                                </div>
-                              )}
-
-                              {selectedPetIds.length >= 2 && multiPetMode === 'per_pet' && (
-                                <div className="space-y-1.5 border-t border-teal-200/70 pt-2">
-                                  <p className="text-[10px] font-bold uppercase tracking-wider text-teal-900">
-                                    Horários clonados para os {selectedPetsList.length} pets nesta semana (ajuste se precisar):
-                                  </p>
-                                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-                                    {selectedPetsList.map(p => {
-                                      const ov = perPetOverrides[p.id]?.[idx];
-                                      const petDate = ov?.date ?? sess.date;
-                                      const petTime = ov?.time ?? sess.time;
-                                      return (
-                                        <div
-                                          key={p.id}
-                                          className="flex items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-2 py-1"
-                                        >
-                                          <span className="min-w-[64px] truncate text-[11px] font-bold text-zinc-800">
-                                            {p.name}
-                                          </span>
-                                          <input
-                                            type="date"
-                                            value={petDate}
-                                            onChange={e => {
-                                              const val = e.target.value;
-                                              setPerPetOverrides(prev => ({
-                                                ...prev,
-                                                [p.id]: {
-                                                  ...(prev[p.id] || {}),
-                                                  [idx]: {
-                                                    ...(prev[p.id]?.[idx] || {}),
-                                                    date: val,
-                                                  },
-                                                },
-                                              }));
-                                            }}
-                                            className="min-w-0 flex-1 rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[11px]"
-                                          />
-                                          <input
-                                            type="time"
-                                            value={petTime}
-                                            onChange={e => {
-                                              const val = e.target.value;
-                                              setPerPetOverrides(prev => ({
-                                                ...prev,
-                                                [p.id]: {
-                                                  ...(prev[p.id] || {}),
-                                                  [idx]: {
-                                                    ...(prev[p.id]?.[idx] || {}),
-                                                    time: val,
-                                                  },
-                                                },
-                                              }));
-                                            }}
-                                            className="w-[74px] shrink-0 rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[11px]"
-                                          />
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-
-                              {isPastSession && operators.length > 0 && (
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-1 border-t border-emerald-200/70">
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Banho:</span>
-                                    <select
-                                      value={sess.stageOperators?.bathing ?? ''}
-                                      onChange={e => {
-                                        const next = [...scheduledSessions];
-                                        next[idx] = {
-                                          ...next[idx],
-                                          stageOperators: { ...next[idx].stageOperators, bathing: e.target.value },
-                                        };
-                                        setScheduledSessions(next);
-                                      }}
-                                      className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
-                                    >
-                                      <option value="">Sem comissão</option>
-                                      {operators.map(op => (
-                                        <option key={op.id} value={op.id}>{op.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Tosa:</span>
-                                    <select
-                                      value={sess.stageOperators?.grooming ?? ''}
-                                      onChange={e => {
-                                        const next = [...scheduledSessions];
-                                        next[idx] = {
-                                          ...next[idx],
-                                          stageOperators: { ...next[idx].stageOperators, grooming: e.target.value },
-                                        };
-                                        setScheduledSessions(next);
-                                      }}
-                                      className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
-                                    >
-                                      <option value="">Sem comissão</option>
-                                      {operators.map(op => (
-                                        <option key={op.id} value={op.id}>{op.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Finaliz.:</span>
-                                    <select
-                                      value={sess.stageOperators?.finishing ?? ''}
-                                      onChange={e => {
-                                        const next = [...scheduledSessions];
-                                        next[idx] = {
-                                          ...next[idx],
-                                          stageOperators: { ...next[idx].stageOperators, finishing: e.target.value },
-                                        };
-                                        setScheduledSessions(next);
-                                      }}
-                                      className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
-                                    >
-                                      <option value="">Sem comissão</option>
-                                      {operators.map(op => (
-                                        <option key={op.id} value={op.id}>{op.name}</option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                </div>
-                              )}
+                                    Voltar p/ padrão
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                          )}
+
+                          {scheduledSessions.map((sess, idx) => {
+                            const ov = focusedPetObj ? perPetOverrides[focusedPetObj.id]?.[idx] : undefined;
+                            const effectiveDate = ov?.date ?? sess.date;
+                            const effectiveTime = ov?.time ?? sess.time;
+                            const effectiveOps = ov?.stageOperators ?? sess.stageOperators;
+
+                            const dObj = effectiveDate ? new Date(`${effectiveDate}T12:00:00`) : null;
+                            const weekdayLabel =
+                              dObj && !Number.isNaN(dObj.getTime())
+                                ? new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(dObj)
+                                : '';
+                            const now = new Date();
+                            const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+                            const isPastSession = Boolean(effectiveDate && effectiveDate < todayYMD);
+                            const isModified = Boolean(focusedPetObj ? (ov?.date || ov?.time) : sess.customEdited);
+
+                            return (
+                              <div
+                                key={`${focusedPetObj?.id || 'base'}-${idx}`}
+                                className={`space-y-2 rounded-lg border p-2 text-xs ${
+                                  isPastSession
+                                    ? 'border-emerald-300 bg-emerald-50/40'
+                                    : isModified
+                                      ? 'border-amber-300 bg-amber-50/40'
+                                      : 'border-slate-200 bg-slate-50/60'
+                                }`}
+                              >
+                                <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
+                                  <div className="sm:col-span-4 flex items-center gap-1.5 font-semibold text-slate-800">
+                                    <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-700 text-[10px] font-bold text-white">
+                                      {idx + 1}ª
+                                    </span>
+                                    <span>Semana {idx + 1}</span>
+                                    {weekdayLabel && (
+                                      <span className="rounded bg-white px-1.5 py-0.5 text-[10px] uppercase text-teal-800 border border-slate-200">
+                                        {weekdayLabel}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="sm:col-span-5">
+                                    <input
+                                      type="date"
+                                      value={effectiveDate}
+                                      onChange={e => {
+                                        const nextDate = e.target.value;
+                                        const isPastDate = Boolean(nextDate && nextDate < todayYMD);
+                                        if (focusedPetObj) {
+                                          setPerPetOverrides(prev => ({
+                                            ...prev,
+                                            [focusedPetObj.id]: {
+                                              ...(prev[focusedPetObj.id] || {}),
+                                              [idx]: {
+                                                ...(prev[focusedPetObj.id]?.[idx] || {}),
+                                                date: nextDate,
+                                                stageOperators: prev[focusedPetObj.id]?.[idx]?.stageOperators || sess.stageOperators || {
+                                                  bathing: defaultPastOperators.bathing,
+                                                  grooming: defaultPastOperators.grooming,
+                                                  finishing: defaultPastOperators.finishing,
+                                                },
+                                              },
+                                            },
+                                          }));
+                                        } else {
+                                          const next = [...scheduledSessions];
+                                          next[idx] = {
+                                            ...next[idx],
+                                            date: nextDate,
+                                            customEdited: true,
+                                            completed: isPastDate,
+                                            stageOperators: next[idx].stageOperators || {
+                                              bathing: defaultPastOperators.bathing,
+                                              grooming: defaultPastOperators.grooming,
+                                              finishing: defaultPastOperators.finishing,
+                                            },
+                                          };
+                                          setScheduledSessions(next);
+                                        }
+                                        if (idx === 0 && nextDate && nextDate < contractForm.startDate) {
+                                          setContractForm(prev => ({ ...prev, startDate: nextDate }));
+                                        }
+                                      }}
+                                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
+                                    />
+                                  </div>
+                                  <div className="sm:col-span-3">
+                                    <input
+                                      type="time"
+                                      value={effectiveTime}
+                                      onChange={e => {
+                                        const nextTime = e.target.value;
+                                        if (focusedPetObj) {
+                                          setPerPetOverrides(prev => ({
+                                            ...prev,
+                                            [focusedPetObj.id]: {
+                                              ...(prev[focusedPetObj.id] || {}),
+                                              [idx]: {
+                                                ...(prev[focusedPetObj.id]?.[idx] || {}),
+                                                time: nextTime,
+                                              },
+                                            },
+                                          }));
+                                        } else {
+                                          const next = [...scheduledSessions];
+                                          next[idx] = {
+                                            ...next[idx],
+                                            time: nextTime,
+                                            customEdited: true,
+                                          };
+                                          setScheduledSessions(next);
+                                        }
+                                      }}
+                                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
+                                    />
+                                  </div>
+                                </div>
+
+                                {selectedPetIds.length >= 2 && multiPetMode === 'shared' && (
+                                  <div className="flex items-center gap-2 rounded-lg border border-sky-200/80 bg-white px-2.5 py-1.5">
+                                    <span className="text-[11px] font-bold text-sky-900 shrink-0">
+                                      Pet desta sessão:
+                                    </span>
+                                    <select
+                                      value={sess.petId || selectedPetIds[idx % selectedPetIds.length] || ''}
+                                      onChange={e => {
+                                        const next = [...scheduledSessions];
+                                        next[idx] = {
+                                          ...next[idx],
+                                          petId: e.target.value,
+                                          customEdited: true,
+                                        };
+                                        setScheduledSessions(next);
+                                      }}
+                                      className="min-w-0 flex-1 rounded border border-sky-200 bg-sky-50/40 px-2 py-1 text-xs font-semibold text-zinc-800"
+                                    >
+                                      {selectedPetsList.map(p => (
+                                        <option key={p.id} value={p.id}>
+                                          {p.name} ({SIZE_LABELS[p.size || ''] || p.size || 'P'})
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                )}
+
+                                {isPastSession && operators.length > 0 && (
+                                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-1 border-t border-emerald-200/70">
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Banho:</span>
+                                      <select
+                                        value={effectiveOps?.bathing ?? ''}
+                                        onChange={e => {
+                                          const val = e.target.value;
+                                          if (focusedPetObj) {
+                                            setPerPetOverrides(prev => ({
+                                              ...prev,
+                                              [focusedPetObj.id]: {
+                                                ...(prev[focusedPetObj.id] || {}),
+                                                [idx]: {
+                                                  ...(prev[focusedPetObj.id]?.[idx] || {}),
+                                                  stageOperators: { ...(effectiveOps || {}), bathing: val },
+                                                },
+                                              },
+                                            }));
+                                          } else {
+                                            const next = [...scheduledSessions];
+                                            next[idx] = {
+                                              ...next[idx],
+                                              stageOperators: { ...next[idx].stageOperators, bathing: val },
+                                            };
+                                            setScheduledSessions(next);
+                                          }
+                                        }}
+                                        className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
+                                      >
+                                        <option value="">Sem comissão</option>
+                                        {operators.map(op => (
+                                          <option key={op.id} value={op.id}>{op.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Tosa:</span>
+                                      <select
+                                        value={effectiveOps?.grooming ?? ''}
+                                        onChange={e => {
+                                          const val = e.target.value;
+                                          if (focusedPetObj) {
+                                            setPerPetOverrides(prev => ({
+                                              ...prev,
+                                              [focusedPetObj.id]: {
+                                                ...(prev[focusedPetObj.id] || {}),
+                                                [idx]: {
+                                                  ...(prev[focusedPetObj.id]?.[idx] || {}),
+                                                  stageOperators: { ...(effectiveOps || {}), grooming: val },
+                                                },
+                                              },
+                                            }));
+                                          } else {
+                                            const next = [...scheduledSessions];
+                                            next[idx] = {
+                                              ...next[idx],
+                                              stageOperators: { ...next[idx].stageOperators, grooming: val },
+                                            };
+                                            setScheduledSessions(next);
+                                          }
+                                        }}
+                                        className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
+                                      >
+                                        <option value="">Sem comissão</option>
+                                        {operators.map(op => (
+                                          <option key={op.id} value={op.id}>{op.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                      <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Finaliz.:</span>
+                                      <select
+                                        value={effectiveOps?.finishing ?? ''}
+                                        onChange={e => {
+                                          const val = e.target.value;
+                                          if (focusedPetObj) {
+                                            setPerPetOverrides(prev => ({
+                                              ...prev,
+                                              [focusedPetObj.id]: {
+                                                ...(prev[focusedPetObj.id] || {}),
+                                                [idx]: {
+                                                  ...(prev[focusedPetObj.id]?.[idx] || {}),
+                                                  stageOperators: { ...(effectiveOps || {}), finishing: val },
+                                                },
+                                              },
+                                            }));
+                                          } else {
+                                            const next = [...scheduledSessions];
+                                            next[idx] = {
+                                              ...next[idx],
+                                              stageOperators: { ...next[idx].stageOperators, finishing: val },
+                                            };
+                                            setScheduledSessions(next);
+                                          }
+                                        }}
+                                        className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
+                                      >
+                                        <option value="">Sem comissão</option>
+                                        {operators.map(op => (
+                                          <option key={op.id} value={op.id}>{op.name}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
                   </div>
                 )}
               </div>
