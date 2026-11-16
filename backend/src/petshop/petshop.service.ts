@@ -1891,18 +1891,19 @@ export class PetshopService {
       } catch {}
     }
 
-    const initialStatus = data.status === 'requested' ? 'requested' : 'scheduled';
+    const isCompletedCreate = Boolean(data.completed);
+    const initialStatus = isCompletedCreate ? 'delivered' : (data.status === 'requested' ? 'requested' : 'scheduled');
     const initialHistory = [
       {
         status: initialStatus,
-        at: new Date().toISOString(),
+        at: (isCompletedCreate ? startsAt : new Date()).toISOString(),
         userId: userId || null,
         userName: operatorName || null,
       },
     ];
 
     const created = await prisma.$transaction(async tx => {
-      if (professionalId) {
+      if (professionalId && !isCompletedCreate) {
         const professional = await tx.$queryRaw<Array<{ id: string }>>(
           Prisma.sql`SELECT id FROM operators WHERE id = ${professionalId} AND active = 1 FOR UPDATE`,
         );
@@ -1920,6 +1921,9 @@ export class PetshopService {
           startsAt,
           endsAt,
           status: initialStatus,
+          checkedInAt: isCompletedCreate ? startsAt : null,
+          readyAt: isCompletedCreate ? endsAt : null,
+          completedAt: isCompletedCreate ? endsAt : null,
           source: data.source || 'internal',
           notes: optionalText(data.notes),
           checkInNotes: serializeAppointmentTransport(transport),
@@ -1959,6 +1963,38 @@ export class PetshopService {
       }
       if (transport?.coveredByPackage) {
         await this.packages.assertTransportCoverageForReservationsInTx(tx, reservations, transport.mode);
+      }
+
+      if (isCompletedCreate) {
+        if (Object.keys(packageSelections).length > 0) {
+          await this.packages.consumeReservedSessionsForAppointmentInTx(tx, app.id, {
+            userId,
+            operatorId: data.operatorId,
+            name: data.operatorName,
+          });
+        }
+        const stageOps =
+          data.stageOperators && typeof data.stageOperators === 'object'
+            ? data.stageOperators
+            : professionalId
+              ? { bathing: professionalId, grooming: professionalId, finishing: professionalId }
+              : {};
+        if (Object.keys(stageOps).length > 0) {
+          const execution = await tx.petAppointment.findUnique({
+            where: { id: app.id },
+            include: {
+              pet: { select: { size: true } },
+              services: { include: { service: true, customerPackageItem: true } },
+            },
+          });
+          if (execution) {
+            for (const [stgKey, opId] of Object.entries(stageOps)) {
+              if (opId && opId !== 'none') {
+                await this.commissions.recordExecution(tx, execution, stgKey, String(opId), startsAt);
+              }
+            }
+          }
+        }
       }
 
       return tx.petAppointment.findUnique({
@@ -2314,16 +2350,19 @@ export class PetshopService {
     if (!APPOINTMENT_STATUSES.has(status) && !resolvedKeys.includes(status)) {
       throw new BadRequestException('Status inválido.');
     }
-    if (['delivered', 'cancelled', 'no_show'].includes(current.status) || current.completedAt) {
+    const hasStageOperatorsMap = Boolean(data?.stageOperators && typeof data.stageOperators === 'object' && Object.keys(data.stageOperators).length > 0);
+    const isDirectComplete = Boolean(data?.directComplete || hasStageOperatorsMap);
+
+    if ((['delivered', 'cancelled', 'no_show'].includes(current.status) || current.completedAt) && !hasStageOperatorsMap) {
       throw new ConflictException('Atendimento finalizado. Não é permitido reabrir ou cobrar novamente.');
     }
     if (status === 'delivered') {
-      if (current.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes da retirada.');
+      if (current.status !== 'ready' && !isDirectComplete) throw new BadRequestException('Conclua os cuidados antes da retirada.');
       const prepaid = await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } });
       const payable = current.services.some(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus) && Number(s.priceSnapshot) > Number(s.coveredAmount || 0));
       const transport = parseAppointmentTransport(current.checkInNotes);
       const taxiPayable = transport && !transport.coveredByPackage && transport.fee > 0;
-      if (!prepaid && (payable || taxiPayable)) throw new BadRequestException('Há serviços ou Táxi Dog a cobrar. Finalize o pagamento na Agenda.');
+      if (!prepaid && (payable || taxiPayable) && !isDirectComplete) throw new BadRequestException('Há serviços ou Táxi Dog a cobrar. Finalize o pagamento na Agenda.');
     }
     if (['cancelled', 'no_show'].includes(status) &&
         await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })) {
@@ -2441,13 +2480,33 @@ export class PetshopService {
         }
       }
 
+      const effectiveExecDate =
+        current.startsAt && new Date(current.startsAt) < now ? new Date(current.startsAt) : now;
+
       if (actor && statusChanged && trackedStage) {
         const execution = await tx.petAppointment.findUnique({ where: { id }, include: { pet: { select: { size: true } }, services: { include: { service: true, customerPackageItem: true } } } });
-        if (execution) await this.commissions.recordExecution(tx, execution, status, actor.id, now);
+        if (execution) await this.commissions.recordExecution(tx, execution, status, actor.id, effectiveExecDate);
+      }
+
+      if (hasStageOperatorsMap) {
+        const execution = await tx.petAppointment.findUnique({
+          where: { id },
+          include: {
+            pet: { select: { size: true } },
+            services: { include: { service: true, customerPackageItem: true } },
+          },
+        });
+        if (execution) {
+          for (const [stgKey, opId] of Object.entries(data.stageOperators)) {
+            if (opId && opId !== 'none') {
+              await this.commissions.recordExecution(tx, execution, stgKey, String(opId), effectiveExecDate);
+            }
+          }
+        }
       }
 
       if (status === 'delivered' && statusChanged) {
-        await recordAddedServiceCommissions(tx, current, this.tenantContext.get().tenantId, now);
+        await recordAddedServiceCommissions(tx, current, this.tenantContext.get().tenantId, effectiveExecDate);
       }
 
       return tx.petAppointment.update({

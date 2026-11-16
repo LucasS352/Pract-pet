@@ -120,21 +120,10 @@ export function TaxiDogWidget({
     };
   }, [openManifestModal]);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    api.get<Appointment[]>('/petshop/appointments/overdue-pickups', {
-      params: { before: today.toISOString() }, signal: controller.signal,
-    }).then(({ data }) => setOverdueItems(data || []))
-      .catch(() => { if (!controller.signal.aborted) toast.error('Não foi possível carregar coletas antigas pendentes.'); });
-    return () => controller.abort();
-  }, [appointments]);
-
-  // Filtra apenas agendamentos ativos (não cancelados) com transporte ativo
-  const operation = useMemo(() => summarizeTaxiAppointments([...overdueItems, ...appointments]), [appointments, overdueItems]);
+  // Filtra apenas agendamentos ativos (não cancelados) com transporte ativo do período atual
+  const operation = useMemo(() => summarizeTaxiAppointments(appointments), [appointments]);
   const transportItems = operation.all;
-  useEffect(() => { setRouteLinks([]); }, [appointments, overdueItems, checkedStops, routeCity]);
+  useEffect(() => { setRouteLinks([]); }, [appointments, checkedStops, routeCity]);
 
   // 1. FALTA BUSCAR: Apenas agendamentos com coleta que AINDA NÃO FIZERAM CHECK-IN
   // Assim que o motorista/recepção dá Check-in, o pet sai imediatamente desta lista!

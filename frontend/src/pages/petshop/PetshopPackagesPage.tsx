@@ -192,8 +192,21 @@ export default function PetshopPackagesPage() {
     fixedTime: '15:00',
   });
   const [scheduledSessions, setScheduledSessions] = useState<
-    Array<{ date: string; time: string; serviceId: string; customEdited?: boolean }>
+    Array<{
+      date: string;
+      time: string;
+      serviceId: string;
+      customEdited?: boolean;
+      completed?: boolean;
+      stageOperators?: { bathing?: string; grooming?: string; finishing?: string };
+    }>
   >([]);
+  const [operators, setOperators] = useState<Array<{ id: string; name: string; jobTitle?: string | null; active?: boolean }>>([]);
+  const [defaultPastOperators, setDefaultPastOperators] = useState<{
+    bathing: string;
+    grooming: string;
+    finishing: string;
+  }>({ bathing: '', grooming: '', finishing: '' });
 
   // Modal de Detalhes / Histórico / Estorno de Contrato
   const [selectedContract, setSelectedContract] = useState<CustomerPetPackage | null>(null);
@@ -207,13 +220,14 @@ export default function PetshopPackagesPage() {
   const loadAll = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
     try {
-      const [contractsRes, plansRes, servicesRes, tutorsRes, petsRes, finRes] = await Promise.all([
+      const [contractsRes, plansRes, servicesRes, tutorsRes, petsRes, finRes, opsRes] = await Promise.all([
         api.get('/petshop/packages/contracts'),
         api.get('/petshop/packages/plans?includeInactive=true'),
         api.get('/petshop/services'),
         api.get('/petshop/tutors'),
         api.get('/petshop/pets'),
         api.get('/petshop/packages/financial-overview'),
+        api.get('/operators').catch(() => ({ data: [] })),
       ]);
 
       setContracts(Array.isArray(contractsRes.data) ? contractsRes.data : []);
@@ -222,6 +236,17 @@ export default function PetshopPackagesPage() {
       setTutors(Array.isArray(tutorsRes.data) ? tutorsRes.data : []);
       setPets(Array.isArray(petsRes.data) ? petsRes.data : []);
       setFinancialOverview(finRes.data || null);
+      const activeOps = (Array.isArray(opsRes.data) ? opsRes.data : []).filter((o: any) => o.active !== false);
+      setOperators(activeOps);
+      if (activeOps.length > 0) {
+        const banhista = activeOps.find((o: any) => (o.jobTitle || '').toLowerCase().includes('banh')) || activeOps[0];
+        const tosador = activeOps.find((o: any) => (o.jobTitle || '').toLowerCase().includes('tosa')) || activeOps[0];
+        setDefaultPastOperators(prev => ({
+          bathing: prev.bathing || banhista?.id || '',
+          grooming: prev.grooming || tosador?.id || '',
+          finishing: prev.finishing || banhista?.id || '',
+        }));
+      }
     } catch {
       toast.error('Não foi possível carregar os dados de pacotes.');
     } finally {
@@ -365,27 +390,52 @@ export default function PetshopPackagesPage() {
 
       // Encontra a primeira ocorrência do dia da semana escolhido a partir da data de início
       const currentDow = baseDate.getDay();
-      let daysUntilFirst = (dayOfWeek - currentDow + 7) % 7;
+      const daysUntilFirst = (dayOfWeek - currentDow + 7) % 7;
       const firstSessionDate = new Date(baseDate);
       firstSessionDate.setDate(firstSessionDate.getDate() + daysUntilFirst);
 
-      const generated: Array<{ date: string; time: string; serviceId: string; customEdited?: boolean }> = [];
-      for (let i = 0; i < totalCount; i++) {
-        const d = new Date(firstSessionDate);
-        d.setDate(d.getDate() + i * 7);
-        const yyyy = d.getFullYear();
-        const mm = String(d.getMonth() + 1).padStart(2, '0');
-        const dd = String(d.getDate()).padStart(2, '0');
-        generated.push({
-          date: `${yyyy}-${mm}-${dd}`,
-          time: timeStr || '15:00',
-          serviceId: expandedServiceIds[i] || plan.items[0].serviceId,
-          customEdited: false,
-        });
-      }
-      setScheduledSessions(generated);
+      const now = new Date();
+      const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      setScheduledSessions(prev => {
+        const generated: Array<{
+          date: string;
+          time: string;
+          serviceId: string;
+          customEdited?: boolean;
+          completed?: boolean;
+          stageOperators?: { bathing?: string; grooming?: string; finishing?: string };
+        }> = [];
+        for (let i = 0; i < totalCount; i++) {
+          const existing = prev[i];
+          if (existing?.customEdited && existing.date) {
+            generated.push(existing);
+            continue;
+          }
+          const d = new Date(firstSessionDate);
+          d.setDate(d.getDate() + i * 7);
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          const dateYMD = `${yyyy}-${mm}-${dd}`;
+          const isPast = dateYMD < todayYMD;
+          generated.push({
+            date: dateYMD,
+            time: timeStr || '15:00',
+            serviceId: expandedServiceIds[i] || plan.items[0].serviceId,
+            customEdited: false,
+            completed: isPast,
+            stageOperators: {
+              bathing: defaultPastOperators.bathing,
+              grooming: defaultPastOperators.grooming,
+              finishing: defaultPastOperators.finishing,
+            },
+          });
+        }
+        return generated;
+      });
     },
-    [],
+    [defaultPastOperators],
   );
 
   useEffect(() => {
@@ -697,6 +747,8 @@ export default function PetshopPackagesPage() {
               .map(s => ({
                 startsAt: new Date(`${s.date}T${s.time}:00`).toISOString(),
                 serviceIds: s.serviceId ? [s.serviceId] : undefined,
+                completed: Boolean(s.completed),
+                stageOperators: s.completed ? s.stageOperators : undefined,
               }))
           : [];
 
@@ -2463,19 +2515,42 @@ export default function PetshopPackagesPage() {
 
                 {contractForm.scheduleRecurring && (
                   <div className="space-y-3 pt-1">
-                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+                      <div>
+                        <label className="mb-1 block text-[11px] font-semibold text-teal-950">
+                          Data da 1ª Sessão / Início *
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          value={contractForm.startDate}
+                          onChange={e => {
+                            const nextStart = e.target.value;
+                            const dObj = nextStart ? new Date(`${nextStart}T12:00:00`) : null;
+                            const nextDow = dObj && !Number.isNaN(dObj.getTime()) ? dObj.getDay() : contractForm.fixedDayOfWeek;
+                            setScheduledSessions(prev => prev.map(s => ({ ...s, customEdited: false })));
+                            setContractForm(prev => ({
+                              ...prev,
+                              startDate: nextStart,
+                              fixedDayOfWeek: nextDow,
+                            }));
+                          }}
+                          className={inputClass}
+                        />
+                      </div>
                       <div>
                         <label className="mb-1 block text-[11px] font-semibold text-teal-950">
                           Dia da Semana Fixo Padrão
                         </label>
                         <select
                           value={contractForm.fixedDayOfWeek}
-                          onChange={e =>
+                          onChange={e => {
+                            setScheduledSessions(prev => prev.map(s => ({ ...s, customEdited: false })));
                             setContractForm({
                               ...contractForm,
                               fixedDayOfWeek: Number(e.target.value),
-                            })
-                          }
+                            });
+                          }}
                           className={inputClass}
                         >
                           <option value={1}>Toda Segunda-feira</option>
@@ -2505,6 +2580,99 @@ export default function PetshopPackagesPage() {
                       </div>
                     </div>
 
+                    {scheduledSessions.some(s => s.completed) && operators.length > 0 && (
+                      <div className="rounded-xl border border-emerald-300 bg-emerald-50/70 p-2.5 space-y-2">
+                        <div className="flex flex-wrap items-center justify-between gap-1">
+                          <span className="text-[11px] font-bold text-emerald-950">
+                            ✓ Sessões passadas (já realizadas): atribua os colaboradores para gerar comissão e abater saldo automaticamente
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                          <div>
+                            <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
+                              Quem fez o Banho (Padrão)
+                            </label>
+                            <select
+                              value={defaultPastOperators.bathing}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setDefaultPastOperators(prev => ({ ...prev, bathing: val }));
+                                setScheduledSessions(prev =>
+                                  prev.map(s =>
+                                    s.completed
+                                      ? { ...s, stageOperators: { ...s.stageOperators, bathing: val } }
+                                      : s,
+                                  ),
+                                );
+                              }}
+                              className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
+                            >
+                              <option value="">Sem comissão de Banho</option>
+                              {operators.map(op => (
+                                <option key={op.id} value={op.id}>
+                                  {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
+                              Quem fez a Tosa (Se houver)
+                            </label>
+                            <select
+                              value={defaultPastOperators.grooming}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setDefaultPastOperators(prev => ({ ...prev, grooming: val }));
+                                setScheduledSessions(prev =>
+                                  prev.map(s =>
+                                    s.completed
+                                      ? { ...s, stageOperators: { ...s.stageOperators, grooming: val } }
+                                      : s,
+                                  ),
+                                );
+                              }}
+                              className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
+                            >
+                              <option value="">Sem comissão de Tosa</option>
+                              {operators.map(op => (
+                                <option key={op.id} value={op.id}>
+                                  {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-[10px] font-bold text-emerald-900 mb-0.5">
+                              Quem fez a Finalização (Padrão)
+                            </label>
+                            <select
+                              value={defaultPastOperators.finishing}
+                              onChange={e => {
+                                const val = e.target.value;
+                                setDefaultPastOperators(prev => ({ ...prev, finishing: val }));
+                                setScheduledSessions(prev =>
+                                  prev.map(s =>
+                                    s.completed
+                                      ? { ...s, stageOperators: { ...s.stageOperators, finishing: val } }
+                                      : s,
+                                  ),
+                                );
+                              }}
+                              className="w-full rounded-lg border border-emerald-300 bg-white px-2 py-1 text-xs font-semibold text-slate-800"
+                            >
+                              <option value="">Sem comissão de Finalização</option>
+                              {operators.map(op => (
+                                <option key={op.id} value={op.id}>
+                                  {op.name} {op.jobTitle ? `(${op.jobTitle})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
                     {scheduledSessions.length > 0 && (
                       <div className="space-y-2 rounded-xl border border-teal-200/80 bg-white p-2.5">
                         {scheduledSessions.map((sess, idx) => {
@@ -2513,58 +2681,168 @@ export default function PetshopPackagesPage() {
                             dObj && !Number.isNaN(dObj.getTime())
                               ? new Intl.DateTimeFormat('pt-BR', { weekday: 'short' }).format(dObj)
                               : '';
+                          const now = new Date();
+                          const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
                           return (
                             <div
                               key={idx}
-                              className={`grid grid-cols-1 gap-2 rounded-lg border p-2 text-xs sm:grid-cols-12 sm:items-center ${
-                                sess.customEdited
-                                  ? 'border-amber-300 bg-amber-50/40'
-                                  : 'border-slate-200 bg-slate-50/60'
+                              className={`space-y-2 rounded-lg border p-2 text-xs ${
+                                sess.completed
+                                  ? 'border-emerald-300 bg-emerald-50/40'
+                                  : sess.customEdited
+                                    ? 'border-amber-300 bg-amber-50/40'
+                                    : 'border-slate-200 bg-slate-50/60'
                               }`}
                             >
-                              <div className="sm:col-span-4 flex items-center gap-1.5 font-semibold text-slate-800">
-                                <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-700 text-[10px] font-bold text-white">
-                                  {idx + 1}ª
-                                </span>
-                                <span>Semana {idx + 1}</span>
-                                {weekdayLabel && (
-                                  <span className="rounded bg-white px-1.5 py-0.5 text-[10px] uppercase text-teal-800 border border-slate-200">
-                                    {weekdayLabel}
+                              <div className="grid grid-cols-1 gap-2 sm:grid-cols-12 sm:items-center">
+                                <div className="sm:col-span-4 flex items-center gap-1.5 font-semibold text-slate-800">
+                                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-teal-700 text-[10px] font-bold text-white">
+                                    {idx + 1}ª
                                   </span>
-                                )}
+                                  <span>Semana {idx + 1}</span>
+                                  {weekdayLabel && (
+                                    <span className="rounded bg-white px-1.5 py-0.5 text-[10px] uppercase text-teal-800 border border-slate-200">
+                                      {weekdayLabel}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="sm:col-span-4">
+                                  <input
+                                    type="date"
+                                    value={sess.date}
+                                    onChange={e => {
+                                      const nextDate = e.target.value;
+                                      const isPastDate = Boolean(nextDate && nextDate < todayYMD);
+                                      const next = [...scheduledSessions];
+                                      next[idx] = {
+                                        ...next[idx],
+                                        date: nextDate,
+                                        customEdited: true,
+                                        completed: isPastDate,
+                                        stageOperators: next[idx].stageOperators || {
+                                          bathing: defaultPastOperators.bathing,
+                                          grooming: defaultPastOperators.grooming,
+                                          finishing: defaultPastOperators.finishing,
+                                        },
+                                      };
+                                      setScheduledSessions(next);
+                                      if (idx === 0 && nextDate && nextDate < contractForm.startDate) {
+                                        setContractForm(prev => ({ ...prev, startDate: nextDate }));
+                                      }
+                                    }}
+                                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
+                                  />
+                                </div>
+                                <div className="sm:col-span-2">
+                                  <input
+                                    type="time"
+                                    value={sess.time}
+                                    onChange={e => {
+                                      const next = [...scheduledSessions];
+                                      next[idx] = {
+                                        ...next[idx],
+                                        time: e.target.value,
+                                        customEdited: true,
+                                      };
+                                      setScheduledSessions(next);
+                                    }}
+                                    className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
+                                  />
+                                </div>
+                                <div className="sm:col-span-2 flex justify-end">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const next = [...scheduledSessions];
+                                      const nextCompleted = !next[idx].completed;
+                                      next[idx] = {
+                                        ...next[idx],
+                                        completed: nextCompleted,
+                                        stageOperators: next[idx].stageOperators || {
+                                          bathing: defaultPastOperators.bathing,
+                                          grooming: defaultPastOperators.grooming,
+                                          finishing: defaultPastOperators.finishing,
+                                        },
+                                      };
+                                      setScheduledSessions(next);
+                                    }}
+                                    title="Marcar se esta sessão já aconteceu (abate do saldo, gera comissão e não envia para Táxi Dog)"
+                                    className={`w-full rounded-lg border px-2 py-1.5 text-[10px] font-bold transition cursor-pointer ${
+                                      sess.completed
+                                        ? 'border-emerald-400 bg-emerald-600 text-white shadow-2xs'
+                                        : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    {sess.completed ? '✓ Realizado' : 'Agendado'}
+                                  </button>
+                                </div>
                               </div>
-                              <div className="sm:col-span-5">
-                                <input
-                                  type="date"
-                                  value={sess.date}
-                                  onChange={e => {
-                                    const next = [...scheduledSessions];
-                                    next[idx] = {
-                                      ...next[idx],
-                                      date: e.target.value,
-                                      customEdited: true,
-                                    };
-                                    setScheduledSessions(next);
-                                  }}
-                                  className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
-                                />
-                              </div>
-                              <div className="sm:col-span-3">
-                                <input
-                                  type="time"
-                                  value={sess.time}
-                                  onChange={e => {
-                                    const next = [...scheduledSessions];
-                                    next[idx] = {
-                                      ...next[idx],
-                                      time: e.target.value,
-                                      customEdited: true,
-                                    };
-                                    setScheduledSessions(next);
-                                  }}
-                                  className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium"
-                                />
-                              </div>
+
+                              {sess.completed && operators.length > 0 && (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-1 border-t border-emerald-200/70">
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Banho:</span>
+                                    <select
+                                      value={sess.stageOperators?.bathing ?? ''}
+                                      onChange={e => {
+                                        const next = [...scheduledSessions];
+                                        next[idx] = {
+                                          ...next[idx],
+                                          stageOperators: { ...next[idx].stageOperators, bathing: e.target.value },
+                                        };
+                                        setScheduledSessions(next);
+                                      }}
+                                      className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
+                                    >
+                                      <option value="">Sem comissão</option>
+                                      {operators.map(op => (
+                                        <option key={op.id} value={op.id}>{op.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Tosa:</span>
+                                    <select
+                                      value={sess.stageOperators?.grooming ?? ''}
+                                      onChange={e => {
+                                        const next = [...scheduledSessions];
+                                        next[idx] = {
+                                          ...next[idx],
+                                          stageOperators: { ...next[idx].stageOperators, grooming: e.target.value },
+                                        };
+                                        setScheduledSessions(next);
+                                      }}
+                                      className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
+                                    >
+                                      <option value="">Sem comissão</option>
+                                      {operators.map(op => (
+                                        <option key={op.id} value={op.id}>{op.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div className="flex items-center gap-1">
+                                    <span className="text-[10px] font-semibold text-emerald-900 shrink-0 w-16">Finaliz.:</span>
+                                    <select
+                                      value={sess.stageOperators?.finishing ?? ''}
+                                      onChange={e => {
+                                        const next = [...scheduledSessions];
+                                        next[idx] = {
+                                          ...next[idx],
+                                          stageOperators: { ...next[idx].stageOperators, finishing: e.target.value },
+                                        };
+                                        setScheduledSessions(next);
+                                      }}
+                                      className="min-w-0 flex-1 rounded border border-emerald-200 bg-white px-1.5 py-1 text-[11px]"
+                                    >
+                                      <option value="">Sem comissão</option>
+                                      {operators.map(op => (
+                                        <option key={op.id} value={op.id}>{op.name}</option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           );
                         })}

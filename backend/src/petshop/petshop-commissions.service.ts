@@ -271,12 +271,38 @@ export class PetshopCommissionsService {
     for (const item of appointment.services) {
       const base = bases.get(item.id);
       if (!base) continue;
+      const svcNameLower = String(item.service?.name || item.nameSnapshot || '').toLowerCase();
       const configured = Array.isArray(item.service?.customStages) && item.service.customStages.length
         ? item.service.customStages : this.pricing.suggestStages(item.service?.name || item.nameSnapshot, item.service?.category);
-      if (!configured.some((stage: any) => (typeof stage === 'string' ? stage : stage.key) === stageKey)) continue;
+      const configuredKeys = new Set(configured.map((stage: any) => (typeof stage === 'string' ? stage : stage?.key)));
+      if (svcNameLower.includes('banho')) configuredKeys.add('bathing');
+      if (!configuredKeys.has(stageKey)) continue;
       const rule = this.resolveRule(rules, item.serviceId, operatorId, petSize);
       if (!rule) continue;
       const amount = rule.kind === 'PERCENT' ? money(base.mul(rule.value).div(100)) : rule.kind === 'FIXED' ? money(D(rule.value)) : ZERO;
+      if ((tx.petCommission as any)?.findUnique) {
+        const existing = await (tx.petCommission as any).findUnique({
+          where: { appointmentServiceId_stageKey: { appointmentServiceId: item.id, stageKey } },
+        }).catch(() => null);
+        if (existing) {
+          if (existing.state === 'PENDING') {
+            await tx.petCommission.update({
+              where: { id: existing.id },
+              data: {
+                operatorId,
+                executedAt: at,
+                baseAmount: base,
+                ruleId: rule.id,
+                ruleVersion: rule.version,
+                ruleKind: rule.kind,
+                ruleValue: rule.value,
+                amount,
+              },
+            });
+          }
+          continue;
+        }
+      }
       await tx.petCommission.createMany({ data: [{ tenantId: this.context.get().tenantId, appointmentId: appointment.id, appointmentServiceId: item.id, operatorId, stageKey, executedAt: at, baseAmount: base, ruleId: rule.id, ruleVersion: rule.version, ruleKind: rule.kind, ruleValue: rule.value, amount }], skipDuplicates: true });
     }
   }

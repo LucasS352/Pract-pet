@@ -164,7 +164,7 @@ export default function PetshopTaxiDogPage() {
   const [appointmentToCancel, setAppointmentToCancel] = useState<Appointment | null>(null);
   const [appointmentToReschedule, setAppointmentToReschedule] = useState<Appointment | null>(null);
 
-  // Carrega agendamentos da data selecionada
+  // Carrega agendamentos estritamente da data selecionada (evita que agendamentos retroativos apareçam como "Falta buscar" hoje ou sumam ao fazer check-in)
   const loadAppointments = useCallback(async () => {
     loadController.current?.abort();
     const controller = new AbortController();
@@ -173,15 +173,14 @@ export default function PetshopTaxiDogPage() {
     try {
       const from = new Date(`${selectedDate}T00:00:00`).toISOString();
       const to = new Date(`${selectedDate}T23:59:59.999`).toISOString();
-      const [res, overdue] = await Promise.all([
-        api.get<Appointment[]>('/petshop/appointments', { params: { from, to }, signal: controller.signal }),
-        api.get<Appointment[]>('/petshop/appointments/overdue-pickups', { params: { before: from }, signal: controller.signal }),
-      ]);
+      const res = await api.get<Appointment[]>('/petshop/appointments', {
+        params: { from, to },
+        signal: controller.signal,
+      });
       if (controller.signal.aborted) return;
       const current = res.data || [];
-      const older = overdue.data || [];
-      setOverdueCount(older.length);
-      setAppointments([...new Map([...older, ...current].map(item => [item.id, item])).values()]);
+      setOverdueCount(0);
+      setAppointments(current);
     } catch {
       if (!controller.signal.aborted) toast.error('Não foi possível carregar as corridas do Táxi Dog.');
     } finally {
