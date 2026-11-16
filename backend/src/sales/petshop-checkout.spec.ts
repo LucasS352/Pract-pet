@@ -42,4 +42,22 @@ describe('Pet Shop checkout integrity', () => {
     db.comanda = { findFirst: jest.fn().mockResolvedValue({ id: 'paid' }) };
     await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, comanda)).rejects.toThrow('já pago antecipadamente');
   });
+
+  it('permite cobrar adicional em atendimento delivered somente com comanda addon:1 e sem venda ativa vinculada', async () => {
+    const db = tx('delivered') as any;
+    db.comanda = { findFirst: jest.fn().mockResolvedValue(null) };
+    const addonComanda = { notes: 'PET2:{"v":2,"a":"apt","addon":1}' };
+
+    expect(await claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, addonComanda)).toBe('apt');
+    await completePetshopCheckout(db, 'apt', 'cashier', 'tenant', false);
+    expect(db.petAppointment.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: {
+        stageHistory: [expect.objectContaining({ kind: 'additional_charge', status: 'delivered', userId: 'cashier' })],
+      },
+    }));
+
+    // Se já existir uma venda fechada anterior, bloqueia cobrança em duplicidade mesmo com addon:1
+    db.comanda = { findFirst: jest.fn().mockResolvedValue({ id: 'already-paid' }) };
+    await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, addonComanda)).rejects.toThrow('Cobrança em duplicidade');
+  });
 });

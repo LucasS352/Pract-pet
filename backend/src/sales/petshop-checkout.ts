@@ -24,20 +24,28 @@ export async function recordAddedServiceCommissions(tx: any, appointment: any, t
   }
 }
 
-export function appointmentFromComanda(notes?: string | null): string | null {
+export function appointmentLinkFromComanda(notes?: string | null): { appointmentId: string; isAddon: boolean } | null {
   if (!notes) return null;
   const prefix = notes.startsWith('PET2:') ? 'PET2:' : notes.startsWith('PETSHOP_LINK_V1:') ? 'PETSHOP_LINK_V1:' : null;
   if (!prefix) return null;
   try {
     const value = JSON.parse(notes.slice(prefix.length));
     const id = prefix === 'PET2:' ? value.a : value.appointment?.id;
-    if (typeof id === 'string' && id) return id;
+    if (typeof id === 'string' && id) {
+      return { appointmentId: id, isAddon: value?.addon === 1 || value?.addon === true };
+    }
   } catch { /* A broken pet link must never silently become an ordinary sale. */ }
   throw new BadRequestException('Vínculo do atendimento inválido. Reabra a cobrança pela Agenda.');
 }
 
+export function appointmentFromComanda(notes?: string | null): string | null {
+  return appointmentLinkFromComanda(notes)?.appointmentId ?? null;
+}
+
 export async function claimPetshopCheckout(tx: any, data: any, comanda: any) {
-  const linkedId = appointmentFromComanda(comanda?.notes);
+  const link = appointmentLinkFromComanda(comanda?.notes);
+  const linkedId = link?.appointmentId ?? null;
+  const isAddon = Boolean(link?.isAddon);
   const requestedId = data.petshopAppointmentId ? String(data.petshopAppointmentId) : null;
   if (!linkedId && !requestedId) return null;
   if (!linkedId || (requestedId && requestedId !== linkedId)) {
@@ -46,11 +54,19 @@ export async function claimPetshopCheckout(tx: any, data: any, comanda: any) {
   await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${linkedId} FOR UPDATE`;
   const appointment = await tx.petAppointment.findUnique({ where: { id: linkedId } });
   if (!appointment) throw new BadRequestException('Atendimento não encontrado.');
+
+  const activePayment = tx.comanda?.findFirst
+    ? await tx.comanda.findFirst({ where: { notes: { contains: linkedId }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })
+    : null;
+
   if (appointment.status === 'delivered' || appointment.completedAt) {
-    throw new ConflictException('Atendimento já cobrado e concluído. Cobrança em duplicidade bloqueada.');
+    // Permite apenas cobrança de adicional em atendimento concluído por pacote sem venda avulsa paga vinculada
+    if (!(isAddon && !activePayment && !data.petshopPrepayment)) {
+      throw new ConflictException('Atendimento já cobrado e concluído. Cobrança em duplicidade bloqueada.');
+    }
+    return linkedId;
   }
   if (Array.isArray(appointment.stageHistory) && appointment.stageHistory.some((event: any) => event?.kind === 'prepayment')) {
-    const activePayment = await tx.comanda.findFirst({ where: { notes: { contains: linkedId }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } });
     if (activePayment) throw new ConflictException('Agendamento já pago antecipadamente. Cobrança em duplicidade bloqueada.');
   }
   if (data.petshopPrepayment) {
@@ -67,6 +83,15 @@ export async function completePetshopCheckout(tx: any, appointmentId: string | n
     await tx.petAppointment.update({ where: { id: appointmentId }, data: {
       stageHistory: [...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []), {
         kind: 'prepayment', status: appointment.status, label: 'Pagamento antecipado no agendamento', at: now.toISOString(), userId: actorId,
+      }],
+    } });
+    return;
+  }
+  if (appointment?.status === 'delivered') {
+    await recordAddedServiceCommissions(tx, appointment, tenantId, appointment.completedAt || now);
+    await tx.petAppointment.update({ where: { id: appointmentId }, data: {
+      stageHistory: [...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []), {
+        kind: 'additional_charge', status: 'delivered', label: 'Adicional cobrado no caixa', at: now.toISOString(), userId: actorId, skipped: false,
       }],
     } });
     return;

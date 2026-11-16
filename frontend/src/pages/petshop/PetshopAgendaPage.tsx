@@ -1018,7 +1018,13 @@ export default function PetshopAgendaPage() {
 
   // Cobrar Atendimento (Valida caixa aberto e carrega no PDV)
   const handleChargeAppointment = async (item: Appointment, prepay = false) => {
-    if (item.status === 'delivered') {
+    const hasUncoveredPending =
+      (item.services || []).some(
+        s => !s.comboParentId && s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed' && Number(s.priceSnapshot || 0) > 0,
+      ) ||
+      Boolean(item.transport?.enabled && !item.transport.coveredByPackage && Number(item.transport.fee || 0) > 0);
+    const hasExistingSale = item.paidAmount !== null && item.paidAmount !== undefined;
+    if (item.status === 'delivered' && (!hasUncoveredPending || hasExistingSale)) {
       toast.info('Atendimento já foi cobrado e concluído!', {
         description: `O atendimento de ${item.pet?.name} já foi finalizado. Não é permitida cobrança em duplicidade.`,
       });
@@ -2572,14 +2578,16 @@ export default function PetshopAgendaPage() {
                 <p className="text-xs font-bold text-zinc-700 uppercase tracking-wider">
                   Serviços Contratados & Cobertura
                 </p>
-                {selectedAppointment.status !== 'delivered' && selectedAppointment.status !== 'cancelled' && !addingExtraService && (
+                {selectedAppointment.status !== 'cancelled' &&
+                  !(selectedAppointment.status === 'delivered' && selectedAppointment.paidAmount !== null && selectedAppointment.paidAmount !== undefined) &&
+                  !addingExtraService && (
                   <button
                     type="button"
                     onClick={() => setAddingExtraService(true)}
                     className="inline-flex items-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-800 hover:bg-teal-100 transition cursor-pointer"
-                    title="Adicionar serviço extra durante o atendimento (ex: Banho Anti-Pulgas, Hidratação, Desembolo)"
+                    title="Adicionar serviço extra ou diferença durante/após o atendimento (ex: Tosa na Máquina, Banho Anti-Pulgas, Hidratação)"
                   >
-                    <Plus size={12} /> Adicionar serviço ao atendimento
+                    <Plus size={12} /> {selectedAppointment.status === 'delivered' ? 'Adicionar serviço / diferença' : 'Adicionar serviço ao atendimento'}
                   </button>
                 )}
               </div>
@@ -3139,12 +3147,36 @@ export default function PetshopAgendaPage() {
               </div>
 
               <div className={selectedAppointment.status === 'ready' ? 'contents' : 'flex items-center gap-2'}>
-                {selectedAppointment.status === 'delivered' ? (
-                  <div className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 shadow-2xs">
-                    <CheckCircle2 size={15} className="text-emerald-600" />
-                    <span>✓ Já Cobrado e Concluído</span>
-                  </div>
-                ) : selectedAppointment.status === 'cancelled' ? (
+                {selectedAppointment.status === 'delivered' ? (() => {
+                  const deliveredPendingAddon =
+                    selectedAppointment.services
+                      .filter(s => !s.comboParentId && s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
+                      .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0) +
+                    (selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage
+                      ? Number(selectedAppointment.transport.fee || 0)
+                      : 0);
+                  const alreadyPaidInPdv = selectedAppointment.paidAmount !== null && selectedAppointment.paidAmount !== undefined;
+                  if (deliveredPendingAddon > 0 && !alreadyPaidInPdv) {
+                    return (
+                      <button
+                        type="button"
+                        disabled={chargingId === selectedAppointment.id}
+                        onClick={() => handleChargeAppointment(selectedAppointment, false)}
+                        className="order-3 flex items-center gap-1.5 rounded-xl bg-teal-600 px-4 py-2 text-xs font-bold text-white ring-2 ring-teal-400/40 transition hover:bg-teal-700 cursor-pointer active:scale-95"
+                        title="Cobrar diferença / serviço adicional deste atendimento no caixa"
+                      >
+                        {chargingId === selectedAppointment.id ? <Loader2 size={15} className="animate-spin" /> : <CreditCard size={15} />}
+                        <span>Cobrar adicional ({money(deliveredPendingAddon)})</span>
+                      </button>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-bold text-emerald-800 shadow-2xs">
+                      <CheckCircle2 size={15} className="text-emerald-600" />
+                      <span>✓ Já Cobrado e Concluído</span>
+                    </div>
+                  );
+                })() : selectedAppointment.status === 'cancelled' ? (
                   <div className="flex items-center gap-2">
                     <div className="flex items-center gap-1.5 rounded-xl border border-rose-300 bg-rose-50 px-3 py-1.5 text-xs font-bold text-rose-800 shadow-2xs">
                       <XCircle size={14} className="text-rose-600" />

@@ -546,6 +546,26 @@ export type CustomerPetPackageLedger = {
   createdAt: string;
   appointmentId?: string | null;
   pet?: { id: string; name: string } | null;
+  appointment?: { id: string; startsAt: string; status: string } | null;
+};
+
+export type PackageScheduledAppointment = {
+  id: string;
+  startsAt: string;
+  endsAt: string;
+  status: string;
+  updatedAt: string;
+  stageHistory?: unknown;
+  pet: { id: string; name: string };
+  services: Array<{ id: string; nameSnapshot: string; coverageStatus: string }>;
+};
+
+export type CustomerPetPackageGroup = {
+  id: string;
+  mode: 'shared' | 'per_pet';
+  petIds: string[];
+  petNames: string[];
+  totalGroupPrice?: number;
 };
 
 export type CustomerPetPackage = {
@@ -571,6 +591,9 @@ export type CustomerPetPackage = {
   saleId?: string | null;
   notes?: string | null;
   transport?: PetTransportInfo | null;
+  packageGroup?: CustomerPetPackageGroup | null;
+  allowedPetIds?: string[] | null;
+  groupContracts?: CustomerPetPackage[];
   createdAt: string;
   customer: { id: string; name: string; phone: string; address?: string | null; reference?: string | null };
   pet?: {
@@ -584,6 +607,7 @@ export type CustomerPetPackage = {
   } | null;
   items: CustomerPetPackageItem[];
   ledgerEvents?: CustomerPetPackageLedger[];
+  scheduledAppointments?: PackageScheduledAppointment[];
 };
 
 export type WhatsappSessionStatus = {

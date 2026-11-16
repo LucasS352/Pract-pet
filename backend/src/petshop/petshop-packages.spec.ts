@@ -25,6 +25,30 @@ describe('PetshopPackagesService & PetshopWhatsappService', () => {
       service = new PetshopPackagesService(mockTenantManager as any, mockTenantContext as any);
     });
 
+    it('retorna as datas reais das sessões vinculadas ao contrato', async () => {
+      const appointment = {
+        id: 'app-1', startsAt: new Date('2026-11-20T15:00:00Z'),
+        endsAt: new Date('2026-11-20T16:00:00Z'), status: 'scheduled',
+        updatedAt: new Date('2026-11-16T12:00:00Z'),
+        pet: { id: 'pet-1', name: 'Lily' },
+        services: [{ id: 'service-1', nameSnapshot: 'Banho', coverageStatus: 'reserved' }],
+      };
+      mockPrisma.customerPetPackage = {
+        updateMany: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ id: 'pkg-1', notes: null }),
+      };
+      mockPrisma.petAppointment = { findMany: jest.fn().mockResolvedValue([appointment]) };
+
+      const contract = await service.getContractById('pkg-1');
+
+      expect(contract.scheduledAppointments).toEqual([appointment]);
+      expect(mockPrisma.petAppointment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { services: { some: {
+          customerPackageId: 'pkg-1', coverageStatus: { in: ['reserved', 'consumed'] },
+        } } },
+      }));
+    });
+
     it('deve selecionar a regra mais específica (espécie + porte + pelagem) em relação à genérica', async () => {
       mockPrisma.petPackagePlan.findUnique.mockResolvedValue({
         id: 'plan-1',
@@ -312,6 +336,109 @@ describe('PetshopPackagesService & PetshopWhatsappService', () => {
           reason: 'ok',
         }),
       ).rejects.toThrow(BadRequestException);
+    });
+
+    it('restringe pacote compartilhado aos allowedPetIds quando definidos na contratação', async () => {
+      mockPrisma.pet = { findUnique: jest.fn().mockResolvedValue({ id: 'pet-outro', customerId: 'cust-1' }) };
+      mockPrisma.customerPetPackage = {
+        updateMany: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([
+          {
+            id: 'pkg-restrito',
+            isShared: true,
+            notes: JSON.stringify({ allowedPetIds: ['pet-1', 'pet-2'], userNotes: null }),
+            items: [],
+          },
+          {
+            id: 'pkg-livre',
+            isShared: true,
+            notes: null,
+            items: [],
+          },
+        ]),
+      };
+
+      const res = await service.getAvailablePackagesForPet('pet-outro');
+      expect(res.map((c: any) => c.id)).toEqual(['pkg-livre']);
+
+      // Já para um pet autorizado, ambos aparecem
+      mockPrisma.pet.findUnique.mockResolvedValue({ id: 'pet-2', customerId: 'cust-1' });
+      const resAuth = await service.getAvailablePackagesForPet('pet-2');
+      expect(resAuth.map((c: any) => c.id)).toEqual(['pkg-restrito', 'pkg-livre']);
+    });
+
+    it('cria contratos agrupados no modo per_pet com comanda única consolidada', async () => {
+      const createdIds: string[] = [];
+      mockPrisma.customer = { findUnique: jest.fn().mockResolvedValue({ id: 'cust-1', name: 'Maria', address: 'Rua A, 10', reference: null }) };
+      mockPrisma.petPackagePlan = {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'plan-1',
+          name: 'Pacote Mensal',
+          active: true,
+          basePrice: 120,
+          validityDays: 30,
+          items: [{ serviceId: 'svc-1', quantity: 2, service: { id: 'svc-1', name: 'Banho', price: 60, durationMinutes: 60, serviceType: 'SINGLE' } }],
+          pricingRules: [
+            { id: 'r1', species: 'dog', size: 'small', coatType: 'all', price: 100, label: 'P' },
+            { id: 'r2', species: 'dog', size: 'large', coatType: 'all', price: 180, label: 'G' },
+          ],
+        }),
+      };
+      mockPrisma.pet = {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'pet-1', customerId: 'cust-1', name: 'Nick', species: 'dog', size: 'small', coatType: 'short' },
+          { id: 'pet-2', customerId: 'cust-1', name: 'Thor', species: 'dog', size: 'large', coatType: 'long' },
+        ]),
+      };
+
+      const groupTx = {
+        customer: { update: jest.fn() },
+        category: { findFirst: jest.fn().mockResolvedValue({ id: 'cat-pkg' }) },
+        product: { upsert: jest.fn() },
+        comanda: { create: jest.fn().mockResolvedValue({ id: 'cmd-grupo-1' }) },
+        customerPetPackage: {
+          create: jest.fn().mockImplementation(args => {
+            const id = `pkg-${createdIds.length + 1}`;
+            createdIds.push(id);
+            return Promise.resolve({ id, ...args.data });
+          }),
+          updateMany: jest.fn(),
+          findMany: jest.fn().mockImplementation(() =>
+            Promise.resolve(
+              createdIds.map((id, idx) => ({
+                id,
+                petId: idx === 0 ? 'pet-1' : 'pet-2',
+                finalPrice: idx === 0 ? 100 : 180,
+                notes: JSON.stringify({ packageGroup: { id: 'grp-1', mode: 'per_pet', petIds: ['pet-1', 'pet-2'], petNames: ['Nick', 'Thor'], totalGroupPrice: 280 } }),
+              })),
+            ),
+          ),
+        },
+        customerPetPackageItem: { create: jest.fn().mockResolvedValue({ id: 'citem-1' }) },
+        customerPetPackageLedger: { create: jest.fn() },
+      };
+      mockPrisma.$transaction = jest.fn(async cb => cb(groupTx));
+
+      const out: any = await service.createContract({
+        customerId: 'cust-1',
+        packagePlanId: 'plan-1',
+        petIds: ['pet-1', 'pet-2'],
+        multiPetMode: 'per_pet',
+        billingMode: 'comanda',
+      });
+
+      expect(groupTx.customerPetPackage.create).toHaveBeenCalledTimes(2);
+      expect(groupTx.comanda.create).toHaveBeenCalledTimes(1);
+      expect(groupTx.comanda.create).toHaveBeenCalledWith(expect.objectContaining({
+        data: expect.objectContaining({
+          total: expect.anything(),
+        }),
+      }));
+      expect(groupTx.customerPetPackage.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { id: { in: ['pkg-1', 'pkg-2'] } },
+        data: { comandaId: 'cmd-grupo-1' },
+      }));
+      expect(out.groupContracts).toHaveLength(2);
     });
   });
 

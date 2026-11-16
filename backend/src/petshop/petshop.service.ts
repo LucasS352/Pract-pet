@@ -1191,7 +1191,7 @@ export class PetshopService {
     });
   }
 
-  async ensureComandaForAppointment(prisma: any, appointmentId: string) {
+  async ensureComandaForAppointment(prisma: any, appointmentId: string, forceAddonFlag = false) {
     const appointment = await prisma.petAppointment.findUnique({
       where: { id: appointmentId },
       include: {
@@ -1275,9 +1275,19 @@ export class PetshopService {
         await prisma.comandaItem.createMany({ data: payableLines.map(line => ({ comandaId: existing.id, ...itemData(line) })) });
       }
       const total = manualItems.reduce((sum: Prisma.Decimal, item: any) => sum.add(new Prisma.Decimal(item.totalPrice)), expectedTotal);
+      let nextNotes: string | undefined;
+      if (forceAddonFlag && typeof existing.notes === 'string' && existing.notes.startsWith('PET2:')) {
+        try {
+          const parsed = JSON.parse(existing.notes.slice(5));
+          if (!parsed?.addon) {
+            const updatedStr = `PET2:${JSON.stringify({ ...parsed, addon: 1 })}`;
+            nextNotes = updatedStr.length <= 180 ? updatedStr : `PET2:${JSON.stringify({ v: 2, a: appointment.id, addon: 1 })}`;
+          }
+        } catch {}
+      }
       return prisma.comanda.update({
         where: { id: existing.id },
-        data: { status: 'waiting_payment', total },
+        data: { status: 'waiting_payment', total, ...(nextNotes ? { notes: nextNotes } : {}) },
         include: { items: true },
       });
     }
@@ -1316,12 +1326,15 @@ export class PetshopService {
     const compactPayload: Record<string, any> = {
       v: 2,
       a: appointment.id,
+      ...(forceAddonFlag ? { addon: 1 } : {}),
       s: serviceName || undefined,
       pr: appointment.professional?.name ? appointment.professional.name.slice(0, 18) : undefined,
       at: appointment.startsAt ? new Date(appointment.startsAt).toISOString().slice(0, 16) : undefined,
     };
     const notesStr = `PET2:${JSON.stringify(compactPayload)}`;
-    const safeNotes = notesStr.length <= 180 ? notesStr : `PET2:{"v":2,"a":"${appointment.id}"}`;
+    const safeNotes = notesStr.length <= 180
+      ? notesStr
+      : `PET2:${JSON.stringify({ v: 2, a: appointment.id, ...(forceAddonFlag ? { addon: 1 } : {}) })}`;
 
     const itemsData = payableLines.map(itemData);
 
@@ -2053,6 +2066,17 @@ export class PetshopService {
     });
     if (!current) throw new NotFoundException('Agendamento não encontrado.');
 
+    if (data.packageContractId) {
+      const linkedReservation = current.services.some(service =>
+        service.customerPackageId === String(data.packageContractId) && service.coverageStatus === 'reserved');
+      if (!linkedReservation || !['scheduled', 'requested'].includes(current.status)) {
+        throw new ConflictException('Esta sessão do pacote não está mais disponível para reagendamento.');
+      }
+      if (data.expectedUpdatedAt !== current.updatedAt.toISOString()) {
+        throw new ConflictException('A sessão foi alterada na agenda. Reabra o contrato antes de reagendar.');
+      }
+    }
+
     let startsAt = current.startsAt;
     if ((data.addServices?.length || data.removeAppointmentServiceId || data.transport !== undefined) &&
         await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })) {
@@ -2084,6 +2108,19 @@ export class PetshopService {
         rescheduled = true;
         startsAt = nextStartsAt;
         endsAt = nextEndsAt;
+      }
+    }
+
+    if (rescheduled) {
+      const reservedPackages = current.services
+        .filter(service => service.coverageStatus === 'reserved' && service.customerPackage)
+        .map(service => service.customerPackage!);
+      for (const contract of reservedPackages) {
+        if (startsAt < contract.startDate || startsAt > contract.expiresAt) {
+          throw new BadRequestException(
+            `A nova data deve estar dentro da validade do pacote "${contract.planNameSnapshot}".`,
+          );
+        }
       }
     }
 
@@ -2288,8 +2325,14 @@ export class PetshopService {
       await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${id} FOR UPDATE`;
       const appointment = await tx.petAppointment.findUnique({ where: { id } });
       if (!appointment) throw new NotFoundException('Atendimento não encontrado.');
-      if (appointment.status === 'delivered' || appointment.completedAt) throw new ConflictException('Atendimento já cobrado e concluído.');
       const paid = await tx.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } });
+      if (appointment.status === 'delivered' || appointment.completedAt) {
+        if (!paid && !prepay) {
+          const addonComanda = await this.ensureComandaForAppointment(tx, id, true);
+          if (addonComanda) return addonComanda;
+        }
+        throw new ConflictException('Atendimento já cobrado e concluído.');
+      }
       if (paid) {
         if (prepay) throw new ConflictException('Agendamento já pago. Cobrança em duplicidade bloqueada.');
         return { prepaid: true, total: 0 };

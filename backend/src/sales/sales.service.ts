@@ -657,7 +657,7 @@ export class SalesService {
         if (comandaToClose.notes) {
           try {
             let apptId: string | null = null;
-            let pkgContractId: string | null = null;
+            let pkgContractIds: string[] = [];
             if (comandaToClose.notes.startsWith('PET2:')) {
               const parsed = JSON.parse(comandaToClose.notes.slice(5));
               apptId = parsed.a || null;
@@ -666,11 +666,20 @@ export class SalesService {
               apptId = parsed.appointment?.id || null;
             } else if (comandaToClose.notes.startsWith('PKG1:')) {
               const parsed = JSON.parse(comandaToClose.notes.slice(5));
-              pkgContractId = parsed.c || null;
+              if (Array.isArray(parsed.g) && parsed.g.length) {
+                pkgContractIds = parsed.g.filter((x: any) => typeof x === 'string' && x);
+              } else if (parsed.c) {
+                pkgContractIds = [parsed.c];
+              }
             }
-            if (pkgContractId) {
+            if (pkgContractIds.length > 0) {
               await tx.customerPetPackage.updateMany({
-                where: { id: pkgContractId },
+                where: {
+                  OR: [
+                    { id: { in: pkgContractIds } },
+                    ...(comandaToClose.id ? [{ comandaId: comandaToClose.id }] : []),
+                  ],
+                },
                 data: { paymentStatus: 'paid', saleId: sale.id },
               });
             }

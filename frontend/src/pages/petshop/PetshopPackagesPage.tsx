@@ -5,11 +5,13 @@ import {
   ArrowRight,
   Box,
   Calendar,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock,
+  Copy,
   CreditCard,
   DollarSign,
   History,
@@ -32,6 +34,7 @@ import {
   TrendingUp,
   Users,
   Wallet,
+  X,
   XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -91,6 +94,12 @@ const EVENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
   RELEASE_RESERVATION: { label: 'Reserva Liberada', color: 'bg-slate-100 text-slate-700 border-slate-200' },
   REFUND: { label: 'Estorno de Sessão', color: 'bg-amber-50 text-amber-800 border-amber-200' },
   CANCEL: { label: 'Cancelamento', color: 'bg-rose-50 text-rose-700 border-rose-200' },
+};
+
+const localDateTimeInput = (value: string) => {
+  const date = new Date(value);
+  const pad = (part: number) => String(part).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
 
 export default function PetshopPackagesPage() {
@@ -196,11 +205,30 @@ export default function PetshopPackagesPage() {
       date: string;
       time: string;
       serviceId: string;
+      petId?: string;
       customEdited?: boolean;
       completed?: boolean;
       stageOperators?: { bathing?: string; grooming?: string; finishing?: string };
     }>
   >([]);
+  const [selectedPetIds, setSelectedPetIds] = useState<string[]>([]);
+  const [multiPetMode, setMultiPetMode] = useState<'shared' | 'per_pet'>('per_pet');
+  const [perPetCustomPrices, setPerPetCustomPrices] = useState<Record<string, string>>({});
+  const [perPetOverrides, setPerPetOverrides] = useState<
+    Record<
+      string,
+      Record<
+        number,
+        {
+          date?: string;
+          time?: string;
+          stageOperators?: { bathing?: string; grooming?: string; finishing?: string };
+        }
+      >
+    >
+  >({});
+  const [tutorSearchQuery, setTutorSearchQuery] = useState('');
+  const [tutorSearchOpen, setTutorSearchOpen] = useState(false);
   const [operators, setOperators] = useState<Array<{ id: string; name: string; jobTitle?: string | null; active?: boolean }>>([]);
   const [defaultPastOperators, setDefaultPastOperators] = useState<{
     bathing: string;
@@ -210,12 +238,37 @@ export default function PetshopPackagesPage() {
 
   // Modal de Detalhes / Histórico / Estorno de Contrato
   const [selectedContract, setSelectedContract] = useState<CustomerPetPackage | null>(null);
+  const [selectedGroupContracts, setSelectedGroupContracts] = useState<CustomerPetPackage[]>([]);
+  const [loadingContractDetails, setLoadingContractDetails] = useState(false);
+  const [contractDetailsError, setContractDetailsError] = useState(false);
+  const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
+  const [rescheduleStartsAt, setRescheduleStartsAt] = useState('');
+  const [savingReschedule, setSavingReschedule] = useState(false);
   const [refundTargetItem, setRefundTargetItem] = useState<CustomerPetPackageItem | null>(null);
   const [refundReason, setRefundReason] = useState('');
   const [submittingRefund, setSubmittingRefund] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [submittingCancel, setSubmittingCancel] = useState(false);
+
+  useEffect(() => {
+    const contractId = selectedContract?.id;
+    if (!contractId) return;
+    let active = true;
+    setLoadingContractDetails(true);
+    setContractDetailsError(false);
+    api.get<CustomerPetPackage>(`/petshop/packages/contracts/${contractId}`)
+      .then(({ data }) => {
+        if (active) setSelectedContract(data);
+      })
+      .catch(() => {
+        if (active) setContractDetailsError(true);
+      })
+      .finally(() => {
+        if (active) setLoadingContractDetails(false);
+      });
+    return () => { active = false; };
+  }, [selectedContract?.id]);
 
   const loadAll = useCallback(async (showSpinner = true) => {
     if (showSpinner) setLoading(true);
@@ -278,6 +331,12 @@ export default function PetshopPackagesPage() {
           size: foundPet?.size || 'small',
           coatType: foundPet?.coatType || 'short',
         }));
+        setSelectedPetIds(foundPet?.id ? [foundPet.id] : []);
+        setMultiPetMode('per_pet');
+        setPerPetCustomPrices({});
+        setPerPetOverrides({});
+        setTutorSearchQuery('');
+        setTutorSearchOpen(!resolvedTutorId);
         setOpenContractModal(true);
         setSearchParams({}, { replace: true });
       }
@@ -344,6 +403,77 @@ export default function PetshopPackagesPage() {
   const selectedPlanObj = useMemo(
     () => plans.find(p => p.id === contractForm.packagePlanId) || null,
     [plans, contractForm.packagePlanId],
+  );
+
+  const filteredModalTutors = useMemo(() => {
+    const q = tutorSearchQuery.trim().toLowerCase();
+    const qDigits = q.replace(/\D/g, '');
+    if (!q) return tutors.slice(0, 30);
+    return tutors
+      .filter(t => {
+        const nameMatch = (t.name || '').toLowerCase().includes(q);
+        const phoneStr = String(t.phone || '');
+        const phoneMatch =
+          phoneStr.toLowerCase().includes(q) ||
+          (qDigits.length >= 2 && phoneStr.replace(/\D/g, '').includes(qDigits));
+        return nameMatch || phoneMatch;
+      })
+      .slice(0, 30);
+  }, [tutors, tutorSearchQuery]);
+
+  const selectedPetsList = useMemo(
+    () => selectedPetIds.map(id => pets.find(p => p.id === id)).filter((p): p is Pet => Boolean(p)),
+    [selectedPetIds, pets],
+  );
+
+  const computeSuggestedPlanPriceForPet = useCallback(
+    (plan: PetPackagePlan | null, petObj: Pet | null) => {
+      if (!plan) return 0;
+      const sp = (petObj?.species || contractForm.species || 'all').toLowerCase();
+      const sz = (petObj?.size || contractForm.size || 'all').toLowerCase();
+      const ct = (petObj?.coatType || contractForm.coatType || 'all').toLowerCase();
+      let bestRule: PetPackagePricingRule | null = null;
+      let bestScore = -1;
+      for (const r of plan.pricingRules || []) {
+        const spMatch = r.species === 'all' || r.species === sp;
+        const szMatch = r.size === 'all' || r.size === sz;
+        const ctMatch = r.coatType === 'all' || r.coatType === ct;
+        if (!spMatch || !szMatch || !ctMatch) continue;
+        let score = 0;
+        if (r.size === sz && sz !== 'all') score += 4;
+        if (r.coatType === ct && ct !== 'all') score += 2;
+        if (r.species === sp && sp !== 'all') score += 1;
+        if (score > bestScore) {
+          bestScore = score;
+          bestRule = r;
+        }
+      }
+      return bestRule ? Number(bestRule.price) : Number(plan.basePrice);
+    },
+    [contractForm.species, contractForm.size, contractForm.coatType],
+  );
+
+  useEffect(() => {
+    if (!openContractModal || !selectedPlanObj || selectedPetsList.length < 2 || multiPetMode !== 'per_pet') return;
+    setPerPetCustomPrices(prev => {
+      const next: Record<string, string> = {};
+      for (const p of selectedPetsList) {
+        next[p.id] = prev[p.id] !== undefined ? prev[p.id] : String(computeSuggestedPlanPriceForPet(selectedPlanObj, p));
+      }
+      return next;
+    });
+  }, [openContractModal, selectedPlanObj, selectedPetsList, multiPetMode, computeSuggestedPlanPriceForPet]);
+
+  const recalcAllPerPetPricesFromPlan = useCallback(
+    (plan: PetPackagePlan | null, petsList: Pet[]) => {
+      if (!plan) return;
+      const next: Record<string, string> = {};
+      for (const p of petsList) {
+        next[p.id] = String(computeSuggestedPlanPriceForPet(plan, p));
+      }
+      setPerPetCustomPrices(next);
+    },
+    [computeSuggestedPlanPriceForPet],
   );
 
   const parseAddressParts = (addr?: string | null) => {
@@ -516,8 +646,9 @@ export default function PetshopPackagesPage() {
         const q = search.toLowerCase();
         const matchTutor = c.customer?.name?.toLowerCase().includes(q);
         const matchPet = c.pet?.name?.toLowerCase().includes(q);
+        const matchGroupPets = c.packageGroup?.petNames?.some(n => n.toLowerCase().includes(q));
         const matchPlan = c.planNameSnapshot?.toLowerCase().includes(q);
-        if (!matchTutor && !matchPet && !matchPlan) return false;
+        if (!matchTutor && !matchPet && !matchGroupPets && !matchPlan) return false;
       }
       return true;
     });
@@ -536,10 +667,69 @@ export default function PetshopPackagesPage() {
 
   const totalPages = Math.max(1, Math.ceil(filteredContracts.length / pageSize));
   const safePage = Math.min(currentPage, totalPages);
-  const paginatedContracts = useMemo(() => {
-    const start = (safePage - 1) * pageSize;
-    return filteredContracts.slice(start, start + pageSize);
-  }, [filteredContracts, safePage, pageSize]);
+
+  type ContractCardEntry = {
+    key: string;
+    primary: CustomerPetPackage;
+    members: CustomerPetPackage[];
+    isMultiPetGroup: boolean;
+  };
+
+  const groupedContractEntries = useMemo<ContractCardEntry[]>(() => {
+    const entries: ContractCardEntry[] = [];
+    const byGroupId = new Map<string, ContractCardEntry>();
+    for (const c of filteredContracts) {
+      const grp = c.packageGroup;
+      if (grp?.id && grp.mode === 'per_pet') {
+        const existing = byGroupId.get(grp.id);
+        if (existing) {
+          existing.members.push(c);
+        } else {
+          const entry: ContractCardEntry = {
+            key: `grp:${grp.id}`,
+            primary: c,
+            members: [c],
+            isMultiPetGroup: true,
+          };
+          byGroupId.set(grp.id, entry);
+          entries.push(entry);
+        }
+      } else {
+        entries.push({
+          key: c.id,
+          primary: c,
+          members: [c],
+          isMultiPetGroup: false,
+        });
+      }
+    }
+    return entries.map(e => ({
+      ...e,
+      isMultiPetGroup: e.members.length > 1,
+    }));
+  }, [filteredContracts]);
+
+  const groupedTotalPages = Math.max(1, Math.ceil(groupedContractEntries.length / pageSize));
+  const groupedSafePage = Math.min(currentPage, groupedTotalPages);
+  const paginatedContractEntries = useMemo(() => {
+    const start = (groupedSafePage - 1) * pageSize;
+    return groupedContractEntries.slice(start, start + pageSize);
+  }, [groupedContractEntries, groupedSafePage, pageSize]);
+
+  const openContractDetailsModal = useCallback(
+    (contract: CustomerPetPackage, groupMembers?: CustomerPetPackage[]) => {
+      const siblings =
+        groupMembers && groupMembers.length > 1
+          ? groupMembers
+          : contract.packageGroup?.id && contract.packageGroup.mode === 'per_pet'
+            ? contracts.filter(c => c.packageGroup?.id === contract.packageGroup?.id)
+            : [contract];
+      const finalMembers = siblings.length > 0 ? siblings : [contract];
+      setSelectedGroupContracts(finalMembers);
+      setSelectedContract(contract);
+    },
+    [contracts],
+  );
 
   const handleOpenNewPlan = () => {
     setEditingPlan(null);
@@ -624,8 +814,6 @@ export default function PetshopPackagesPage() {
   };
 
   const handleOpenNewContract = (preselectedPlan?: PetPackagePlan) => {
-    const defaultTutor = tutors[0];
-    const firstPet = pets.find(p => p.customerId === defaultTutor?.id) || pets[0];
     const plan = preselectedPlan || plans.find(p => p.active) || plans[0];
 
     if (!plan) {
@@ -635,13 +823,13 @@ export default function PetshopPackagesPage() {
     }
 
     setContractForm({
-      customerId: firstPet?.customerId || defaultTutor?.id || '',
-      petId: firstPet?.id || '',
+      customerId: '',
+      petId: '',
       packagePlanId: plan.id,
       isShared: false,
-      species: firstPet?.species || 'dog',
-      size: firstPet?.size || 'small',
-      coatType: firstPet?.coatType || 'short',
+      species: 'dog',
+      size: 'small',
+      coatType: 'short',
       customPrice: String(Number(plan.basePrice)),
       discountAmount: '0',
       validityDays: plan.validityDays,
@@ -652,15 +840,21 @@ export default function PetshopPackagesPage() {
       transportEnabled: false,
       transportMode: 'round_trip',
       transportFee: taxiDefaultFee,
-      customerStreet: parseAddressParts(defaultTutor?.address).street,
-      customerNeighborhood: parseAddressParts(defaultTutor?.address).neighborhood,
-      customerReference: defaultTutor?.reference || '',
+      customerStreet: '',
+      customerNeighborhood: '',
+      customerReference: '',
       transportNotes: '',
-      saveAddressToCustomer: !Boolean(defaultTutor?.address && defaultTutor.address.trim().length > 0),
+      saveAddressToCustomer: false,
       scheduleRecurring: true,
       fixedDayOfWeek: 5,
       fixedTime: '15:00',
     });
+    setSelectedPetIds([]);
+    setMultiPetMode('per_pet');
+    setPerPetCustomPrices({});
+    setPerPetOverrides({});
+    setTutorSearchQuery('');
+    setTutorSearchOpen(true);
     setOpenContractModal(true);
   };
 
@@ -713,6 +907,12 @@ export default function PetshopPackagesPage() {
       fixedDayOfWeek: 5,
       fixedTime: '15:00',
     });
+    setSelectedPetIds(petObj?.id ? [petObj.id] : []);
+    setMultiPetMode(op.isShared ? 'shared' : 'per_pet');
+    setPerPetCustomPrices({});
+    setPerPetOverrides({});
+    setTutorSearchQuery('');
+    setTutorSearchOpen(!tutorId);
 
     regenerateRecurringSchedule(
       matchedPlan,
@@ -725,6 +925,19 @@ export default function PetshopPackagesPage() {
   };
   const handleSubmitContract = async (e: FormEvent) => {
     e.preventDefault();
+    if (!contractForm.customerId) {
+      toast.error('Busque e selecione o tutor antes de confirmar.');
+      setTutorSearchOpen(true);
+      return;
+    }
+    const effectivePetIds = selectedPetIds.length > 0 ? selectedPetIds : contractForm.petId ? [contractForm.petId] : [];
+    if (effectivePetIds.length === 0 && !contractForm.isShared) {
+      toast.error('Selecione pelo menos um pet para vincular ao pacote.');
+      return;
+    }
+    const isPerPetGroup = effectivePetIds.length >= 2 && multiPetMode === 'per_pet';
+    const isSharedMulti = effectivePetIds.length >= 2 && multiPetMode === 'shared';
+
     const street = contractForm.customerStreet.trim();
     const neighborhood = contractForm.customerNeighborhood.trim();
     const fullAddress = [street, neighborhood].filter(Boolean).join(' - ');
@@ -742,13 +955,47 @@ export default function PetshopPackagesPage() {
     try {
       const now = new Date();
       const todayYMD = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      const perPetConfigs = isPerPetGroup
+        ? effectivePetIds.map(pid => {
+            const pOverrides = perPetOverrides[pid] || {};
+            const petSessions = contractForm.scheduleRecurring
+              ? scheduledSessions
+                  .map((s, idx) => {
+                    const ov = pOverrides[idx];
+                    const d = ov?.date || s.date;
+                    const t = ov?.time || s.time;
+                    if (!d || !t) return null;
+                    const isPast = Boolean(d < todayYMD);
+                    return {
+                      petId: pid,
+                      startsAt: new Date(`${d}T${t}:00`).toISOString(),
+                      serviceIds: s.serviceId ? [s.serviceId] : undefined,
+                      completed: isPast,
+                      stageOperators: isPast ? (ov?.stageOperators || s.stageOperators) : undefined,
+                    };
+                  })
+                  .filter(Boolean)
+              : [];
+            const petPriceRaw = perPetCustomPrices[pid];
+            return {
+              petId: pid,
+              customPrice: petPriceRaw !== undefined && petPriceRaw !== '' ? Number(petPriceRaw) : undefined,
+              scheduledSessions: petSessions,
+            };
+          })
+        : undefined;
+
       const formattedSessions =
-        contractForm.scheduleRecurring && contractForm.petId
+        !isPerPetGroup && contractForm.scheduleRecurring && effectivePetIds.length > 0
           ? scheduledSessions
               .filter(s => s.date && s.time)
-              .map(s => {
+              .map((s, idx) => {
                 const isPast = Boolean(s.date && s.date < todayYMD);
+                const fallbackPetId = effectivePetIds[idx % effectivePetIds.length];
+                const resolvedPetId = s.petId && effectivePetIds.includes(s.petId) ? s.petId : fallbackPetId;
                 return {
+                  petId: resolvedPetId,
                   startsAt: new Date(`${s.date}T${s.time}:00`).toISOString(),
                   serviceIds: s.serviceId ? [s.serviceId] : undefined,
                   completed: isPast,
@@ -759,6 +1006,11 @@ export default function PetshopPackagesPage() {
 
       const { data: created } = await api.post('/petshop/packages/contracts', {
         ...contractForm,
+        petId: effectivePetIds[0] || contractForm.petId || '',
+        petIds: effectivePetIds,
+        multiPetMode: effectivePetIds.length >= 2 ? multiPetMode : undefined,
+        isShared: isSharedMulti ? true : isPerPetGroup ? false : contractForm.isShared,
+        perPetConfigs,
         customPrice: Number(contractForm.customPrice || 0),
         discountAmount: Number(contractForm.discountAmount || 0),
         validityDays: Number(contractForm.validityDays || 30),
@@ -783,17 +1035,27 @@ export default function PetshopPackagesPage() {
       });
 
       if (contractForm.billingMode === 'comanda') {
-        toast.success('Pacote contratado e comanda gerada no Caixa (PDV)!', {
-          description: 'O cliente pode realizar o pagamento na recepção/caixa.',
-        });
+        toast.success(
+          isPerPetGroup
+            ? `Grupo de ${effectivePetIds.length} pacotes criado com comanda única no Caixa!`
+            : 'Pacote contratado e comanda gerada no Caixa (PDV)!',
+          { description: 'O cliente pode realizar o pagamento na recepção/caixa.' },
+        );
       } else {
-        toast.success('Pacote contratado e ativado com sucesso!');
+        toast.success(
+          isPerPetGroup
+            ? `Pacotes contratados e agrupados para os ${effectivePetIds.length} pets!`
+            : 'Pacote contratado e ativado com sucesso!',
+        );
       }
 
       setOpenContractModal(false);
-      loadAll(false);
+      await loadAll(false);
       if (created?.id) {
-        setSelectedContract(created);
+        const groupList = Array.isArray(created.groupContracts) && created.groupContracts.length
+          ? created.groupContracts
+          : [created];
+        openContractDetailsModal(created, groupList);
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao contratar pacote.');
@@ -808,10 +1070,61 @@ export default function PetshopPackagesPage() {
         paymentMethod: 'pix',
       });
       toast.success('Pagamento do pacote confirmado!');
-      setSelectedContract(prev => (prev?.id === contractId ? data : prev));
+      setSelectedContract(prev => (prev?.id === contractId ? { ...data, scheduledAppointments: prev.scheduledAppointments } : prev));
+      api.get<CustomerPetPackage>(`/petshop/packages/contracts/${contractId}`)
+        .then(({ data: details }) => setSelectedContract(prev => prev?.id === contractId ? details : prev))
+        .catch(() => {});
       loadAll(false);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao confirmar pagamento.');
+    }
+  };
+
+  const handleSavePackageReschedule = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!selectedContract || !editingAppointmentId || !rescheduleStartsAt) return;
+    const appointment = selectedContract.scheduledAppointments?.find(item => item.id === editingAppointmentId);
+    if (!appointment || !['scheduled', 'requested'].includes(appointment.status) ||
+        !appointment.services.some(service => service.coverageStatus === 'reserved')) {
+      toast.error('Esta sessão não está mais disponível para reagendamento.');
+      return;
+    }
+    const nextStart = new Date(rescheduleStartsAt);
+    if (Number.isNaN(nextStart.getTime()) || nextStart <= new Date()) {
+      toast.error('Escolha uma data e horário futuros.');
+      return;
+    }
+    if (nextStart > new Date(selectedContract.expiresAt)) {
+      toast.error('A nova data precisa estar dentro da validade do pacote.');
+      return;
+    }
+    if (nextStart.getTime() === new Date(appointment.startsAt).getTime()) {
+      setEditingAppointmentId(null);
+      return;
+    }
+    setSavingReschedule(true);
+    try {
+      const { data: updated } = await api.patch(`/petshop/appointments/${appointment.id}`, {
+        startsAt: nextStart.toISOString(),
+        packageContractId: selectedContract.id,
+        expectedUpdatedAt: appointment.updatedAt,
+      });
+      setSelectedContract(current => current ? {
+        ...current,
+        scheduledAppointments: current.scheduledAppointments?.map(item =>
+          item.id === appointment.id
+            ? { ...item, startsAt: updated.startsAt, endsAt: updated.endsAt, updatedAt: updated.updatedAt }
+            : item),
+      } : current);
+      setEditingAppointmentId(null);
+      toast.success('Sessão reagendada na agenda.');
+      const refreshed = await api.get<CustomerPetPackage>(`/petshop/packages/contracts/${selectedContract.id}`).catch(() => null);
+      if (refreshed) setSelectedContract(current => current?.id === selectedContract.id ? refreshed.data : current);
+      loadAll(false);
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Não foi possível reagendar a sessão.');
+    } finally {
+      setSavingReschedule(false);
     }
   };
 
@@ -830,7 +1143,10 @@ export default function PetshopPackagesPage() {
         },
       );
       toast.success('Sessão estornada e devolvida ao saldo do pacote!');
-      setSelectedContract(data);
+      setSelectedContract(prev => ({ ...data, scheduledAppointments: prev?.scheduledAppointments }));
+      api.get<CustomerPetPackage>(`/petshop/packages/contracts/${selectedContract.id}`)
+        .then(({ data: details }) => setSelectedContract(prev => prev?.id === details.id ? details : prev))
+        .catch(() => {});
       setRefundTargetItem(null);
       setRefundReason('');
       loadAll(false);
@@ -855,7 +1171,10 @@ export default function PetshopPackagesPage() {
         },
       );
       toast.success('Contrato de pacote cancelado.');
-      setSelectedContract(data);
+      setSelectedContract(prev => ({ ...data, scheduledAppointments: prev?.scheduledAppointments }));
+      api.get<CustomerPetPackage>(`/petshop/packages/contracts/${selectedContract.id}`)
+        .then(({ data: details }) => setSelectedContract(prev => prev?.id === details.id ? details : prev))
+        .catch(() => {});
       setShowCancelConfirm(false);
       setCancelReason('');
       loadAll(false);
@@ -869,9 +1188,17 @@ export default function PetshopPackagesPage() {
   const computedTransportFee = contractForm.transportEnabled
     ? Math.max(0, Number(contractForm.transportFee || 0))
     : 0;
+  const computedBaseForMode =
+    selectedPetIds.length >= 2 && multiPetMode === 'per_pet'
+      ? selectedPetsList.reduce((sum, p) => {
+          const val = perPetCustomPrices[p.id];
+          const num = val !== undefined && val !== '' ? Number(val) : computeSuggestedPlanPriceForPet(selectedPlanObj, p);
+          return sum + (Number.isFinite(num) ? num : 0);
+        }, 0)
+      : Number(contractForm.customPrice || 0);
   const computedFinalContractPrice = Math.max(
     0,
-    Number(contractForm.customPrice || 0) + computedTransportFee - Number(contractForm.discountAmount || 0),
+    computedBaseForMode + computedTransportFee - Number(contractForm.discountAmount || 0),
   );
 
   return (
@@ -1253,7 +1580,7 @@ export default function PetshopPackagesPage() {
             </div>
           </div>
 
-          {filteredContracts.length === 0 ? (
+          {groupedContractEntries.length === 0 ? (
             <div className="rounded-2xl border border-zinc-200 bg-white">
               <EmptyState
                 icon={PackageCheck}
@@ -1273,18 +1600,45 @@ export default function PetshopPackagesPage() {
           ) : (
             <>
               <div className={viewMode === 'grid' ? 'grid grid-cols-1 gap-3 xl:grid-cols-2' : 'space-y-3'}>
-                {paginatedContracts.map(contract => {
-                  const totalSessions = contract.items.reduce((s, i) => s + i.totalQuantity, 0);
-                  const usedSessions = contract.items.reduce((s, i) => s + i.usedQuantity, 0);
-                  const reservedSessions = contract.items.reduce((s, i) => s + i.reservedQuantity, 0);
-                  const availableSessions = contract.items.reduce((s, i) => s + i.availableQuantity, 0);
+                {paginatedContractEntries.map(entry => {
+                  const contract = entry.primary;
+                  const members = entry.members;
+                  const isGroup = entry.isMultiPetGroup;
+                  const totalSessions = members.reduce(
+                    (sumM, m) => sumM + m.items.reduce((s, i) => s + i.totalQuantity, 0),
+                    0,
+                  );
+                  const usedSessions = members.reduce(
+                    (sumM, m) => sumM + m.items.reduce((s, i) => s + i.usedQuantity, 0),
+                    0,
+                  );
+                  const reservedSessions = members.reduce(
+                    (sumM, m) => sumM + m.items.reduce((s, i) => s + i.reservedQuantity, 0),
+                    0,
+                  );
+                  const availableSessions = members.reduce(
+                    (sumM, m) => sumM + m.items.reduce((s, i) => s + i.availableQuantity, 0),
+                    0,
+                  );
+                  const consolidatedFinalPrice = isGroup
+                    ? members.reduce((sumM, m) => sumM + Number(m.finalPrice || 0), 0)
+                    : Number(contract.finalPrice || 0);
+                  const groupPetNames = isGroup
+                    ? members.map(m => m.pet?.name).filter(Boolean).join(', ')
+                    : contract.packageGroup?.petNames?.length
+                      ? contract.packageGroup.petNames.join(', ')
+                      : '';
                   const usedPct =
                     totalSessions > 0
                       ? Math.min(100, Math.round((usedSessions / totalSessions) * 100))
                       : 0;
-                  const expired = isContractExpired(contract);
-                  const isPendingPayment = contract.paymentStatus === 'pending' && contract.status !== 'cancelled' && !expired;
-                  const isLowBalance = contract.status === 'active' && !expired && availableSessions <= 1;
+                  const expired = members.every(m => isContractExpired(m));
+                  const isPendingPayment = members.some(
+                    m => m.paymentStatus === 'pending' && m.status !== 'cancelled' && !isContractExpired(m),
+                  );
+                  const isLowBalance = members.some(
+                    m => m.status === 'active' && !isContractExpired(m) && m.items.reduce((s, i) => s + i.availableQuantity, 0) <= 1,
+                  );
 
                   const accentBarColor = isPendingPayment
                     ? 'bg-amber-400'
@@ -1306,10 +1660,15 @@ export default function PetshopPackagesPage() {
                           ? { label: 'Pendente', cls: 'bg-amber-50 text-amber-800 border border-amber-200/70' }
                           : { label: 'Ativo', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200/70' };
 
+                  const groupTaxiFee = isGroup
+                    ? members.reduce((s, m) => s + Number(m.transport?.fee || 0), 0)
+                    : Number(contract.transport?.fee || 0);
+                  const hasGroupTaxi = members.some(m => m.transport?.enabled);
+
                   if (viewMode === 'grid') {
                     return (
                       <div
-                        key={contract.id}
+                        key={entry.key}
                         className="group relative rounded-2xl border border-zinc-200/90 bg-white px-4 py-3.5 shadow-2xs transition hover:border-[#0d6e5a]/40 hover:shadow-sm"
                       >
                         {/* Barra lateral de status */}
@@ -1318,10 +1677,10 @@ export default function PetshopPackagesPage() {
                         <div className="flex flex-col gap-3 pl-1 sm:flex-row sm:items-center sm:justify-between">
                           {/* Bloco Esquerdo: Avatar + Nome do Pacote + Badge Táxi + Tutor/Pet */}
                           <div
-                            onClick={() => setSelectedContract(contract)}
+                            onClick={() => openContractDetailsModal(contract, members)}
                             className="flex min-w-0 flex-1 cursor-pointer items-center gap-3"
                           >
-                            {contract.pet ? (
+                            {!isGroup && contract.pet ? (
                               <PetAvatar pet={contract.pet} size="md" />
                             ) : (
                               <div className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-teal-50 text-teal-700 ring-2 ring-white shadow-xs">
@@ -1335,9 +1694,14 @@ export default function PetshopPackagesPage() {
                               </h3>
 
                               <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                                {contract.transport?.enabled && (
+                                {isGroup && (
+                                  <span className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-800">
+                                    🐾 Grupo · {members.length} pets
+                                  </span>
+                                )}
+                                {hasGroupTaxi && (
                                   <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                                    🚐 Táxi Dog (+{money(contract.transport.fee || 0)})
+                                    🚐 Táxi Dog (+{money(groupTaxiFee)})
                                   </span>
                                 )}
                                 {contract.isShared && (
@@ -1349,14 +1713,18 @@ export default function PetshopPackagesPage() {
 
                               <p className="mt-0.5 truncate text-xs text-zinc-500">
                                 Tutor: <strong className="font-semibold text-zinc-800">{contract.customer?.name}</strong>
-                                {contract.pet ? ` · Pet: ${contract.pet.name}` : ' · Todos os pets'}
+                                {groupPetNames
+                                  ? ` · Pets: ${groupPetNames}`
+                                  : contract.pet
+                                    ? ` · Pet: ${contract.pet.name}`
+                                    : ' · Todos os pets'}
                               </p>
                             </div>
                           </div>
 
                           {/* Bloco Central: Progresso de Sessões + Reservadas */}
                           <div
-                            onClick={() => setSelectedContract(contract)}
+                            onClick={() => openContractDetailsModal(contract, members)}
                             className="w-full shrink-0 cursor-pointer sm:w-[138px]"
                           >
                             <div className="mb-1 flex items-center justify-between text-[11px]">
@@ -1388,7 +1756,7 @@ export default function PetshopPackagesPage() {
                           {/* Bloco Direito: Pílula Status + Pagamento/Data + Valor + Menu (...) */}
                           <div className="flex items-center justify-between gap-2.5 border-t border-zinc-100 pt-2 sm:justify-end sm:border-t-0 sm:pt-0 shrink-0">
                             <div
-                              onClick={() => setSelectedContract(contract)}
+                              onClick={() => openContractDetailsModal(contract, members)}
                               className="cursor-pointer text-left sm:min-w-[82px] sm:text-right"
                             >
                               <span className={`inline-block rounded-full px-2.5 py-0.5 text-[10px] font-bold ${statusBadge.cls}`}>
@@ -1410,7 +1778,7 @@ export default function PetshopPackagesPage() {
                                     Cancelado
                                   </p>
                                   <p className="text-xs font-bold tabular-nums leading-tight text-zinc-500 line-through">
-                                    {money(contract.finalPrice)}
+                                    {money(consolidatedFinalPrice)}
                                   </p>
                                 </>
                               ) : isPendingPayment ? (
@@ -1419,7 +1787,7 @@ export default function PetshopPackagesPage() {
                                     Pendente Caixa
                                   </p>
                                   <p className="text-xs font-black tabular-nums leading-tight text-amber-800">
-                                    {money(contract.finalPrice)}
+                                    {money(consolidatedFinalPrice)}
                                   </p>
                                 </>
                               ) : (
@@ -1428,7 +1796,7 @@ export default function PetshopPackagesPage() {
                                     Pago
                                   </p>
                                   <p className="text-xs font-black tabular-nums leading-tight text-emerald-800">
-                                    {money(contract.finalPrice)}
+                                    {money(consolidatedFinalPrice)}
                                   </p>
                                 </>
                               )}
@@ -1439,13 +1807,13 @@ export default function PetshopPackagesPage() {
                               <button
                                 type="button"
                                 aria-label="Ações do contrato"
-                                onClick={() => setOpenMenuId(prev => (prev === contract.id ? null : contract.id))}
+                                onClick={() => setOpenMenuId(prev => (prev === entry.key ? null : entry.key))}
                                 className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 transition hover:bg-zinc-100 hover:text-zinc-800 cursor-pointer"
                               >
                                 <MoreHorizontal size={17} />
                               </button>
 
-                              {openMenuId === contract.id && (
+                              {openMenuId === entry.key && (
                                 <div className="absolute bottom-9 right-0 z-30 w-52 rounded-xl border border-zinc-200 bg-white p-1.5 shadow-xl sm:bottom-auto sm:top-9">
                                   {contract.status === 'active' && !expired && availableSessions > 0 && (
                                     <button
@@ -1464,7 +1832,7 @@ export default function PetshopPackagesPage() {
                                     type="button"
                                     onClick={() => {
                                       setOpenMenuId(null);
-                                      setSelectedContract(contract);
+                                      openContractDetailsModal(contract, members);
                                     }}
                                     className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
                                   >
@@ -1481,7 +1849,7 @@ export default function PetshopPackagesPage() {
                                       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer"
                                     >
                                       <CheckCircle2 size={14} />
-                                      <span>Confirmar Recebimento</span>
+                                      <span>{isGroup ? 'Confirmar Recebimento (Grupo)' : 'Confirmar Recebimento'}</span>
                                     </button>
                                   )}
                                   {(isLowBalance || expired || contract.status === 'completed') && (
@@ -1514,13 +1882,13 @@ export default function PetshopPackagesPage() {
                   /* Modo Lista Detalhada (Alternado pelo botão de visualização) */
                   return (
                     <div
-                      key={contract.id}
+                      key={entry.key}
                       className="flex flex-col justify-between rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-2xs transition hover:border-[#0d6e5a]/40"
                     >
                       <div>
                         <div className="flex flex-wrap items-start justify-between gap-3">
                           <div className="flex items-center gap-3">
-                            {contract.pet ? (
+                            {!isGroup && contract.pet ? (
                               <PetAvatar pet={contract.pet} size="md" />
                             ) : (
                               <div className="grid h-11 w-11 place-items-center rounded-full bg-teal-50 text-teal-700">
@@ -1532,20 +1900,29 @@ export default function PetshopPackagesPage() {
                                 <h3 className="text-base font-bold text-zinc-900">
                                   {contract.planNameSnapshot}
                                 </h3>
+                                {isGroup && (
+                                  <span className="rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-800">
+                                    🐾 Grupo · {members.length} pets
+                                  </span>
+                                )}
                                 {contract.isShared && (
                                   <span className="rounded-md bg-sky-50 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
                                     Compartilhado
                                   </span>
                                 )}
-                                {contract.transport?.enabled && (
+                                {hasGroupTaxi && (
                                   <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-                                    🚐 Táxi Dog (+{money(contract.transport.fee || 0)})
+                                    🚐 Táxi Dog (+{money(groupTaxiFee)})
                                   </span>
                                 )}
                               </div>
                               <p className="text-xs text-zinc-500">
                                 Tutor: <strong className="text-zinc-800">{contract.customer?.name}</strong>
-                                {contract.pet ? ` · Pet: ${contract.pet.name}` : ' · Todos os pets do tutor'}
+                                {groupPetNames
+                                  ? ` · Pets: ${groupPetNames}`
+                                  : contract.pet
+                                    ? ` · Pet: ${contract.pet.name}`
+                                    : ' · Todos os pets do tutor'}
                               </p>
                             </div>
                           </div>
@@ -1556,14 +1933,14 @@ export default function PetshopPackagesPage() {
                             </span>
                             <span
                               className={`text-[11px] font-bold ${
-                                contract.paymentStatus === 'paid'
+                                !isPendingPayment
                                   ? 'text-emerald-700'
                                   : 'text-amber-700'
                               }`}
                             >
-                              {contract.paymentStatus === 'paid'
-                                ? `Pago (${money(contract.finalPrice)})`
-                                : `Pendente Caixa (${money(contract.finalPrice)})`}
+                              {!isPendingPayment
+                                ? `Pago (${money(consolidatedFinalPrice)})`
+                                : `Pendente Caixa (${money(consolidatedFinalPrice)})`}
                             </span>
                           </div>
                         </div>
@@ -1587,26 +1964,52 @@ export default function PetshopPackagesPage() {
                           </div>
 
                           <div className="mt-3 grid gap-1.5 sm:grid-cols-2">
-                            {contract.items.map(item => (
-                              <div
-                                key={item.id}
-                                className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs"
-                              >
-                                <span className="font-medium text-zinc-800">
-                                  {item.serviceNameSnapshot}
-                                </span>
-                                <div className="flex items-center gap-2">
-                                  {item.reservedQuantity > 0 && (
-                                    <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
-                                      {item.reservedQuantity} reservada(s)
+                            {isGroup
+                              ? members.map(member => {
+                                  const mAvail = member.items.reduce((s, i) => s + i.availableQuantity, 0);
+                                  const mTotal = member.items.reduce((s, i) => s + i.totalQuantity, 0);
+                                  const mRes = member.items.reduce((s, i) => s + i.reservedQuantity, 0);
+                                  return (
+                                    <div
+                                      key={member.id}
+                                      className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs"
+                                    >
+                                      <span className="font-medium text-zinc-800">
+                                        {member.pet?.name || 'Pet'} ({money(member.finalPrice)})
+                                      </span>
+                                      <div className="flex items-center gap-2">
+                                        {mRes > 0 && (
+                                          <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
+                                            {mRes} reservada(s)
+                                          </span>
+                                        )}
+                                        <span className="font-bold text-[#0d6e5a]">
+                                          {mAvail}/{mTotal} livres
+                                        </span>
+                                      </div>
+                                    </div>
+                                  );
+                                })
+                              : contract.items.map(item => (
+                                  <div
+                                    key={item.id}
+                                    className="flex items-center justify-between rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs"
+                                  >
+                                    <span className="font-medium text-zinc-800">
+                                      {item.serviceNameSnapshot}
                                     </span>
-                                  )}
-                                  <span className="font-bold text-[#0d6e5a]">
-                                    {item.availableQuantity}/{item.totalQuantity} livres
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
+                                    <div className="flex items-center gap-2">
+                                      {item.reservedQuantity > 0 && (
+                                        <span className="rounded bg-sky-50 px-1.5 py-0.5 text-[11px] font-medium text-sky-700">
+                                          {item.reservedQuantity} reservada(s)
+                                        </span>
+                                      )}
+                                      <span className="font-bold text-[#0d6e5a]">
+                                        {item.availableQuantity}/{item.totalQuantity} livres
+                                      </span>
+                                    </div>
+                                  </div>
+                                ))}
                           </div>
                         </div>
 
@@ -1641,7 +2044,7 @@ export default function PetshopPackagesPage() {
                           )}
                           <button
                             type="button"
-                            onClick={() => setSelectedContract(contract)}
+                            onClick={() => openContractDetailsModal(contract, members)}
                             className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 cursor-pointer"
                           >
                             <History size={13} />
@@ -1657,22 +2060,22 @@ export default function PetshopPackagesPage() {
               {/* Barra de Paginação Inferior (Fiel ao Mockup Web) */}
               <div className="flex flex-col items-center justify-between gap-3 pt-2 text-xs text-zinc-500 sm:flex-row">
                 <p className="font-medium">
-                  Mostrando <strong className="text-zinc-800">{paginatedContracts.length}</strong> de{' '}
-                  <strong className="text-zinc-800">{filteredContracts.length}</strong> pacotes
+                  Mostrando <strong className="text-zinc-800">{paginatedContractEntries.length}</strong> de{' '}
+                  <strong className="text-zinc-800">{groupedContractEntries.length}</strong> pacotes
                 </p>
 
                 <div className="flex items-center gap-1.5">
                   <button
                     type="button"
-                    disabled={safePage <= 1}
+                    disabled={groupedSafePage <= 1}
                     onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                     className="grid h-8 w-8 place-items-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
                   >
                     <ChevronLeft size={15} />
                   </button>
 
-                  {Array.from({ length: totalPages }, (_, i) => i + 1)
-                    .filter(p => p === 1 || p === totalPages || Math.abs(p - safePage) <= 1)
+                  {Array.from({ length: groupedTotalPages }, (_, i) => i + 1)
+                    .filter(p => p === 1 || p === groupedTotalPages || Math.abs(p - groupedSafePage) <= 1)
                     .map((pageNum, idx, arr) => {
                       const prev = arr[idx - 1];
                       const showEllipsis = prev && pageNum - prev > 1;
@@ -1683,7 +2086,7 @@ export default function PetshopPackagesPage() {
                             type="button"
                             onClick={() => setCurrentPage(pageNum)}
                             className={`grid h-8 w-8 place-items-center rounded-lg text-xs font-bold transition cursor-pointer ${
-                              safePage === pageNum
+                              groupedSafePage === pageNum
                                 ? 'bg-[#0d6e5a] text-white shadow-2xs'
                                 : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
                             }`}
@@ -1696,8 +2099,8 @@ export default function PetshopPackagesPage() {
 
                   <button
                     type="button"
-                    disabled={safePage >= totalPages}
-                    onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    disabled={groupedSafePage >= groupedTotalPages}
+                    onClick={() => setCurrentPage(p => Math.min(groupedTotalPages, p + 1))}
                     className="grid h-8 w-8 place-items-center rounded-lg border border-zinc-200 bg-white text-zinc-600 transition hover:bg-zinc-50 disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
                   >
                     <ChevronRight size={15} />
@@ -2175,67 +2578,290 @@ export default function PetshopPackagesPage() {
           onClose={() => setOpenContractModal(false)}
         >
           <form onSubmit={handleSubmitContract} className="space-y-4">
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className={labelClass}>Tutor *</label>
-                <select
-                  required
-                  value={contractForm.customerId}
-                  onChange={e => {
-                    const nextTutorId = e.target.value;
-                    const firstPet = pets.find(p => p.customerId === nextTutorId);
-                    setContractForm(prev => ({
-                      ...prev,
-                      customerId: nextTutorId,
-                      petId: firstPet?.id || '',
-                      species: firstPet?.species || prev.species,
-                      size: firstPet?.size || prev.size,
-                      coatType: firstPet?.coatType || prev.coatType,
-                    }));
-                  }}
-                  className={inputClass}
-                >
-                  <option value="">Selecione o tutor...</option>
-                  {tutors.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} ({t.phone})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className={labelClass}>
-                  Pet Beneficiado {contractForm.isShared ? '(Opcional - Compartilhado)' : '*'}
-                </label>
-                <select
-                  required={!contractForm.isShared}
-                  value={contractForm.petId}
-                  onChange={e => {
-                    const nextPet = pets.find(p => p.id === e.target.value);
-                    setContractForm(prev => ({
-                      ...prev,
-                      petId: e.target.value,
-                      species: nextPet?.species || prev.species,
-                      size: nextPet?.size || prev.size,
-                      coatType: nextPet?.coatType || prev.coatType,
-                    }));
-                  }}
-                  className={inputClass}
-                >
-                  <option value="">
-                    {contractForm.isShared
-                      ? 'Compartilhado entre todos os pets do tutor'
-                      : 'Selecione o pet...'}
-                  </option>
-                  {tutorPets.map(p => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.breed || p.species})
-                    </option>
-                  ))}
-                </select>
-              </div>
+            {/* Seleção de Tutor com Busca Rápida por Nome ou Telefone */}
+            <div className="space-y-2">
+              <label className={labelClass}>Tutor *</label>
+              {selectedTutorObj && !tutorSearchOpen ? (
+                <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-teal-200 bg-teal-50/60 px-3.5 py-2.5">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold text-zinc-900">
+                      {selectedTutorObj.name}
+                    </p>
+                    <p className="text-xs text-zinc-600">
+                      {selectedTutorObj.phone || 'Sem telefone'} · {tutorPets.length}{' '}
+                      {tutorPets.length === 1 ? 'pet cadastrado' : 'pets cadastrados'}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTutorSearchQuery('');
+                      setTutorSearchOpen(true);
+                    }}
+                    className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg border border-teal-300 bg-white px-3 py-1.5 text-xs font-bold text-teal-800 hover:bg-teal-50 transition"
+                  >
+                    <Search size={13} />
+                    Trocar tutor
+                  </button>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50/50 p-2.5 space-y-2">
+                  <div className="relative flex items-center">
+                    <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
+                    <input
+                      type="text"
+                      value={tutorSearchQuery}
+                      onChange={e => setTutorSearchQuery(e.target.value)}
+                      placeholder="Digite o nome ou telefone do tutor..."
+                      className={`${inputClass} pl-9 pr-9`}
+                    />
+                    {tutorSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setTutorSearchQuery('')}
+                        aria-label="Limpar busca de tutor"
+                        className="absolute right-2.5 text-zinc-400 hover:text-zinc-700"
+                      >
+                        <X size={15} />
+                      </button>
+                    )}
+                  </div>
+                  <div className="max-h-44 overflow-y-auto divide-y divide-zinc-100 rounded-lg border border-zinc-200 bg-white">
+                    {filteredModalTutors.map(t => {
+                      const countPets = pets.filter(p => p.customerId === t.id).length;
+                      const isSel = t.id === contractForm.customerId;
+                      return (
+                        <button
+                          key={t.id}
+                          type="button"
+                          onClick={() => {
+                            const nextTutorPets = pets.filter(p => p.customerId === t.id);
+                            const firstPet = nextTutorPets[0];
+                            setContractForm(prev => ({
+                              ...prev,
+                              customerId: t.id,
+                              petId: firstPet?.id || '',
+                              species: firstPet?.species || prev.species,
+                              size: firstPet?.size || prev.size,
+                              coatType: firstPet?.coatType || prev.coatType,
+                            }));
+                            setSelectedPetIds(firstPet?.id ? [firstPet.id] : []);
+                            setPerPetCustomPrices({});
+                            setPerPetOverrides({});
+                            setTutorSearchOpen(false);
+                          }}
+                          className={`flex w-full cursor-pointer items-center justify-between gap-2 px-3 py-2 text-left text-xs transition hover:bg-teal-50/70 ${
+                            isSel ? 'bg-teal-50 font-semibold text-teal-900' : 'text-zinc-800'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-bold">{t.name}</p>
+                            <p className="text-[11px] text-zinc-500">{t.phone || 'Sem telefone'}</p>
+                          </div>
+                          <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600">
+                            {countPets} {countPets === 1 ? 'pet' : 'pets'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {filteredModalTutors.length === 0 && (
+                      <p className="p-3 text-center text-xs text-zinc-500">
+                        Nenhum tutor encontrado com "{tutorSearchQuery}".
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
+
+            {/* Seleção Múltipla de Pets do Tutor */}
+            {contractForm.customerId && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label className="text-xs font-medium text-[var(--pc-text-secondary)]">
+                    Pets Beneficiados *{' '}
+                    <span className="text-[11px] text-zinc-500">
+                      (marque 1 ou mais pets deste tutor)
+                    </span>
+                  </label>
+                  {tutorPets.length > 1 && (
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allIds = tutorPets.map(p => p.id);
+                          setSelectedPetIds(allIds);
+                          const first = tutorPets[0];
+                          setContractForm(prev => ({
+                            ...prev,
+                            petId: first?.id || '',
+                            species: first?.species || prev.species,
+                            size: first?.size || prev.size,
+                            coatType: first?.coatType || prev.coatType,
+                          }));
+                          recalcAllPerPetPricesFromPlan(selectedPlanObj, tutorPets);
+                        }}
+                        className="cursor-pointer font-bold text-[#0d6e5a] hover:underline"
+                      >
+                        Selecionar todos ({tutorPets.length})
+                      </button>
+                      {selectedPetIds.length > 0 && (
+                        <>
+                          <span className="text-zinc-300">|</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedPetIds([]);
+                              setContractForm(prev => ({ ...prev, petId: '' }));
+                            }}
+                            className="cursor-pointer font-semibold text-zinc-500 hover:underline"
+                          >
+                            Limpar
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {tutorPets.length === 0 ? (
+                  <p className="rounded-xl border border-dashed border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-500">
+                    Este tutor ainda não possui pets cadastrados.
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {tutorPets.map(p => {
+                      const checked = selectedPetIds.includes(p.id);
+                      const sizeTxt = SIZE_LABELS[p.size || ''] || p.size || 'Porte N/I';
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            const nextIds = checked
+                              ? selectedPetIds.filter(id => id !== p.id)
+                              : [...selectedPetIds, p.id];
+                            setSelectedPetIds(nextIds);
+                            const primaryPet = pets.find(pt => pt.id === nextIds[0]) || p;
+                            setContractForm(prev => ({
+                              ...prev,
+                              petId: nextIds[0] || '',
+                              species: primaryPet?.species || prev.species,
+                              size: primaryPet?.size || prev.size,
+                              coatType: primaryPet?.coatType || prev.coatType,
+                            }));
+                            if (!checked && selectedPlanObj) {
+                              setPerPetCustomPrices(prev => ({
+                                ...prev,
+                                [p.id]: String(computeSuggestedPlanPriceForPet(selectedPlanObj, p)),
+                              }));
+                            }
+                          }}
+                          className={`flex cursor-pointer items-center gap-2.5 rounded-xl border p-2.5 text-left transition ${
+                            checked
+                              ? 'border-[#0d6e5a] bg-[#eef8f4] ring-1 ring-[#0d6e5a]/25'
+                              : 'border-zinc-200 bg-white hover:border-zinc-300'
+                          }`}
+                        >
+                          <span
+                            className={`grid h-5 w-5 shrink-0 place-items-center rounded border text-white transition ${
+                              checked
+                                ? 'border-[#0d6e5a] bg-[#0d6e5a]'
+                                : 'border-zinc-300 bg-white'
+                            }`}
+                          >
+                            {checked && <Check size={13} strokeWidth={3} />}
+                          </span>
+                          <PetAvatar pet={p} size="sm" />
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs font-bold text-zinc-900">{p.name}</p>
+                            <p className="truncate text-[11px] text-zinc-500">
+                              {p.breed || (p.species === 'cat' ? 'Gato' : 'Cachorro')} · {sizeTxt}
+                            </p>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Escolha de Modo Multi-Pet (quando 2+ pets marcados) */}
+            {selectedPetIds.length >= 2 && (
+              <div className="rounded-xl border border-teal-300 bg-teal-50/50 p-3.5 space-y-2.5">
+                <p className="text-xs font-bold uppercase tracking-wider text-teal-950">
+                  Como deseja aplicar o pacote para estes {selectedPetIds.length} pets?
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setMultiPetMode('per_pet')}
+                    className={`cursor-pointer rounded-xl border p-3 text-left transition ${
+                      multiPetMode === 'per_pet'
+                        ? 'border-[#0d6e5a] bg-white ring-2 ring-[#0d6e5a]/25 shadow-2xs'
+                        : 'border-zinc-200 bg-white/70 hover:bg-white'
+                    }`}
+                  >
+                    <p className="text-xs font-extrabold text-zinc-900">
+                      🐾 1 pacote igual p/ cada pet (Agrupado)
+                    </p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-zinc-600">
+                      Cada pet recebe seu saldo completo, clona os horários juntos e fica tudo no mesmo card com 1 cobrança.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMultiPetMode('shared')}
+                    className={`cursor-pointer rounded-xl border p-3 text-left transition ${
+                      multiPetMode === 'shared'
+                        ? 'border-[#0d6e5a] bg-white ring-2 ring-[#0d6e5a]/25 shadow-2xs'
+                        : 'border-zinc-200 bg-white/70 hover:bg-white'
+                    }`}
+                  >
+                    <p className="text-xs font-extrabold text-zinc-900">
+                      🤝 Dividir 1 único pacote entre os {selectedPetIds.length} pets
+                    </p>
+                    <p className="mt-0.5 text-[11px] leading-snug text-zinc-600">
+                      Cria 1 pacote com saldo compartilhado entre os pets selecionados (ex: 4 banhos divididos entre eles).
+                    </p>
+                  </button>
+                </div>
+
+                {multiPetMode === 'per_pet' && (
+                  <div className="rounded-lg border border-teal-200 bg-white p-2.5 space-y-1.5">
+                    <p className="text-[11px] font-bold text-teal-900">
+                      Valor individual por pet (calculado por porte/pelagem — editável):
+                    </p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {selectedPetsList.map(p => (
+                        <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50/70 px-2.5 py-1.5">
+                          <span className="truncate text-xs font-semibold text-zinc-800">
+                            {p.name}{' '}
+                            <span className="text-[10px] font-normal text-zinc-500">
+                              ({SIZE_LABELS[p.size || ''] || p.size || 'P'})
+                            </span>
+                          </span>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="text-[11px] text-zinc-500">R$</span>
+                            <input
+                              type="number"
+                              step="0.01"
+                              min={0}
+                              value={perPetCustomPrices[p.id] ?? ''}
+                              onChange={e =>
+                                setPerPetCustomPrices(prev => ({ ...prev, [p.id]: e.target.value }))
+                              }
+                              className="h-8 w-24 rounded-md border border-zinc-300 bg-white px-2 text-right text-xs font-bold text-zinc-900"
+                            />
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div>
               <label className={labelClass}>Plano de Pacote *</label>
@@ -2243,13 +2869,16 @@ export default function PetshopPackagesPage() {
                 required
                 value={contractForm.packagePlanId}
                 onChange={e => {
-                  const p = plans.find(pl => pl.id === e.target.value);
+                  const p = plans.find(pl => pl.id === e.target.value) || null;
                   setContractForm(prev => ({
                     ...prev,
                     packagePlanId: e.target.value,
                     validityDays: p?.validityDays || prev.validityDays,
                     isShared: p?.allowSharedPets ? prev.isShared : false,
                   }));
+                  if (selectedPetsList.length >= 2) {
+                    recalcAllPerPetPricesFromPlan(p, selectedPetsList);
+                  }
                 }}
                 className={inputClass}
               >
@@ -2493,8 +3122,8 @@ export default function PetshopPackagesPage() {
               })()}
             </div>
 
-            {/* Agendamento Recorrente Semanal com Exceções por Semana */}
-            {contractForm.petId && (
+            {/* Agendamento Recorrente Semanal com Exceções por Semana e Clonagem Multi-Pet */}
+            {(selectedPetIds.length > 0 || contractForm.petId) && (
               <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-3.5 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="flex cursor-pointer items-center gap-2 text-xs font-bold uppercase tracking-wider text-teal-950">
@@ -2513,10 +3142,67 @@ export default function PetshopPackagesPage() {
                   </label>
                   {contractForm.scheduleRecurring && (
                     <span className="rounded-full bg-teal-100 px-2.5 py-0.5 text-[11px] font-bold text-teal-900">
-                      {scheduledSessions.length} sessões programadas
+                      {selectedPetIds.length >= 2 && multiPetMode === 'per_pet'
+                        ? `${scheduledSessions.length}×${selectedPetIds.length} = ${scheduledSessions.length * selectedPetIds.length} sessões`
+                        : `${scheduledSessions.length} sessões programadas`}
                     </span>
                   )}
                 </div>
+
+                {contractForm.scheduleRecurring && selectedPetIds.length >= 2 && multiPetMode === 'shared' && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-sky-200 bg-sky-50/80 px-3 py-2 text-[11px] text-sky-950">
+                    <span>
+                      <strong>Pacote dividido:</strong> escolha qual pet vai em cada sessão ou clone o mesmo horário para todos (dentro do limite de sessões do pacote).
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setScheduledSessions(prev => {
+                          if (!prev.length || selectedPetIds.length === 0) return prev;
+                          const totalSlots = prev.length;
+                          const next: typeof prev = [];
+                          let slotIdx = 0;
+                          let weekCursor = 0;
+                          while (slotIdx < totalSlots) {
+                            const baseRow = prev[weekCursor] || prev[0];
+                            for (const pid of selectedPetIds) {
+                              if (slotIdx >= totalSlots) break;
+                              next.push({
+                                ...baseRow,
+                                petId: pid,
+                                customEdited: true,
+                              });
+                              slotIdx += 1;
+                            }
+                            weekCursor += 1;
+                          }
+                          return next;
+                        });
+                        toast.success('Mesma data e horário clonados entre os pets selecionados!');
+                      }}
+                      className="inline-flex cursor-pointer items-center gap-1 rounded-lg border border-sky-300 bg-white px-2.5 py-1 text-[11px] font-bold text-sky-800 hover:bg-sky-100 transition"
+                    >
+                      <Copy size={12} /> Clonar dia/horário p/ todos
+                    </button>
+                  </div>
+                )}
+
+                {contractForm.scheduleRecurring && selectedPetIds.length >= 2 && multiPetMode === 'per_pet' && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-teal-200 bg-white/90 px-3 py-2 text-[11px] text-teal-900">
+                    <span>
+                      <strong>Clonagem flexível:</strong> todas as semanas abaixo já replicam automaticamente para os {selectedPetIds.length} pets. Se quiser, ajuste o horário ou dia de um pet específico em qualquer semana.
+                    </span>
+                    {Object.keys(perPetOverrides).length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setPerPetOverrides({})}
+                        className="cursor-pointer font-bold text-[#0d6e5a] underline"
+                      >
+                        Reclonar padrão p/ todos
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {contractForm.scheduleRecurring && (
                   <div className="space-y-3 pt-1">
@@ -2764,6 +3450,94 @@ export default function PetshopPackagesPage() {
                                 </div>
                               </div>
 
+                              {selectedPetIds.length >= 2 && multiPetMode === 'shared' && (
+                                <div className="flex items-center gap-2 rounded-lg border border-sky-200/80 bg-white px-2.5 py-1.5">
+                                  <span className="text-[11px] font-bold text-sky-900 shrink-0">
+                                    Pet desta sessão:
+                                  </span>
+                                  <select
+                                    value={sess.petId || selectedPetIds[idx % selectedPetIds.length] || ''}
+                                    onChange={e => {
+                                      const next = [...scheduledSessions];
+                                      next[idx] = {
+                                        ...next[idx],
+                                        petId: e.target.value,
+                                        customEdited: true,
+                                      };
+                                      setScheduledSessions(next);
+                                    }}
+                                    className="min-w-0 flex-1 rounded border border-sky-200 bg-sky-50/40 px-2 py-1 text-xs font-semibold text-zinc-800"
+                                  >
+                                    {selectedPetsList.map(p => (
+                                      <option key={p.id} value={p.id}>
+                                        {p.name} ({SIZE_LABELS[p.size || ''] || p.size || 'P'})
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+                              )}
+
+                              {selectedPetIds.length >= 2 && multiPetMode === 'per_pet' && (
+                                <div className="space-y-1.5 border-t border-teal-200/70 pt-2">
+                                  <p className="text-[10px] font-bold uppercase tracking-wider text-teal-900">
+                                    Horários clonados para os {selectedPetsList.length} pets nesta semana (ajuste se precisar):
+                                  </p>
+                                  <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
+                                    {selectedPetsList.map(p => {
+                                      const ov = perPetOverrides[p.id]?.[idx];
+                                      const petDate = ov?.date ?? sess.date;
+                                      const petTime = ov?.time ?? sess.time;
+                                      return (
+                                        <div
+                                          key={p.id}
+                                          className="flex items-center gap-1.5 rounded-lg border border-teal-200 bg-white px-2 py-1"
+                                        >
+                                          <span className="min-w-[64px] truncate text-[11px] font-bold text-zinc-800">
+                                            {p.name}
+                                          </span>
+                                          <input
+                                            type="date"
+                                            value={petDate}
+                                            onChange={e => {
+                                              const val = e.target.value;
+                                              setPerPetOverrides(prev => ({
+                                                ...prev,
+                                                [p.id]: {
+                                                  ...(prev[p.id] || {}),
+                                                  [idx]: {
+                                                    ...(prev[p.id]?.[idx] || {}),
+                                                    date: val,
+                                                  },
+                                                },
+                                              }));
+                                            }}
+                                            className="min-w-0 flex-1 rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[11px]"
+                                          />
+                                          <input
+                                            type="time"
+                                            value={petTime}
+                                            onChange={e => {
+                                              const val = e.target.value;
+                                              setPerPetOverrides(prev => ({
+                                                ...prev,
+                                                [p.id]: {
+                                                  ...(prev[p.id] || {}),
+                                                  [idx]: {
+                                                    ...(prev[p.id]?.[idx] || {}),
+                                                    time: val,
+                                                  },
+                                                },
+                                              }));
+                                            }}
+                                            className="w-[74px] shrink-0 rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[11px]"
+                                          />
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+
                               {isPastSession && operators.length > 0 && (
                                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-1.5 pt-1 border-t border-emerald-200/70">
                                   <div className="flex items-center gap-1">
@@ -2841,16 +3615,26 @@ export default function PetshopPackagesPage() {
             {/* Condições Comerciais Snapshot */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
               <div>
-                <label className={labelClass}>Valor Tabelado / Personalizado (R$)</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min={0}
-                  required
-                  value={contractForm.customPrice}
-                  onChange={e => setContractForm({ ...contractForm, customPrice: e.target.value })}
-                  className={inputClass}
-                />
+                <label className={labelClass}>
+                  {selectedPetIds.length >= 2 && multiPetMode === 'per_pet'
+                    ? `Soma dos ${selectedPetIds.length} Pacotes (R$)`
+                    : 'Valor Tabelado / Personalizado (R$)'}
+                </label>
+                {selectedPetIds.length >= 2 && multiPetMode === 'per_pet' ? (
+                  <div className="flex min-h-11 items-center rounded-lg border border-zinc-300 bg-zinc-50 px-3 text-sm font-bold text-zinc-900">
+                    {money(computedBaseForMode)}
+                  </div>
+                ) : (
+                  <input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    required
+                    value={contractForm.customPrice}
+                    onChange={e => setContractForm({ ...contractForm, customPrice: e.target.value })}
+                    className={inputClass}
+                  />
+                )}
               </div>
               <div>
                 <label className={labelClass}>Desconto Autorizado (R$)</label>
@@ -2866,7 +3650,11 @@ export default function PetshopPackagesPage() {
                 />
               </div>
               <div>
-                <label className={labelClass}>Valor Final do Contrato</label>
+                <label className={labelClass}>
+                  {selectedPetIds.length >= 2 && multiPetMode === 'per_pet'
+                    ? 'Valor Total do Grupo'
+                    : 'Valor Final do Contrato'}
+                </label>
                 <div className="flex min-h-11 items-center rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-base font-bold text-emerald-900">
                   {money(computedFinalContractPrice)}
                 </div>
@@ -2940,19 +3728,73 @@ export default function PetshopPackagesPage() {
          ===================================================================== */}
       {selectedContract && (
         <Modal
-          title={`Contrato: ${selectedContract.planNameSnapshot}`}
+          title={
+            selectedGroupContracts.length > 1
+              ? `Pacote Família (${selectedGroupContracts.length} pets): ${selectedContract.planNameSnapshot}`
+              : `Contrato: ${selectedContract.planNameSnapshot}`
+          }
           onClose={() => {
             setSelectedContract(null);
+            setSelectedGroupContracts([]);
+            setEditingAppointmentId(null);
+            setRescheduleStartsAt('');
             setRefundTargetItem(null);
             setShowCancelConfirm(false);
           }}
         >
           <div className="space-y-4">
+            {selectedGroupContracts.length > 1 && (
+              <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-3 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-teal-950">
+                    🐾 Grupo com {selectedGroupContracts.length} pets · Selecione o pet para gerenciar saldo e sessões:
+                  </span>
+                  <span className="font-black text-teal-900">
+                    Total do Grupo:{' '}
+                    {money(
+                      selectedGroupContracts.reduce((sum, m) => sum + Number(m.finalPrice || 0), 0),
+                    )}
+                  </span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedGroupContracts.map(member => {
+                    const active = selectedContract.id === member.id;
+                    const avail = member.items.reduce((s, i) => s + i.availableQuantity, 0);
+                    const total = member.items.reduce((s, i) => s + i.totalQuantity, 0);
+                    return (
+                      <button
+                        key={member.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedContract(member);
+                          setEditingAppointmentId(null);
+                          setRefundTargetItem(null);
+                        }}
+                        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                          active
+                            ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                            : 'border-teal-200 bg-white text-teal-900 hover:bg-teal-50'
+                        }`}
+                      >
+                        <span>{member.pet?.name || 'Pet'}</span>
+                        <span className={`text-[10px] ${active ? 'text-emerald-100' : 'text-zinc-500'}`}>
+                          ({avail}/{total})
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-3.5 text-xs">
               <div>
                 <p className="font-bold text-sm text-[var(--pc-text)]">
                   {selectedContract.customer?.name} ·{' '}
-                  {selectedContract.pet?.name || 'Compartilhado entre pets'}
+                  {selectedContract.pet?.name ||
+                    (selectedContract.packageGroup?.petNames?.length
+                      ? `Compartilhado (${selectedContract.packageGroup.petNames.join(', ')})`
+                      : 'Compartilhado entre pets')}
                 </p>
                 <p className="text-[var(--pc-text-secondary)]">
                   Contratado em {new Date(selectedContract.startDate).toLocaleDateString('pt-BR')} ·
@@ -2969,7 +3811,10 @@ export default function PetshopPackagesPage() {
                     onClick={() => handleConfirmPayment(selectedContract.id)}
                     className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
                   >
-                    <CheckCircle2 size={12} /> Confirmar Recebimento
+                    <CheckCircle2 size={12} />{' '}
+                    {selectedGroupContracts.length > 1
+                      ? 'Confirmar Recebimento (Grupo)'
+                      : 'Confirmar Recebimento'}
                   </button>
                 )}
               </div>
@@ -3058,6 +3903,101 @@ export default function PetshopPackagesPage() {
               </form>
             )}
 
+            {/* Datas atuais das sessões vinculadas à agenda */}
+            <section aria-label="Sessões do pacote agendadas">
+              <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--pc-text-muted)]">
+                Sessões na agenda
+              </h4>
+              {loadingContractDetails ? (
+                <p className="rounded-xl border border-[var(--pc-border)] p-3 text-xs text-[var(--pc-text-secondary)]">
+                  Carregando datas das sessões...
+                </p>
+              ) : contractDetailsError ? (
+                <p className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+                  Não foi possível carregar as datas. Feche e abra o contrato para tentar novamente.
+                </p>
+              ) : selectedContract.scheduledAppointments?.length ? (
+                <div className="space-y-2">
+                  {selectedContract.scheduledAppointments.map((appointment, index) => {
+                    const canReschedule = selectedContract.status === 'active' &&
+                      ['scheduled', 'requested'].includes(appointment.status) &&
+                      appointment.services.some(service => service.coverageStatus === 'reserved');
+                    const isEditing = editingAppointmentId === appointment.id;
+                    const latestReschedule = Array.isArray(appointment.stageHistory)
+                      ? [...appointment.stageHistory].reverse().find(entry =>
+                          entry && typeof entry.at === 'string' && typeof entry.rescheduledFrom === 'string')
+                      : null;
+                    return (
+                      <div key={appointment.id} className="rounded-xl border border-[var(--pc-border)] bg-white p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-xs font-semibold text-[var(--pc-text-secondary)]">
+                              Sessão {index + 1} · {appointment.services.map(service => service.nameSnapshot).join(', ')}
+                              {selectedContract.isShared ? ` · ${appointment.pet.name}` : ''}
+                            </p>
+                            <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-[var(--pc-text)]">
+                              <Calendar size={15} aria-hidden="true" /> {dateTime(appointment.startsAt)}
+                            </p>
+                            {latestReschedule && (
+                              <p className="mt-1 text-[11px] text-[var(--pc-text-secondary)]">
+                                Reagendado em {dateTime(latestReschedule.at)} · data anterior: {dateTime(latestReschedule.rescheduledFrom)}
+                              </p>
+                            )}
+                            {appointment.status === 'delivered' || appointment.services.every(service => service.coverageStatus === 'consumed') ? (
+                              <p className="mt-1 text-xs text-emerald-700">Realizada</p>
+                            ) : !canReschedule ? (
+                              <p className="mt-1 text-xs text-[var(--pc-text-secondary)]">Atendimento em andamento</p>
+                            ) : null}
+                          </div>
+                          {canReschedule && !isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingAppointmentId(appointment.id);
+                                setRescheduleStartsAt(localDateTimeInput(appointment.startsAt));
+                              }}
+                              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800 hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                              aria-label={`Alterar data da sessão ${index + 1}`}
+                            >
+                              <Pencil size={13} aria-hidden="true" /> Alterar data
+                            </button>
+                          )}
+                        </div>
+                        {isEditing && (
+                          <form onSubmit={handleSavePackageReschedule} className="mt-3 border-t border-[var(--pc-border)] pt-3">
+                            <label htmlFor="package-reschedule-date" className="mb-1 block text-xs font-semibold text-[var(--pc-text)]">
+                              Nova data e horário
+                            </label>
+                            <input
+                              id="package-reschedule-date"
+                              type="datetime-local"
+                              required
+                              value={rescheduleStartsAt}
+                              onChange={e => setRescheduleStartsAt(e.target.value)}
+                              disabled={savingReschedule}
+                              className={inputClass}
+                            />
+                            <div className="mt-2 flex flex-wrap justify-end gap-2">
+                              <button type="button" disabled={savingReschedule} onClick={() => setEditingAppointmentId(null)} className={secondaryButton}>
+                                Cancelar
+                              </button>
+                              <button type="submit" disabled={savingReschedule} className={primaryButton}>
+                                {savingReschedule ? 'Salvando...' : 'Salvar data'}
+                              </button>
+                            </div>
+                          </form>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="rounded-xl border border-[var(--pc-border)] p-3 text-xs text-[var(--pc-text-secondary)]">
+                  Nenhuma sessão vinculada à agenda neste contrato.
+                </p>
+              )}
+            </section>
+
             {/* Histórico de Movimentações (Ledger Imutável) */}
             <div>
               <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--pc-text-muted)]">
@@ -3085,8 +4025,13 @@ export default function PetshopPackagesPage() {
                         </p>
                         <p className="text-[11px] text-[var(--pc-text-secondary)]">
                           {ev.operatorName ? `Operador: ${ev.operatorName} · ` : ''}
-                          {dateTime(ev.createdAt)}
+                          Registrado em {dateTime(ev.createdAt)}
                         </p>
+                        {ev.eventType === 'RESERVE' && ev.appointment && (
+                          <p className="mt-1 text-[11px] text-sky-800">
+                            Data atual da sessão: {dateTime(ev.appointment.startsAt)}
+                          </p>
+                        )}
                       </div>
                       <div className="text-right font-mono text-xs">
                         <span className="block font-bold text-[var(--pc-text)]">

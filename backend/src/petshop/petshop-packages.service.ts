@@ -5,6 +5,7 @@ import {
   NotFoundException,
   Optional,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
@@ -433,16 +434,34 @@ export class PetshopPackagesService {
   // 2. CONTRATAÇÃO, VINCULAÇÃO E CONSULTA DE PACOTES DE CLIENTES
   // ===========================================================================
 
-  private serializeContractNotes(userNotes?: string | null, transport?: any): string | null {
+  private serializeContractNotes(
+    userNotes?: string | null,
+    transport?: any,
+    packageGroup?: {
+      id: string;
+      mode: 'shared' | 'per_pet';
+      petIds: string[];
+      petNames: string[];
+      totalGroupPrice?: number;
+    } | null,
+    allowedPetIds?: string[] | null,
+  ): string | null {
     const cleanNotes = userNotes ? String(userNotes).trim() : '';
-    if (transport && transport.enabled) {
-      const street = transport.street ? String(transport.street).trim() : '';
-      const neighborhood = transport.neighborhood ? String(transport.neighborhood).trim() : '';
-      const composed = [street, neighborhood].filter(Boolean).join(' - ');
-      const effectiveAddress = composed || (transport.address ? String(transport.address).trim() : null);
+    const hasTransport = Boolean(transport && transport.enabled);
+    const hasGroup = Boolean(packageGroup && packageGroup.id);
+    const hasAllowed = Array.isArray(allowedPetIds) && allowedPetIds.length > 0;
 
-      return JSON.stringify({
-        transport: {
+    if (hasTransport || hasGroup || hasAllowed) {
+      const payload: Record<string, any> = {
+        userNotes: cleanNotes || null,
+      };
+      if (hasTransport) {
+        const street = transport.street ? String(transport.street).trim() : '';
+        const neighborhood = transport.neighborhood ? String(transport.neighborhood).trim() : '';
+        const composed = [street, neighborhood].filter(Boolean).join(' - ');
+        const effectiveAddress = composed || (transport.address ? String(transport.address).trim() : null);
+
+        payload.transport = {
           enabled: true,
           mode: ['round_trip', 'pickup_only', 'dropoff_only'].includes(transport.mode) ? transport.mode : 'round_trip',
           fee: Math.max(0, Number(transport.fee ?? 40)),
@@ -451,29 +470,51 @@ export class PetshopPackagesService {
           reference: transport.reference ? String(transport.reference).trim() : null,
           notes: transport.notes ? String(transport.notes).trim() : null,
           address: effectiveAddress,
-        },
-        userNotes: cleanNotes || null,
-      });
+        };
+      } else {
+        payload.transport = null;
+      }
+      if (hasGroup) payload.packageGroup = packageGroup;
+      if (hasAllowed) payload.allowedPetIds = allowedPetIds;
+      return JSON.stringify(payload);
     }
     return cleanNotes || null;
   }
 
-  private enrichContractTransport<T extends { notes?: string | null }>(contract: T): T & { transport?: any } {
+  private enrichContractTransport<T extends { notes?: string | null }>(
+    contract: T,
+  ): T & {
+    transport?: any;
+    packageGroup?: {
+      id: string;
+      mode: 'shared' | 'per_pet';
+      petIds: string[];
+      petNames: string[];
+      totalGroupPrice?: number;
+    } | null;
+    allowedPetIds?: string[] | null;
+  } {
     if (!contract) return contract;
     const raw = contract.notes;
     if (raw && raw.trim().startsWith('{')) {
       try {
         const parsed = JSON.parse(raw);
-        if (parsed && typeof parsed === 'object' && 'transport' in parsed) {
+        if (
+          parsed &&
+          typeof parsed === 'object' &&
+          ('transport' in parsed || 'packageGroup' in parsed || 'allowedPetIds' in parsed)
+        ) {
           return {
             ...contract,
             notes: parsed.userNotes || null,
             transport: parsed.transport || null,
+            packageGroup: parsed.packageGroup || null,
+            allowedPetIds: Array.isArray(parsed.allowedPetIds) ? parsed.allowedPetIds : null,
           };
         }
       } catch {}
     }
-    return { ...contract, transport: null };
+    return { ...contract, transport: null, packageGroup: null, allowedPetIds: null };
   }
 
   private async expireOverdueContracts(prisma: any) {
@@ -573,7 +614,34 @@ export class PetshopPackagesService {
       },
     });
     if (!contract) throw new NotFoundException('Contrato de pacote não encontrado.');
-    return this.enrichContractTransport(contract);
+    const scheduledAppointments = await prisma.petAppointment.findMany({
+      where: {
+        services: {
+          some: {
+            customerPackageId: id,
+            coverageStatus: { in: ['reserved', 'consumed'] },
+          },
+        },
+      },
+      select: {
+        id: true,
+        startsAt: true,
+        endsAt: true,
+        status: true,
+        updatedAt: true,
+        stageHistory: true,
+        pet: { select: { id: true, name: true } },
+        services: {
+          where: {
+            customerPackageId: id,
+            coverageStatus: { in: ['reserved', 'consumed'] },
+          },
+          select: { id: true, nameSnapshot: true, coverageStatus: true },
+        },
+      },
+      orderBy: { startsAt: 'asc' },
+    });
+    return { ...this.enrichContractTransport(contract), scheduledAppointments };
   }
 
   /**
@@ -611,7 +679,12 @@ export class PetshopPackagesService {
       orderBy: { expiresAt: 'asc' },
     });
 
-    return contracts.map((c: any) => this.enrichContractTransport(c));
+    return contracts
+      .map((c: any) => this.enrichContractTransport(c))
+      .filter((c: any) => {
+        if (!c.isShared || !Array.isArray(c.allowedPetIds) || !c.allowedPetIds.length) return true;
+        return c.allowedPetIds.includes(pet.id);
+      });
   }
 
   async assertTransportCoverageForReservationsInTx(
@@ -633,6 +706,159 @@ export class PetshopPackagesService {
         (!hasTaxiDropoff(mode) || hasTaxiDropoff(packageMode));
     });
     if (!covered) throw new BadRequestException('O pacote reservado não cobre esta modalidade de Táxi Dog.');
+  }
+
+  private async scheduleSessionsForContractInTx(
+    tx: any,
+    params: {
+      contractId: string;
+      customerId: string;
+      defaultPetId: string | null;
+      validPetIdsSet: Set<string>;
+      plan: any;
+      scheduledSessions: Array<{
+        startsAt: string;
+        petId?: string;
+        serviceIds?: string[];
+        professionalId?: string;
+        completed?: boolean;
+        stageOperators?: Record<string, string>;
+      }>;
+      transportMeta: any;
+      actor?: PackageActor;
+    },
+  ) {
+    if (!params.scheduledSessions.length) return;
+    const remainingCountByService = new Map<string, number>();
+    for (const pi of params.plan.items) {
+      remainingCountByService.set(pi.serviceId, Number(pi.quantity));
+    }
+
+    for (let idx = 0; idx < params.scheduledSessions.length; idx++) {
+      const sess = params.scheduledSessions[idx];
+      if (!sess?.startsAt) continue;
+      const sessStart = new Date(String(sess.startsAt));
+      if (Number.isNaN(sessStart.getTime())) continue;
+
+      const sessPetId = sess.petId ? String(sess.petId).trim() : params.defaultPetId;
+      if (!sessPetId) continue;
+      if (params.validPetIdsSet.size > 0 && !params.validPetIdsSet.has(sessPetId)) {
+        throw new BadRequestException('O pet selecionado na sessão não pertence ao contrato.');
+      }
+
+      let sessionServiceIds: string[] = [];
+      if (Array.isArray(sess.serviceIds) && sess.serviceIds.length > 0) {
+        sessionServiceIds = sess.serviceIds.filter(sid => (remainingCountByService.get(sid) || 0) > 0);
+      } else {
+        for (const pi of params.plan.items) {
+          if ((remainingCountByService.get(pi.serviceId) || 0) > 0) {
+            sessionServiceIds = [pi.serviceId];
+            break;
+          }
+        }
+      }
+
+      if (!sessionServiceIds.length) continue;
+
+      const chosenServices = params.plan.items
+        .filter((pi: any) => sessionServiceIds.includes(pi.serviceId))
+        .map((pi: any) => pi.service);
+      if (!chosenServices.length) continue;
+
+      const totalDuration = chosenServices.reduce(
+        (sum: number, s: any) => sum + Math.max(15, Number(s.durationMinutes || 60)),
+        0,
+      );
+      const sessEnd = new Date(sessStart.getTime() + totalDuration * 60_000);
+
+      const appointmentCheckInNotes = params.transportMeta
+        ? JSON.stringify({
+            transport: {
+              enabled: true,
+              mode: params.transportMeta.mode,
+              fee: 0,
+              coveredByPackage: true,
+              street: params.transportMeta.street,
+              neighborhood: params.transportMeta.neighborhood,
+              reference: params.transportMeta.reference,
+              notes: params.transportMeta.notes,
+              address: params.transportMeta.address,
+            },
+          })
+        : null;
+
+      const isSessionCompleted = Boolean(sess.completed);
+      const createdAppt = await tx.petAppointment.create({
+        data: {
+          petId: sessPetId,
+          customerId: params.customerId,
+          professionalId: sess.professionalId && sess.professionalId !== 'none' ? String(sess.professionalId) : null,
+          startsAt: sessStart,
+          endsAt: sessEnd,
+          status: isSessionCompleted ? 'delivered' : 'scheduled',
+          checkedInAt: isSessionCompleted ? sessStart : null,
+          readyAt: isSessionCompleted ? sessEnd : null,
+          completedAt: isSessionCompleted ? sessEnd : null,
+          notes: `Sessão ${idx + 1} do pacote ${params.plan.name}`,
+          checkInNotes: appointmentCheckInNotes,
+          services: {
+            create: chosenServices.map((svc: any) => ({
+              serviceId: svc.id,
+              nameSnapshot: svc.name,
+              priceSnapshot: svc.price,
+              durationMinutes: svc.durationMinutes || 60,
+              isCombo: svc.serviceType === 'COMBO',
+            })),
+          },
+        },
+      });
+
+      const packageSelections: Record<string, string> = {};
+      for (const sid of sessionServiceIds) {
+        packageSelections[sid] = params.contractId;
+        remainingCountByService.set(sid, Math.max(0, (remainingCountByService.get(sid) || 0) - 1));
+      }
+
+      await this.reserveSessionsForAppointmentInTx(tx, {
+        appointmentId: createdAppt.id,
+        petId: sessPetId,
+        customerId: params.customerId,
+        startsAt: sessStart,
+        packageSelections,
+        allowPendingPayment: true,
+        actor: params.actor,
+      });
+
+      if (isSessionCompleted) {
+        await this.consumeReservedSessionsForAppointmentInTx(tx, createdAppt.id, params.actor);
+        if (this.commissions) {
+          const execution = await tx.petAppointment.findUnique({
+            where: { id: createdAppt.id },
+            include: {
+              pet: { select: { size: true } },
+              services: { include: { service: true, customerPackageItem: true } },
+            },
+          });
+          if (execution) {
+            const stageOps =
+              sess.stageOperators && typeof sess.stageOperators === 'object'
+                ? sess.stageOperators
+                : sess.professionalId && sess.professionalId !== 'none'
+                  ? {
+                      bathing: String(sess.professionalId),
+                      grooming: String(sess.professionalId),
+                      finishing: String(sess.professionalId),
+                    }
+                  : {};
+            for (const [stgKey, opId] of Object.entries(stageOps)) {
+              if (opId && opId !== 'none') {
+                await this.commissions.recordExecution(tx, execution, stgKey, String(opId), sessStart);
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   async createContract(data: any, actor?: PackageActor) {
@@ -657,36 +883,28 @@ export class PetshopPackagesService {
     if (!plan || !plan.active) throw new BadRequestException('Plano de pacote inválido ou inativo.');
     if (!plan.items.length) throw new BadRequestException('Este plano não possui serviços configurados.');
 
-    const isShared = Boolean(data?.isShared);
-    const petId = data?.petId ? String(data.petId).trim() : null;
+    const rawPetIds: string[] = Array.isArray(data?.petIds)
+      ? Array.from(new Set(data.petIds.map((id: any) => String(id || '').trim()).filter(Boolean)))
+      : [];
+    const singlePetId = data?.petId ? String(data.petId).trim() : null;
+    const requestedPetIds = rawPetIds.length > 0 ? rawPetIds : singlePetId ? [singlePetId] : [];
+    const isSharedInput = Boolean(data?.isShared);
 
-    if (!isShared && !petId) {
-      throw new BadRequestException('Selecione o pet vinculado ao pacote ou marque como pacote compartilhado entre pets do tutor.');
+    if (!isSharedInput && requestedPetIds.length === 0) {
+      throw new BadRequestException('Selecione pelo menos um pet vinculado ao pacote ou marque como pacote compartilhado.');
     }
 
-    let pet: any = null;
-    if (petId) {
-      pet = await prisma.pet.findUnique({ where: { id: petId } });
-      if (!pet || pet.customerId !== customerId) {
-        throw new BadRequestException('O pet selecionado não pertence ao tutor informado.');
-      }
+    const selectedPets = requestedPetIds.length
+      ? await prisma.pet.findMany({ where: { id: { in: requestedPetIds }, customerId } })
+      : [];
+    if (requestedPetIds.length !== selectedPets.length) {
+      throw new BadRequestException('Um ou mais pets selecionados não pertencem ao tutor informado.');
     }
+    const petById = new Map<string, any>(selectedPets.map((p: any) => [p.id, p]));
+    const orderedPets = requestedPetIds.map(id => petById.get(id)).filter(Boolean);
 
-    const species = normalizeSpecies(data?.species || pet?.species);
-    const size = normalizePetSize(data?.size || pet?.size);
-    const coatType = normalizeCoatType(data?.coatType || pet?.coatType);
-
-    const matchedRule = this.findBestPricingRule(plan.pricingRules, species, size, coatType);
-    const defaultPrice = matchedRule ? Number(matchedRule.price) : Number(plan.basePrice);
-
-    const basePriceSnapshot =
-      data?.customPrice !== undefined && data?.customPrice !== '' && data?.customPrice !== null
-        ? Number(data.customPrice)
-        : defaultPrice;
-
-    if (!Number.isFinite(basePriceSnapshot) || basePriceSnapshot < 0) {
-      throw new BadRequestException('Valor base do contrato inválido.');
-    }
+    const multiPetMode: 'shared' | 'per_pet' =
+      orderedPets.length >= 2 && data?.multiPetMode === 'per_pet' ? 'per_pet' : 'shared';
 
     const transportEnabled = Boolean(data?.transport?.enabled);
     const transportFee = transportEnabled ? Math.max(0, Number(data?.transport?.fee ?? await readTaxiDefaultFee(prisma))) : 0;
@@ -710,12 +928,6 @@ export class PetshopPackagesService {
       throw new BadRequestException('Informe o endereço do cliente para contratar pacote com Táxi Dog / Transporte.');
     }
 
-    const discountAmount = Number(data?.discountAmount ?? 0);
-    if (!Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount > basePriceSnapshot + transportFee) {
-      throw new BadRequestException('Valor de desconto inválido.');
-    }
-
-    const finalPrice = Math.max(0, Number((basePriceSnapshot + transportFee - discountAmount).toFixed(2)));
     const validityDays =
       data?.validityDays !== undefined ? Number(data.validityDays) : plan.validityDays;
     if (!Number.isInteger(validityDays) || validityDays < 1 || validityDays > 3650) {
@@ -726,30 +938,10 @@ export class PetshopPackagesService {
     if (Number.isNaN(startDate.getTime())) {
       throw new BadRequestException('Data de início inválida.');
     }
-    const scheduledSessions: Array<{
-      startsAt: string;
-      serviceIds?: string[];
-      professionalId?: string;
-      completed?: boolean;
-      stageOperators?: Record<string, string>;
-    }> = Array.isArray(data?.scheduledSessions) ? data.scheduledSessions : [];
-
-    let expiresAt = new Date(startDate.getTime() + validityDays * 86_400_000);
-    expiresAt.setHours(23, 59, 59, 999);
-    for (const s of scheduledSessions) {
-      if (s?.startsAt) {
-        const sd = new Date(String(s.startsAt));
-        if (!Number.isNaN(sd.getTime()) && sd.getTime() > expiresAt.getTime()) {
-          expiresAt = new Date(sd.getTime() + 7 * 86_400_000);
-          expiresAt.setHours(23, 59, 59, 999);
-        }
-      }
-    }
 
     const billingMode = data?.billingMode === 'comanda' ? 'comanda' : 'paid';
     const paymentStatus = billingMode === 'comanda' ? 'pending' : (data?.paymentStatus === 'pending' ? 'pending' : 'paid');
     const paymentMethod = data?.paymentMethod ? String(data.paymentMethod).trim() : (billingMode === 'comanda' ? 'comanda' : 'pix');
-
     const totalSessionsInPlan = plan.items.reduce((sum, item) => sum + item.quantity, 0);
 
     const streetInput = data?.transport?.street !== undefined
@@ -762,7 +954,7 @@ export class PetshopPackagesService {
       ? String(data.transport.notes || '').trim()
       : undefined;
 
-    const transportMeta = transportEnabled
+    const baseTransportMeta = transportEnabled
       ? {
           enabled: true,
           mode: ['round_trip', 'pickup_only', 'dropoff_only'].includes(data?.transport?.mode)
@@ -777,9 +969,275 @@ export class PetshopPackagesService {
         }
       : null;
 
+    const computeExpiresAt = (sessionsList: Array<{ startsAt?: string }>) => {
+      let exp = new Date(startDate.getTime() + validityDays * 86_400_000);
+      exp.setHours(23, 59, 59, 999);
+      for (const s of sessionsList) {
+        if (s?.startsAt) {
+          const sd = new Date(String(s.startsAt));
+          if (!Number.isNaN(sd.getTime()) && sd.getTime() > exp.getTime()) {
+            exp = new Date(sd.getTime() + 7 * 86_400_000);
+            exp.setHours(23, 59, 59, 999);
+          }
+        }
+      }
+      return exp;
+    };
+
+    const perPetConfigsMap = new Map<string, any>();
+    if (Array.isArray(data?.perPetConfigs)) {
+      for (const cfg of data.perPetConfigs) {
+        if (cfg?.petId) perPetConfigsMap.set(String(cfg.petId), cfg);
+      }
+    }
+
+    // Caso A: Modo 'per_pet' com 2+ pets — cria contratos vinculados sob um único packageGroup
+    if (multiPetMode === 'per_pet' && orderedPets.length >= 2) {
+      const groupId = randomUUID();
+      const petIdsList = orderedPets.map((p: any) => p.id);
+      const petNamesList = orderedPets.map((p: any) => p.name);
+
+      const perPetSpecs = orderedPets.map((petItem: any, idx: number) => {
+        const cfg = perPetConfigsMap.get(petItem.id) || {};
+        const sp = normalizeSpecies(petItem.species || data?.species);
+        const sz = normalizePetSize(petItem.size || data?.size);
+        const ct = normalizeCoatType(petItem.coatType || data?.coatType);
+        const matchedRule = this.findBestPricingRule(plan.pricingRules, sp, sz, ct);
+        const defaultPrice = matchedRule ? Number(matchedRule.price) : Number(plan.basePrice);
+        const rawBase =
+          cfg.customPrice !== undefined && cfg.customPrice !== '' && cfg.customPrice !== null
+            ? Number(cfg.customPrice)
+            : data?.customPrice !== undefined && data?.customPrice !== '' && data?.customPrice !== null
+              ? Number(data.customPrice)
+              : defaultPrice;
+        if (!Number.isFinite(rawBase) || rawBase < 0) {
+          throw new BadRequestException(`Valor base inválido para o pet ${petItem.name}.`);
+        }
+        const petTransportFee = idx === 0 ? transportFee : 0;
+        const petDiscount =
+          cfg.discountAmount !== undefined
+            ? Number(cfg.discountAmount || 0)
+            : idx === 0
+              ? Number(data?.discountAmount ?? 0)
+              : 0;
+        if (!Number.isFinite(petDiscount) || petDiscount < 0 || petDiscount > rawBase + petTransportFee) {
+          throw new BadRequestException(`Valor de desconto inválido para o pet ${petItem.name}.`);
+        }
+        const petFinalPrice = Math.max(0, Number((rawBase + petTransportFee - petDiscount).toFixed(2)));
+        const petSessions = Array.isArray(cfg.scheduledSessions)
+          ? cfg.scheduledSessions
+          : Array.isArray(data?.scheduledSessions)
+            ? data.scheduledSessions.map((s: any) => ({ ...s, petId: petItem.id }))
+            : [];
+        return {
+          pet: petItem,
+          species: sp,
+          size: sz,
+          coatType: ct,
+          basePriceSnapshot: rawBase,
+          transportFee: petTransportFee,
+          discountAmount: petDiscount,
+          finalPrice: petFinalPrice,
+          scheduledSessions: petSessions,
+          expiresAt: computeExpiresAt(petSessions),
+          transportMeta: baseTransportMeta ? { ...baseTransportMeta, fee: petTransportFee } : null,
+        };
+      });
+
+      const totalGroupPrice = Number(
+        perPetSpecs.reduce((sum, spec) => sum + spec.finalPrice, 0).toFixed(2),
+      );
+
+      const groupMeta = {
+        id: groupId,
+        mode: 'per_pet' as const,
+        petIds: petIdsList,
+        petNames: petNamesList,
+        totalGroupPrice,
+      };
+
+      const createdContracts = await prisma.$transaction(async tx => {
+        const customerHadNoAddress = !customer.address || customer.address.trim().length === 0;
+        const shouldSaveToCustomer =
+          data?.saveAddressToCustomer === true ||
+          (customerHadNoAddress && data?.saveAddressToCustomer !== false && Boolean(effectiveAddress));
+
+        if (shouldSaveToCustomer && (customerAddressInput !== undefined || customerReferenceInput !== undefined)) {
+          await tx.customer.update({
+            where: { id: customerId },
+            data: {
+              ...(customerAddressInput !== undefined ? { address: customerAddressInput || null } : {}),
+              ...(customerReferenceInput !== undefined ? { reference: customerReferenceInput || null } : {}),
+            },
+          });
+        }
+
+        const createdIds: string[] = [];
+        for (const spec of perPetSpecs) {
+          const createdContract = await tx.customerPetPackage.create({
+            data: {
+              customerId,
+              packagePlanId: plan.id,
+              petId: spec.pet.id,
+              isShared: false,
+              planNameSnapshot: plan.name,
+              speciesSnapshot: spec.species,
+              sizeSnapshot: spec.size,
+              coatTypeSnapshot: spec.coatType,
+              basePriceSnapshot: new Prisma.Decimal(spec.basePriceSnapshot + spec.transportFee),
+              discountAmount: new Prisma.Decimal(spec.discountAmount),
+              finalPrice: new Prisma.Decimal(spec.finalPrice),
+              validityDays,
+              startDate,
+              expiresAt: spec.expiresAt,
+              status: 'active',
+              paymentStatus,
+              paymentMethod,
+              createdByOperatorId: actor?.operatorId || actor?.userId || null,
+              createdByOperatorName: actor?.name || null,
+              notes: this.serializeContractNotes(data?.notes, spec.transportMeta, groupMeta, [spec.pet.id]),
+            },
+          });
+          createdIds.push(createdContract.id);
+
+          for (const planItem of plan.items) {
+            const unitValue = totalSessionsInPlan > 0
+              ? new Prisma.Decimal(spec.finalPrice).div(totalSessionsInPlan).toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP)
+              : new Prisma.Decimal(0);
+
+            const createdItem = await tx.customerPetPackageItem.create({
+              data: {
+                customerPackageId: createdContract.id,
+                serviceId: planItem.serviceId,
+                serviceNameSnapshot: planItem.service.name,
+                unitValueSnapshot: unitValue,
+                totalQuantity: planItem.quantity,
+                reservedQuantity: 0,
+                usedQuantity: 0,
+                availableQuantity: planItem.quantity,
+              },
+            });
+
+            await tx.customerPetPackageLedger.create({
+              data: {
+                idempotencyKey: `create:${createdContract.id}:${planItem.serviceId}`,
+                customerPackageId: createdContract.id,
+                customerPackageItemId: createdItem.id,
+                petId: spec.pet.id,
+                eventType: 'CONTRACT_CREATED',
+                quantityDelta: planItem.quantity,
+                balanceAfter: planItem.quantity,
+                usedAfter: 0,
+                reservedAfter: 0,
+                operatorId: actor?.operatorId || actor?.userId || null,
+                operatorName: actor?.name || null,
+                reason: `Contratação do pacote ${plan.name} (Grupo ${petNamesList.join(', ')})`,
+              },
+            });
+          }
+
+          await this.scheduleSessionsForContractInTx(tx, {
+            contractId: createdContract.id,
+            customerId,
+            defaultPetId: spec.pet.id,
+            validPetIdsSet: new Set([spec.pet.id]),
+            plan,
+            scheduledSessions: spec.scheduledSessions,
+            transportMeta: spec.transportMeta,
+            actor,
+          });
+        }
+
+        if (billingMode === 'comanda' && totalGroupPrice > 0 && createdIds.length > 0) {
+          const comanda = await this.createComandaForPackageContract(tx, {
+            contractId: createdIds[0],
+            planId: plan.id,
+            planName: plan.name,
+            customerName: customer.name,
+            petName: petNamesList.join(', '),
+            finalPrice: totalGroupPrice,
+          });
+          await tx.customerPetPackage.updateMany({
+            where: { id: { in: createdIds } },
+            data: { comandaId: comanda.id },
+          });
+        }
+
+        return tx.customerPetPackage.findMany({
+          where: { id: { in: createdIds } },
+          include: {
+            customer: true,
+            pet: true,
+            items: { include: { service: true } },
+            ledgerEvents: true,
+          },
+          orderBy: { createdAt: 'asc' },
+        });
+      });
+
+      const enrichedList = createdContracts.map((c: any) => this.enrichContractTransport(c));
+      return {
+        ...enrichedList[0],
+        groupContracts: enrichedList,
+      };
+    }
+
+    // Caso B: Contrato único (1 pet OU pacote compartilhado dividido entre N pets)
+    const primaryPet = orderedPets[0] || null;
+    const isShared = orderedPets.length >= 2 ? true : isSharedInput;
+    const species = normalizeSpecies(data?.species || primaryPet?.species);
+    const size = normalizePetSize(data?.size || primaryPet?.size);
+    const coatType = normalizeCoatType(data?.coatType || primaryPet?.coatType);
+
+    const matchedRule = this.findBestPricingRule(plan.pricingRules, species, size, coatType);
+    const defaultPrice = matchedRule ? Number(matchedRule.price) : Number(plan.basePrice);
+
+    const basePriceSnapshot =
+      data?.customPrice !== undefined && data?.customPrice !== '' && data?.customPrice !== null
+        ? Number(data.customPrice)
+        : defaultPrice;
+
+    if (!Number.isFinite(basePriceSnapshot) || basePriceSnapshot < 0) {
+      throw new BadRequestException('Valor base do contrato inválido.');
+    }
+
+    const discountAmount = Number(data?.discountAmount ?? 0);
+    if (!Number.isFinite(discountAmount) || discountAmount < 0 || discountAmount > basePriceSnapshot + transportFee) {
+      throw new BadRequestException('Valor de desconto inválido.');
+    }
+
+    const finalPrice = Math.max(0, Number((basePriceSnapshot + transportFee - discountAmount).toFixed(2)));
+    const scheduledSessions: Array<{
+      startsAt: string;
+      petId?: string;
+      serviceIds?: string[];
+      professionalId?: string;
+      completed?: boolean;
+      stageOperators?: Record<string, string>;
+    }> = Array.isArray(data?.scheduledSessions) ? data.scheduledSessions : [];
+
+    const expiresAt = computeExpiresAt(scheduledSessions);
+    const allowedPetIds = orderedPets.length > 0 ? orderedPets.map((p: any) => p.id) : null;
+    const sharedGroupMeta =
+      orderedPets.length >= 2
+        ? {
+            id: randomUUID(),
+            mode: 'shared' as const,
+            petIds: orderedPets.map((p: any) => p.id),
+            petNames: orderedPets.map((p: any) => p.name),
+            totalGroupPrice: finalPrice,
+          }
+        : null;
+
+    const validPetIdsSet = new Set(
+      orderedPets.length > 0 ? orderedPets.map((p: any) => p.id) : [],
+    );
+
     const resultContract = await prisma.$transaction(async tx => {
       const customerHadNoAddress = !customer.address || customer.address.trim().length === 0;
-      const shouldSaveToCustomer = data?.saveAddressToCustomer === true || (customerHadNoAddress && data?.saveAddressToCustomer !== false && Boolean(effectiveAddress));
+      const shouldSaveToCustomer =
+        data?.saveAddressToCustomer === true ||
+        (customerHadNoAddress && data?.saveAddressToCustomer !== false && Boolean(effectiveAddress));
 
       if (shouldSaveToCustomer && (customerAddressInput !== undefined || customerReferenceInput !== undefined)) {
         await tx.customer.update({
@@ -795,7 +1253,7 @@ export class PetshopPackagesService {
         data: {
           customerId,
           packagePlanId: plan.id,
-          petId: pet?.id || null,
+          petId: orderedPets.length === 1 && !isShared ? primaryPet.id : null,
           isShared,
           planNameSnapshot: plan.name,
           speciesSnapshot: species,
@@ -812,7 +1270,7 @@ export class PetshopPackagesService {
           paymentMethod,
           createdByOperatorId: actor?.operatorId || actor?.userId || null,
           createdByOperatorName: actor?.name || null,
-          notes: this.serializeContractNotes(data?.notes, transportMeta),
+          notes: this.serializeContractNotes(data?.notes, baseTransportMeta, sharedGroupMeta, allowedPetIds),
         },
       });
 
@@ -839,7 +1297,7 @@ export class PetshopPackagesService {
             idempotencyKey: `create:${createdContract.id}:${planItem.serviceId}`,
             customerPackageId: createdContract.id,
             customerPackageItemId: createdItem.id,
-            petId: pet?.id || null,
+            petId: orderedPets.length === 1 && !isShared ? primaryPet.id : null,
             eventType: 'CONTRACT_CREATED',
             quantityDelta: planItem.quantity,
             balanceAfter: planItem.quantity,
@@ -852,139 +1310,29 @@ export class PetshopPackagesService {
         });
       }
 
-      // Se o usuário enviou o cronograma de sessões recorrentes (ex: toda sexta às 15h ou exceções por semana), cria os agendamentos automaticamente e reserva o saldo
-      if (scheduledSessions.length > 0 && pet) {
-        const remainingCountByService = new Map<string, number>();
-        for (const pi of plan.items) {
-          remainingCountByService.set(pi.serviceId, Number(pi.quantity));
-        }
-
-        for (let idx = 0; idx < scheduledSessions.length; idx++) {
-          const sess = scheduledSessions[idx];
-          if (!sess?.startsAt) continue;
-          const sessStart = new Date(String(sess.startsAt));
-          if (Number.isNaN(sessStart.getTime())) continue;
-
-          // Determina quais serviços agendar nesta sessão
-          let sessionServiceIds: string[] = [];
-          if (Array.isArray(sess.serviceIds) && sess.serviceIds.length > 0) {
-            sessionServiceIds = sess.serviceIds.filter(sid => (remainingCountByService.get(sid) || 0) > 0);
-          } else {
-            // Seleciona o primeiro serviço do plano que ainda possui saldo para agendar
-            for (const pi of plan.items) {
-              if ((remainingCountByService.get(pi.serviceId) || 0) > 0) {
-                sessionServiceIds = [pi.serviceId];
-                break;
-              }
-            }
-          }
-
-          if (!sessionServiceIds.length) continue;
-
-          const chosenServices = plan.items
-            .filter(pi => sessionServiceIds.includes(pi.serviceId))
-            .map(pi => pi.service);
-          if (!chosenServices.length) continue;
-
-          const totalDuration = chosenServices.reduce((sum, s) => sum + Math.max(15, Number(s.durationMinutes || 60)), 0);
-          const sessEnd = new Date(sessStart.getTime() + totalDuration * 60_000);
-
-          const appointmentCheckInNotes = transportMeta
-            ? JSON.stringify({
-                transport: {
-                  enabled: true,
-                  mode: transportMeta.mode,
-                  fee: 0,
-                  coveredByPackage: true,
-                  street: transportMeta.street,
-                  neighborhood: transportMeta.neighborhood,
-                  reference: transportMeta.reference,
-                  notes: transportMeta.notes,
-                  address: transportMeta.address,
-                },
-              })
-            : null;
-
-          const isSessionCompleted = Boolean(sess.completed);
-          const createdAppt = await tx.petAppointment.create({
-            data: {
-              petId: pet.id,
-              customerId,
-              professionalId: sess.professionalId && sess.professionalId !== 'none' ? String(sess.professionalId) : null,
-              startsAt: sessStart,
-              endsAt: sessEnd,
-              status: isSessionCompleted ? 'delivered' : 'scheduled',
-              checkedInAt: isSessionCompleted ? sessStart : null,
-              readyAt: isSessionCompleted ? sessEnd : null,
-              completedAt: isSessionCompleted ? sessEnd : null,
-              notes: `Sessão ${idx + 1} do pacote ${plan.name}`,
-              checkInNotes: appointmentCheckInNotes,
-              services: {
-                create: chosenServices.map(svc => ({
-                  serviceId: svc.id,
-                  nameSnapshot: svc.name,
-                  priceSnapshot: svc.price,
-                  durationMinutes: svc.durationMinutes || 60,
-                  isCombo: svc.serviceType === 'COMBO',
-                })),
-              },
-            },
-          });
-
-          const packageSelections: Record<string, string> = {};
-          for (const sid of sessionServiceIds) {
-            packageSelections[sid] = createdContract.id;
-            remainingCountByService.set(sid, Math.max(0, (remainingCountByService.get(sid) || 0) - 1));
-          }
-
-          await this.reserveSessionsForAppointmentInTx(tx, {
-            appointmentId: createdAppt.id,
-            petId: pet.id,
-            customerId,
-            startsAt: sessStart,
-            packageSelections,
-            allowPendingPayment: true,
-            actor,
-          });
-
-          if (isSessionCompleted) {
-            await this.consumeReservedSessionsForAppointmentInTx(tx, createdAppt.id, actor);
-            if (this.commissions) {
-              const execution = await tx.petAppointment.findUnique({
-                where: { id: createdAppt.id },
-                include: {
-                  pet: { select: { size: true } },
-                  services: { include: { service: true, customerPackageItem: true } },
-                },
-              });
-              if (execution) {
-                const stageOps = sess.stageOperators && typeof sess.stageOperators === 'object'
-                  ? sess.stageOperators
-                  : sess.professionalId && sess.professionalId !== 'none'
-                    ? {
-                        bathing: String(sess.professionalId),
-                        grooming: String(sess.professionalId),
-                        finishing: String(sess.professionalId),
-                      }
-                    : {};
-                for (const [stgKey, opId] of Object.entries(stageOps)) {
-                  if (opId && opId !== 'none') {
-                    await this.commissions.recordExecution(tx, execution, stgKey, String(opId), sessStart);
-                  }
-                }
-              }
-            }
-          }
-        }
+      if (scheduledSessions.length > 0 && (primaryPet || orderedPets.length > 0)) {
+        await this.scheduleSessionsForContractInTx(tx, {
+          contractId: createdContract.id,
+          customerId,
+          defaultPetId: primaryPet?.id || null,
+          validPetIdsSet,
+          plan,
+          scheduledSessions,
+          transportMeta: baseTransportMeta,
+          actor,
+        });
       }
 
       if (billingMode === 'comanda' && finalPrice > 0) {
+        const petLabel = orderedPets.length >= 2
+          ? orderedPets.map((p: any) => p.name).join(', ')
+          : primaryPet?.name || 'Compartilhado';
         const comanda = await this.createComandaForPackageContract(tx, {
           contractId: createdContract.id,
           planId: plan.id,
           planName: plan.name,
           customerName: customer.name,
-          petName: pet?.name || 'Compartilhado',
+          petName: petLabel,
           finalPrice,
         });
         await tx.customerPetPackage.update({
@@ -1072,7 +1420,10 @@ export class PetshopPackagesService {
     });
   }
 
-  async confirmContractPayment(contractId: string, body: { paymentMethod?: string; saleId?: string }) {
+  async confirmContractPayment(
+    contractId: string,
+    body: { paymentMethod?: string; saleId?: string; confirmGroup?: boolean },
+  ) {
     const prisma = await this.prisma();
     const contract = await prisma.customerPetPackage.findUnique({ where: { id: contractId } });
     if (!contract) throw new NotFoundException('Contrato não encontrado.');
@@ -1080,12 +1431,31 @@ export class PetshopPackagesService {
       throw new BadRequestException('Não é possível confirmar pagamento de um contrato cancelado.');
     }
 
-    return prisma.customerPetPackage.update({
+    const enriched = this.enrichContractTransport(contract);
+    const paymentMethod = body?.paymentMethod ? String(body.paymentMethod).trim() : contract.paymentMethod;
+    const saleId = body?.saleId || contract.saleId;
+
+    if (body?.confirmGroup !== false && enriched.packageGroup?.id && enriched.packageGroup.mode === 'per_pet') {
+      await prisma.customerPetPackage.updateMany({
+        where: {
+          customerId: contract.customerId,
+          status: { not: 'cancelled' },
+          notes: { contains: enriched.packageGroup.id },
+        },
+        data: {
+          paymentStatus: 'paid',
+          paymentMethod,
+          saleId,
+        },
+      });
+    }
+
+    const updated = await prisma.customerPetPackage.update({
       where: { id: contractId },
       data: {
         paymentStatus: 'paid',
-        paymentMethod: body?.paymentMethod ? String(body.paymentMethod).trim() : contract.paymentMethod,
-        saleId: body?.saleId || contract.saleId,
+        paymentMethod,
+        saleId,
       },
       include: {
         customer: true,
@@ -1093,6 +1463,7 @@ export class PetshopPackagesService {
         items: { include: { service: true } },
       },
     });
+    return this.enrichContractTransport(updated);
   }
 
   // ===========================================================================
@@ -1139,7 +1510,7 @@ export class PetshopPackagesService {
       if (!appSvc) throw new BadRequestException('O serviço do pacote não pertence ao agendamento.');
 
       const contractRows: any[] = await tx.$queryRaw(
-        Prisma.sql`SELECT id, customerId, petId, isShared, status, paymentStatus, expiresAt, planNameSnapshot
+        Prisma.sql`SELECT id, customerId, petId, isShared, status, paymentStatus, expiresAt, planNameSnapshot, notes
                    FROM customer_pet_packages
                    WHERE id = ${customerPackageId}
                    FOR UPDATE`,
@@ -1156,6 +1527,18 @@ export class PetshopPackagesService {
         throw new BadRequestException(
           `O pacote "${contract.planNameSnapshot}" é exclusivo de outro pet e não está marcado como compartilhado.`,
         );
+      }
+      if (contract.isShared) {
+        const enrichedMeta = this.enrichContractTransport(contract);
+        if (
+          Array.isArray(enrichedMeta.allowedPetIds) &&
+          enrichedMeta.allowedPetIds.length > 0 &&
+          !enrichedMeta.allowedPetIds.includes(params.petId)
+        ) {
+          throw new BadRequestException(
+            `O pacote "${contract.planNameSnapshot}" está restrito a outros pets deste tutor.`,
+          );
+        }
       }
       if (contract.status !== 'active') {
         throw new BadRequestException(`O pacote "${contract.planNameSnapshot}" não está ativo (status: ${contract.status}).`);
