@@ -792,21 +792,21 @@ export default function PetshopCommissionsPage() {
             <div className="space-y-4 border-t border-zinc-100 p-4">
               {/* Filtros (Período, Funcionário, Serviço, Estado) */}
               <div className="grid grid-cols-2 gap-2.5">
-                <div>
+                <div className="min-w-0">
                   <label className="mb-1 block text-[11px] font-medium text-zinc-500">Período</label>
                   <input
                     type="month"
                     value={period}
                     onChange={e => setPeriod(e.target.value)}
-                    className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
+                    className="h-10 w-full min-w-0 max-w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
                   />
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="mb-1 block text-[11px] font-medium text-zinc-500">Funcionário</label>
                   <select
                     value={operatorId}
                     onChange={e => setOperatorId(e.target.value)}
-                    className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
+                    className="h-10 w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
                   >
                     <option value="">Todos</option>
                     {operators.map(o => (
@@ -816,12 +816,12 @@ export default function PetshopCommissionsPage() {
                     ))}
                   </select>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="mb-1 block text-[11px] font-medium text-zinc-500">Serviço</label>
                   <select
                     value={serviceId}
                     onChange={e => setServiceId(e.target.value)}
-                    className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
+                    className="h-10 w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
                   >
                     <option value="">Todos</option>
                     {services.map(s => (
@@ -831,12 +831,12 @@ export default function PetshopCommissionsPage() {
                     ))}
                   </select>
                 </div>
-                <div>
+                <div className="min-w-0">
                   <label className="mb-1 block text-[11px] font-medium text-zinc-500">Estado</label>
                   <select
                     value={state}
                     onChange={e => setState(e.target.value)}
-                    className="h-9 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
+                    className="h-10 w-full min-w-0 rounded-xl border border-zinc-200 bg-white px-2.5 text-xs"
                   >
                     <option value="">Todos</option>
                     {Object.entries(stateLabel).map(([key, label]) => (
