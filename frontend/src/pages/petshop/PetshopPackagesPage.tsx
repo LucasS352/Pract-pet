@@ -172,7 +172,6 @@ export default function PetshopPackagesPage() {
       .catch(() => toast.error('Não foi possível carregar o preço padrão do Táxi Dog.'));
   }, []);
   const [savingContract, setSavingContract] = useState(false);
-  const [priceSimulation, setPriceSimulation] = useState<any>(null);
   const [contractForm, setContractForm] = useState({
     customerId: '',
     petId: '',
@@ -361,7 +360,6 @@ export default function PetshopPackagesPage() {
   // Simula preço automático sempre que plano, pet, porte ou pelagem mudam no modal de contratação
   useEffect(() => {
     if (!openContractModal || !contractForm.packagePlanId) {
-      setPriceSimulation(null);
       return;
     }
     api
@@ -375,13 +373,12 @@ export default function PetshopPackagesPage() {
         },
       })
       .then(res => {
-        setPriceSimulation(res.data);
         setContractForm(prev => ({
           ...prev,
           customPrice: String(res.data.suggestedPrice ?? ''),
         }));
       })
-      .catch(() => setPriceSimulation(null));
+      .catch(() => {});
   }, [
     openContractModal,
     contractForm.packagePlanId,
@@ -2945,76 +2942,6 @@ export default function PetshopPackagesPage() {
                     </option>
                   ))}
               </select>
-            </div>
-
-            {/* Características do Pet para Precificação Inteligente */}
-            <div className="rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-3.5">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-[var(--pc-text)]">
-                  Parâmetros de Porte e Pelagem para Precificação
-                </span>
-                {priceSimulation?.matchedRule && (
-                  <span className="rounded-md bg-teal-100 px-2 py-0.5 text-[11px] font-semibold text-teal-900">
-                    Regra aplicada: {money(priceSimulation.matchedRule.price)}
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-                <div>
-                  <label className="mb-1 block text-[11px] font-medium text-[var(--pc-text-secondary)]">
-                    Espécie
-                  </label>
-                  <select
-                    value={contractForm.species}
-                    onChange={e => setContractForm({ ...contractForm, species: e.target.value })}
-                    className={inputClass}
-                  >
-                    <option value="dog">Cachorro</option>
-                    <option value="cat">Gato</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] font-medium text-[var(--pc-text-secondary)]">
-                    Porte do Animal
-                  </label>
-                  <select
-                    value={contractForm.size}
-                    onChange={e => setContractForm({ ...contractForm, size: e.target.value })}
-                    className={inputClass}
-                  >
-                    <option value="small">Pequeno (P)</option>
-                    <option value="medium">Médio (M)</option>
-                    <option value="large">Grande (G)</option>
-                    <option value="giant">Gigante (GG)</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="mb-1 block text-[11px] font-medium text-[var(--pc-text-secondary)]">
-                    Tipo de Pelagem
-                  </label>
-                  <select
-                    value={contractForm.coatType}
-                    onChange={e => setContractForm({ ...contractForm, coatType: e.target.value })}
-                    className={inputClass}
-                  >
-                    <option value="short">Pelo Curto</option>
-                    <option value="medium">Pelo Médio</option>
-                    <option value="long">Pelo Longo</option>
-                    <option value="double">Pelagem Dupla</option>
-                  </select>
-                </div>
-              </div>
-
-              <label className="mt-3 flex cursor-pointer items-center gap-2 text-xs font-medium text-[var(--pc-text)]">
-                <input
-                  type="checkbox"
-                  checked={contractForm.isShared}
-                  onChange={e => setContractForm({ ...contractForm, isShared: e.target.checked })}
-                  className="h-4 w-4 rounded border-slate-300 text-[var(--pc-action)]"
-                />
-                Permitir uso compartilhado deste pacote entre outros pets deste mesmo tutor
-              </label>
             </div>
 
             {/* Transporte do Animal (Táxi Dog) & Endereço do Tutor */}
