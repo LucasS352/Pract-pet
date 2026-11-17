@@ -34,7 +34,10 @@ describe('Lançamentos KDS preservam estoque e valores de comandas', () => {
           .mockResolvedValue({ id: 'c', number: '04', status: 'open' }),
       },
       tenantSettings: {
-        findFirst: async () => ({ allowNegativeStock: false }),
+        findUnique: async ({ where }: any) => {
+          expect(where.id).toBe('singleton');
+          return { allowNegativeStock: false };
+        },
       },
       $transaction: (fn: any) => fn(tx),
     };

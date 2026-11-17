@@ -44,7 +44,7 @@ describe('Operational authorization over HTTP', () => {
           stationAccessLink: { findUnique: async () => link },
         } },
         { provide: TenantConnectionManager, useValue: {
-          getTenantClient: async () => ({ operator: { findUnique: async () => operator } }),
+          getTenantClient: async () => ({ tenantSettings: { findUnique: async () => null }, operator: { findUnique: async () => operator } }),
         } },
       ],
     }).compile();

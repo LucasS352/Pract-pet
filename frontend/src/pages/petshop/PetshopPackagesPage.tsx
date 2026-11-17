@@ -1,3 +1,4 @@
+import { PackagePaymentFields, type PackagePaymentRow, packagePaymentLabels, paymentAmount, packagePaymentsValid } from './PackagePaymentFields';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -180,6 +181,7 @@ export default function PetshopPackagesPage() {
       .catch(() => toast.error('Não foi possível carregar o preço padrão do Táxi Dog.'));
   }, []);
   const [savingContract, setSavingContract] = useState(false);
+  const [paymentRows, setPaymentRows] = useState<PackagePaymentRow[]>([{ method: 'pix', amount: '0,00' }]);
   const [contractForm, setContractForm] = useState({
     customerId: '',
     petId: '',
@@ -254,6 +256,7 @@ export default function PetshopPackagesPage() {
   const [savingReschedule, setSavingReschedule] = useState(false);
   const [refundTargetItem, setRefundTargetItem] = useState<CustomerPetPackageItem | null>(null);
   const [refundReason, setRefundReason] = useState('');
+  const [refundAppointmentId, setRefundAppointmentId] = useState('');
   const [submittingRefund, setSubmittingRefund] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
@@ -958,6 +961,10 @@ export default function PetshopPackagesPage() {
       return;
     }
 
+    if (contractForm.billingMode === 'paid' && !packagePaymentsValid(paymentRows, computedFinalContractPrice)) {
+      toast.error('Confira os pagamentos: a soma precisa fechar o total do pacote.');
+      return;
+    }
     setSavingContract(true);
     try {
       const now = new Date();
@@ -1013,6 +1020,7 @@ export default function PetshopPackagesPage() {
 
       const { data: created } = await api.post('/petshop/packages/contracts', {
         ...contractForm,
+        payments: contractForm.billingMode === 'paid' ? (computedFinalContractPrice === 0 ? [] : paymentRows.map(row => ({ method: row.method, amount: paymentAmount(row.amount) }))) : undefined,
         petId: effectivePetIds[0] || contractForm.petId || '',
         petIds: effectivePetIds,
         multiPetMode: effectivePetIds.length >= 2 ? multiPetMode : undefined,
@@ -1144,6 +1152,7 @@ export default function PetshopPackagesPage() {
         `/petshop/packages/contracts/${selectedContract.id}/refund-session`,
         {
           packageItemId: refundTargetItem.id,
+          appointmentId: refundAppointmentId,
           reason: refundReason,
           operatorId: operator?.id,
           operatorName: operator?.name,
@@ -1207,6 +1216,17 @@ export default function PetshopPackagesPage() {
     0,
     computedBaseForMode + computedTransportFee - Number(contractForm.discountAmount || 0),
   );
+
+  const wasContractOpen = useRef(false);
+  useEffect(() => {
+    if (openContractModal) {
+      const justOpened = !wasContractOpen.current;
+      setPaymentRows(rows => justOpened || rows.length === 1
+        ? [{ method: justOpened ? 'pix' : rows[0].method, amount: computedFinalContractPrice.toFixed(2).replace('.', ',') }]
+        : rows);
+    }
+    wasContractOpen.current = openContractModal;
+  }, [computedFinalContractPrice, openContractModal]);
 
   return (
     <div className={pageClass}>
@@ -3780,24 +3800,10 @@ export default function PetshopPackagesPage() {
                   <option value="comanda">Enviar p/ Cobrança no Caixa (PDV)</option>
                 </select>
               </div>
-              {contractForm.billingMode === 'paid' && (
-                <div>
-                  <label className={labelClass}>Meio de Pagamento</label>
-                  <select
-                    value={contractForm.paymentMethod}
-                    onChange={e =>
-                      setContractForm({ ...contractForm, paymentMethod: e.target.value })
-                    }
-                    className={inputClass}
-                  >
-                    <option value="pix">PIX</option>
-                    <option value="credito">Cartão de Crédito</option>
-                    <option value="debito">Cartão de Débito</option>
-                    <option value="dinheiro">Dinheiro</option>
-                  </select>
-                </div>
-              )}
             </div>
+            {contractForm.billingMode === 'paid' && (
+              <PackagePaymentFields rows={paymentRows} total={computedFinalContractPrice} onChange={setPaymentRows} />
+            )}
 
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -3807,7 +3813,7 @@ export default function PetshopPackagesPage() {
               >
                 Cancelar
               </button>
-              <button type="submit" disabled={savingContract} className={primaryButton}>
+              <button type="submit" disabled={savingContract || (contractForm.billingMode === 'paid' && !packagePaymentsValid(paymentRows, computedFinalContractPrice))} className={primaryButton}>
                 {savingContract ? 'Processando...' : 'Confirmar Contratação'}
               </button>
             </div>
@@ -4018,6 +4024,13 @@ export default function PetshopPackagesPage() {
               );
             })()}
 
+            {selectedContract.receipt && (
+              <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-3" aria-label="Recebimento do contrato">
+                <h4 className="text-sm font-semibold text-emerald-950">Recebido em {new Date(selectedContract.receipt.receivedAt).toLocaleString('pt-BR')}</h4>
+                {selectedContract.receipt.payments.map((payment, index) => <p key={index} className="mt-1 flex justify-between gap-2 text-sm text-emerald-900"><span>{packagePaymentLabels[payment.method] || payment.method}</span><strong>{money(payment.amount)}</strong></p>)}
+              </section>
+            )}
+
             {/* Itens de Saldo com Botão de Estorno de Sessão */}
             <div>
               <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--pc-text-muted)]">
@@ -4046,6 +4059,7 @@ export default function PetshopPackagesPage() {
                         onClick={() => {
                           setRefundTargetItem(item);
                           setRefundReason('');
+                          setRefundAppointmentId('');
                         }}
                         className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
                       >
@@ -4076,6 +4090,15 @@ export default function PetshopPackagesPage() {
                     Fechar
                   </button>
                 </div>
+                <label className="block space-y-1 text-sm text-amber-950">
+                  <span>Sessão a estornar *</span>
+                  <select required value={refundAppointmentId} onChange={e => setRefundAppointmentId(e.target.value)} className={inputClass}>
+                    <option value="">Selecione a sessão concluída</option>
+                    {(selectedContract.scheduledAppointments || []).filter(a => a.services.some(service => service.coverageStatus === 'consumed' && service.customerPackageItemId === refundTargetItem.id)).map(a => (
+                      <option key={a.id} value={a.id}>{new Date(a.startsAt).toLocaleString('pt-BR')} · {a.pet.name}</option>
+                    ))}
+                  </select>
+                </label>
                 <div>
                   <label className="mb-1 block text-xs font-medium text-amber-950">
                     Motivo obrigatório do estorno (registrado na auditoria) *

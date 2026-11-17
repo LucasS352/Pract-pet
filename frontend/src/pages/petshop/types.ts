@@ -557,7 +557,7 @@ export type PackageScheduledAppointment = {
   updatedAt: string;
   stageHistory?: unknown;
   pet: { id: string; name: string };
-  services: Array<{ id: string; nameSnapshot: string; coverageStatus: string }>;
+  services: Array<{ id: string; nameSnapshot: string; coverageStatus: string; customerPackageItemId?: string | null }>;
 };
 
 export type CustomerPetPackageGroup = {
@@ -587,6 +587,7 @@ export type CustomerPetPackage = {
   status: 'active' | 'completed' | 'expired' | 'cancelled' | string;
   paymentStatus: 'paid' | 'pending' | 'cancelled' | string;
   paymentMethod?: string | null;
+  receipt?: { receivedAt: string; payments: Array<{ method: string; amount: number }> } | null;
   comandaId?: string | null;
   saleId?: string | null;
   notes?: string | null;

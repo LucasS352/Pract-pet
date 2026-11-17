@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { hasTaxiDropoff, hasTaxiPickup, type TaxiMode } from './petshop-transport';
+import { allocatePackagePayments, contractMetadata, moneyCents, normalizePackagePayments, receiptNotes } from './package-receipts';
 import { readTaxiDefaultFee } from './taxi-default-fee';
 import { PetshopCommissionsService } from './petshop-commissions.service';
 
@@ -485,6 +486,7 @@ export class PetshopPackagesService {
     contract: T,
   ): T & {
     transport?: any;
+    receipt?: { receivedAt: string; payments: Array<{ method: string; amount: number }> };
     packageGroup?: {
       id: string;
       mode: 'shared' | 'per_pet';
@@ -502,12 +504,13 @@ export class PetshopPackagesService {
         if (
           parsed &&
           typeof parsed === 'object' &&
-          ('transport' in parsed || 'packageGroup' in parsed || 'allowedPetIds' in parsed)
+          ('transport' in parsed || 'packageGroup' in parsed || 'allowedPetIds' in parsed || 'receipt' in parsed)
         ) {
           return {
             ...contract,
             notes: parsed.userNotes || null,
             transport: parsed.transport || null,
+            receipt: parsed.receipt || null,
             packageGroup: parsed.packageGroup || null,
             allowedPetIds: Array.isArray(parsed.allowedPetIds) ? parsed.allowedPetIds : null,
           };
@@ -636,7 +639,7 @@ export class PetshopPackagesService {
             customerPackageId: id,
             coverageStatus: { in: ['reserved', 'consumed'] },
           },
-          select: { id: true, nameSnapshot: true, coverageStatus: true },
+          select: { id: true, nameSnapshot: true, coverageStatus: true, customerPackageItemId: true },
         },
       },
       orderBy: { startsAt: 'asc' },
@@ -729,6 +732,11 @@ export class PetshopPackagesService {
     },
   ) {
     if (!params.scheduledSessions.length) return;
+    const professionals = [...new Set(params.scheduledSessions.map(s => s.professionalId).filter(id => id && id !== 'none'))].sort();
+    for (const id of professionals) {
+      const rows: any[] = await tx.$queryRaw(Prisma.sql`SELECT id FROM operators WHERE id = ${id} AND active = 1 FOR UPDATE`);
+      if (!rows.length) throw new BadRequestException('Profissional inválido para a sessão.');
+    }
     const remainingCountByService = new Map<string, number>();
     for (const pi of params.plan.items) {
       remainingCountByService.set(pi.serviceId, Number(pi.quantity));
@@ -736,19 +744,22 @@ export class PetshopPackagesService {
 
     for (let idx = 0; idx < params.scheduledSessions.length; idx++) {
       const sess = params.scheduledSessions[idx];
-      if (!sess?.startsAt) continue;
+      if (!sess?.startsAt) throw new BadRequestException(`Informe a data da sessão ${idx + 1}.`);
       const sessStart = new Date(String(sess.startsAt));
-      if (Number.isNaN(sessStart.getTime())) continue;
+      if (Number.isNaN(sessStart.getTime())) throw new BadRequestException(`Data inválida na sessão ${idx + 1}.`);
 
       const sessPetId = sess.petId ? String(sess.petId).trim() : params.defaultPetId;
-      if (!sessPetId) continue;
+      if (!sessPetId) throw new BadRequestException(`Selecione o pet da sessão ${idx + 1}.`);
       if (params.validPetIdsSet.size > 0 && !params.validPetIdsSet.has(sessPetId)) {
         throw new BadRequestException('O pet selecionado na sessão não pertence ao contrato.');
       }
 
       let sessionServiceIds: string[] = [];
       if (Array.isArray(sess.serviceIds) && sess.serviceIds.length > 0) {
-        sessionServiceIds = sess.serviceIds.filter(sid => (remainingCountByService.get(sid) || 0) > 0);
+        sessionServiceIds = [...new Set(sess.serviceIds)];
+        if (sessionServiceIds.some(sid => (remainingCountByService.get(sid) || 0) <= 0)) {
+          throw new BadRequestException(`Serviço sem saldo na sessão ${idx + 1}.`);
+        }
       } else {
         for (const pi of params.plan.items) {
           if ((remainingCountByService.get(pi.serviceId) || 0) > 0) {
@@ -758,7 +769,7 @@ export class PetshopPackagesService {
         }
       }
 
-      if (!sessionServiceIds.length) continue;
+      if (!sessionServiceIds.length) throw new BadRequestException(`A sessão ${idx + 1} excede o saldo ou contém um serviço inválido.`);
 
       const chosenServices = params.plan.items
         .filter((pi: any) => sessionServiceIds.includes(pi.serviceId))
@@ -788,6 +799,14 @@ export class PetshopPackagesService {
         : null;
 
       const isSessionCompleted = Boolean(sess.completed);
+      if (isSessionCompleted && sessStart > new Date()) throw new BadRequestException('Uma sessão futura não pode ser marcada como concluída.');
+      if (sess.professionalId && sess.professionalId !== 'none' && !isSessionCompleted) {
+        const conflict = await tx.petAppointment.findFirst({ where: {
+          professionalId: sess.professionalId, status: { notIn: ['cancelled', 'no_show'] },
+          startsAt: { lt: sessEnd }, endsAt: { gt: sessStart },
+        } });
+        if (conflict) throw new ConflictException(`O profissional já possui atendimento no horário da sessão ${idx + 1}.`);
+      }
       const createdAppt = await tx.petAppointment.create({
         data: {
           petId: sessPetId,
@@ -907,7 +926,7 @@ export class PetshopPackagesService {
       orderedPets.length >= 2 && data?.multiPetMode === 'per_pet' ? 'per_pet' : 'shared';
 
     const transportEnabled = Boolean(data?.transport?.enabled);
-    const transportFee = transportEnabled ? Math.max(0, Number(data?.transport?.fee ?? await readTaxiDefaultFee(prisma))) : 0;
+    const transportFee = transportEnabled ? moneyCents(data?.transport?.fee ?? await readTaxiDefaultFee(prisma), 'Taxa de transporte') / 100 : 0;
     if (!Number.isFinite(transportFee) || transportFee < 0) {
       throw new BadRequestException('Taxa de transporte inválida.');
     }
@@ -1013,6 +1032,7 @@ export class PetshopPackagesService {
         if (!Number.isFinite(rawBase) || rawBase < 0) {
           throw new BadRequestException(`Valor base inválido para o pet ${petItem.name}.`);
         }
+        moneyCents(rawBase, 'Valor do pacote');
         const petTransportFee = idx === 0 ? transportFee : 0;
         const petDiscount =
           cfg.discountAmount !== undefined
@@ -1023,7 +1043,8 @@ export class PetshopPackagesService {
         if (!Number.isFinite(petDiscount) || petDiscount < 0 || petDiscount > rawBase + petTransportFee) {
           throw new BadRequestException(`Valor de desconto inválido para o pet ${petItem.name}.`);
         }
-        const petFinalPrice = Math.max(0, Number((rawBase + petTransportFee - petDiscount).toFixed(2)));
+        moneyCents(petDiscount, 'Desconto');
+        const petFinalPrice = moneyCents(Number((rawBase + petTransportFee - petDiscount).toFixed(2)), 'Total') / 100;
         const petSessions = Array.isArray(cfg.scheduledSessions)
           ? cfg.scheduledSessions
           : Array.isArray(data?.scheduledSessions)
@@ -1048,6 +1069,9 @@ export class PetshopPackagesService {
         perPetSpecs.reduce((sum, spec) => sum + spec.finalPrice, 0).toFixed(2),
       );
 
+      const groupPayments = paymentStatus === 'paid' ? normalizePackagePayments(data?.payments, totalGroupPrice, paymentMethod) : [];
+      const allocations = paymentStatus === 'paid' ? allocatePackagePayments(groupPayments, perPetSpecs.map(s => s.finalPrice)) : [];
+      const receivedAt = new Date().toISOString();
       const groupMeta = {
         id: groupId,
         mode: 'per_pet' as const,
@@ -1073,7 +1097,7 @@ export class PetshopPackagesService {
         }
 
         const createdIds: string[] = [];
-        for (const spec of perPetSpecs) {
+        for (const [specIndex, spec] of perPetSpecs.entries()) {
           const createdContract = await tx.customerPetPackage.create({
             data: {
               customerId,
@@ -1092,10 +1116,12 @@ export class PetshopPackagesService {
               expiresAt: spec.expiresAt,
               status: 'active',
               paymentStatus,
-              paymentMethod,
+              paymentMethod: paymentStatus === 'paid' ? (allocations[specIndex].length > 1 ? 'mixed' : allocations[specIndex][0]?.method || paymentMethod) : paymentMethod,
               createdByOperatorId: actor?.operatorId || actor?.userId || null,
               createdByOperatorName: actor?.name || null,
-              notes: this.serializeContractNotes(data?.notes, spec.transportMeta, groupMeta, [spec.pet.id]),
+              notes: paymentStatus === 'paid'
+                ? receiptNotes(this.serializeContractNotes(data?.notes, spec.transportMeta, groupMeta, [spec.pet.id]), { receivedAt, payments: allocations[specIndex] })
+                : this.serializeContractNotes(data?.notes, spec.transportMeta, groupMeta, [spec.pet.id]),
             },
           });
           createdIds.push(createdContract.id);
@@ -1173,7 +1199,7 @@ export class PetshopPackagesService {
           },
           orderBy: { createdAt: 'asc' },
         });
-      });
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 
       const enrichedList = createdContracts.map((c: any) => this.enrichContractTransport(c));
       return {
@@ -1206,7 +1232,10 @@ export class PetshopPackagesService {
       throw new BadRequestException('Valor de desconto inválido.');
     }
 
-    const finalPrice = Math.max(0, Number((basePriceSnapshot + transportFee - discountAmount).toFixed(2)));
+    moneyCents(basePriceSnapshot, 'Valor do pacote');
+    moneyCents(discountAmount, 'Desconto');
+    const finalPrice = moneyCents(Number((basePriceSnapshot + transportFee - discountAmount).toFixed(2)), 'Total') / 100;
+    const payments = paymentStatus === 'paid' ? normalizePackagePayments(data?.payments, finalPrice, paymentMethod) : [];
     const scheduledSessions: Array<{
       startsAt: string;
       petId?: string;
@@ -1267,10 +1296,12 @@ export class PetshopPackagesService {
           expiresAt,
           status: 'active',
           paymentStatus,
-          paymentMethod,
+          paymentMethod: paymentStatus === 'paid' ? (payments.length > 1 ? 'mixed' : payments[0]?.method || paymentMethod) : paymentMethod,
           createdByOperatorId: actor?.operatorId || actor?.userId || null,
           createdByOperatorName: actor?.name || null,
-          notes: this.serializeContractNotes(data?.notes, baseTransportMeta, sharedGroupMeta, allowedPetIds),
+          notes: paymentStatus === 'paid'
+            ? receiptNotes(this.serializeContractNotes(data?.notes, baseTransportMeta, sharedGroupMeta, allowedPetIds), { receivedAt: new Date().toISOString(), payments })
+            : this.serializeContractNotes(data?.notes, baseTransportMeta, sharedGroupMeta, allowedPetIds),
         },
       });
 
@@ -1350,7 +1381,7 @@ export class PetshopPackagesService {
           ledgerEvents: true,
         },
       });
-    });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
 
     return this.enrichContractTransport(resultContract as any);
   }
@@ -1420,50 +1451,53 @@ export class PetshopPackagesService {
     });
   }
 
-  async confirmContractPayment(
-    contractId: string,
-    body: { paymentMethod?: string; saleId?: string; confirmGroup?: boolean },
-  ) {
+  async confirmContractPayment(contractId: string, body: { paymentMethod?: string; payments?: unknown; saleId?: string; confirmGroup?: boolean }) {
     const prisma = await this.prisma();
-    const contract = await prisma.customerPetPackage.findUnique({ where: { id: contractId } });
-    if (!contract) throw new NotFoundException('Contrato não encontrado.');
-    if (contract.status === 'cancelled') {
-      throw new BadRequestException('Não é possível confirmar pagamento de um contrato cancelado.');
+    if (body?.saleId) throw new BadRequestException('Recebimentos pelo PDV devem ser confirmados no Caixa.');
+    const initial = await prisma.customerPetPackage.findUnique({ where: { id: contractId } });
+    if (!initial) throw new NotFoundException('Contrato não encontrado.');
+    if (initial.status === 'cancelled') throw new BadRequestException('Contrato cancelado.');
+    if (initial.comandaId && contractMetadata(initial.notes).packageGroup?.mode === 'per_pet' && body?.confirmGroup === false) {
+      throw new BadRequestException('Confirme o grupo completo para quitar sua comanda única.');
     }
-
-    const enriched = this.enrichContractTransport(contract);
-    const paymentMethod = body?.paymentMethod ? String(body.paymentMethod).trim() : contract.paymentMethod;
-    const saleId = body?.saleId || contract.saleId;
-
-    if (body?.confirmGroup !== false && enriched.packageGroup?.id && enriched.packageGroup.mode === 'per_pet') {
-      await prisma.customerPetPackage.updateMany({
-        where: {
-          customerId: contract.customerId,
-          status: { not: 'cancelled' },
-          notes: { contains: enriched.packageGroup.id },
-        },
-        data: {
-          paymentStatus: 'paid',
-          paymentMethod,
-          saleId,
-        },
-      });
-    }
-
-    const updated = await prisma.customerPetPackage.update({
-      where: { id: contractId },
-      data: {
-        paymentStatus: 'paid',
-        paymentMethod,
-        saleId,
-      },
-      include: {
-        customer: true,
-        pet: true,
-        items: { include: { service: true } },
-      },
-    });
-    return this.enrichContractTransport(updated);
+    await prisma.$transaction(async tx => {
+      // Serialize family confirmations before locking its individual contracts.
+      await tx.$queryRaw(Prisma.sql`SELECT id FROM customers WHERE id = ${initial.customerId} FOR UPDATE`);
+      const group = contractMetadata(initial.notes).packageGroup;
+      const members = await tx.customerPetPackage.findMany({ where: group?.mode === 'per_pet' && body?.confirmGroup !== false
+        ? { customerId: initial.customerId, notes: { contains: group.id }, status: { not: 'cancelled' } }
+        : { id: contractId }, orderBy: { id: 'asc' }, include: { items: true } });
+      // Checkout locks the comanda before its packages: keep the same lock order.
+      for (const id of [...new Set(members.map(m => m.comandaId).filter(Boolean))].sort()) {
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM comandas WHERE id = ${id} FOR UPDATE`);
+      }
+      for (const member of members) await tx.$queryRaw(Prisma.sql`SELECT id FROM customer_pet_packages WHERE id = ${member.id} FOR UPDATE`);
+      const contracts = await tx.customerPetPackage.findMany({ where: { id: { in: members.map(m => m.id) } }, orderBy: { id: 'asc' }, include: { items: true } });
+      if (contracts.some(c => c.status === 'cancelled')) throw new BadRequestException('Contrato cancelado.');
+      const pending = contracts.filter(c => c.paymentStatus === 'pending');
+      if (!pending.length) return; // Already received: preserve its date and methods.
+      const total = pending.reduce((sum, c) => sum + moneyCents(Number(c.finalPrice)), 0) / 100;
+      const payments = normalizePackagePayments(body?.payments, total, body?.paymentMethod || 'pix');
+      const allocations = allocatePackagePayments(payments, pending.map(c => Number(c.finalPrice)));
+      const receivedAt = new Date();
+      for (const [index, contract] of pending.entries()) {
+        const item = contract.items[0];
+        if (!item) throw new BadRequestException('Contrato sem itens de saldo.');
+        await tx.customerPetPackage.update({ where: { id: contract.id }, data: {
+          paymentStatus: 'paid', paymentMethod: allocations[index].length > 1 ? 'mixed' : allocations[index][0]?.method || 'pix',
+          notes: receiptNotes(contract.notes, { receivedAt: receivedAt.toISOString(), payments: allocations[index] }),
+        } });
+        await tx.customerPetPackageLedger.create({ data: {
+          idempotencyKey: `payment:${contract.id}`, customerPackageId: contract.id, customerPackageItemId: item.id,
+          eventType: 'PAYMENT_RECEIVED', quantityDelta: 0, balanceAfter: item.availableQuantity,
+          usedAfter: item.usedQuantity, reservedAfter: item.reservedQuantity, createdAt: receivedAt,
+          reason: 'Recebimento confirmado diretamente no Pet Shop',
+        } });
+        // Prevent a second charge through the old pending checkout.
+        if (contract.comandaId) await tx.comanda.updateMany({ where: { id: contract.comandaId, status: { in: ['open', 'waiting_payment'] }, saleId: null }, data: { status: 'cancelled' } });
+      }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.ReadCommitted });
+    return this.getContractById(contractId);
   }
 
   // ===========================================================================
@@ -1852,13 +1886,15 @@ export class PetshopPackagesService {
       throw new BadRequestException('Informe o item do pacote a ser estornado.');
     }
 
+    if (!body.appointmentId) throw new BadRequestException('Selecione a sessão consumida que deseja estornar.');
     const prisma = await this.prisma();
-    return prisma.$transaction(async tx => {
+    await prisma.$transaction(async tx => {
       const contractRows: any[] = await tx.$queryRaw(
         Prisma.sql`SELECT id, status, expiresAt FROM customer_pet_packages WHERE id = ${contractId} FOR UPDATE`,
       );
       if (!contractRows.length) throw new NotFoundException('Contrato não encontrado.');
       const contract = contractRows[0];
+      if (contract.status === 'cancelled') throw new BadRequestException('Contrato cancelado.');
 
       const itemRows: any[] = await tx.$queryRaw(
         Prisma.sql`SELECT id, customerPackageId, serviceId, totalQuantity, reservedQuantity, usedQuantity, availableQuantity
@@ -1873,6 +1909,22 @@ export class PetshopPackagesService {
         throw new BadRequestException('Não há sessões consumidas neste item para estornar.');
       }
 
+      {
+        const changed = await tx.petAppointmentService.updateMany({
+          where: {
+            appointmentId: body.appointmentId,
+            customerPackageItemId: pkgItem.id,
+            coverageStatus: 'consumed',
+          },
+          data: {
+            coverageStatus: 'refunded',
+            coveredAmount: new Prisma.Decimal(0),
+          },
+        });
+        if (changed.count !== 1) throw new ConflictException('Esta sessão já foi estornada ou não está consumida neste pacote.');
+      }
+
+
       const nextUsed = Number(pkgItem.usedQuantity) - 1;
       const nextAvailable =
         Number(pkgItem.totalQuantity) - nextUsed - Number(pkgItem.reservedQuantity);
@@ -1885,20 +1937,6 @@ export class PetshopPackagesService {
         },
       });
 
-      if (body.appointmentId) {
-        await tx.petAppointmentService.updateMany({
-          where: {
-            appointmentId: body.appointmentId,
-            customerPackageItemId: pkgItem.id,
-            coverageStatus: 'consumed',
-          },
-          data: {
-            coverageStatus: 'refunded',
-            coveredAmount: new Prisma.Decimal(0),
-          },
-        });
-      }
-
       if (contract.status === 'completed' && new Date(contract.expiresAt) >= new Date()) {
         await tx.customerPetPackage.update({
           where: { id: contractId },
@@ -1906,9 +1944,7 @@ export class PetshopPackagesService {
         });
       }
 
-      const idempotencyKey = body.appointmentId
-        ? `refund:${body.appointmentId}:${pkgItem.id}:${nextUsed}`
-        : `refund:manual:${pkgItem.id}:${Date.now()}`;
+      const idempotencyKey = `refund:${body.appointmentId}:${pkgItem.id}`;
 
       await tx.customerPetPackageLedger.create({
         data: {
@@ -1927,8 +1963,8 @@ export class PetshopPackagesService {
         },
       });
 
-      return this.getContractById(contractId);
     });
+    return this.getContractById(contractId);
   }
 
   async cancelContract(contractId: string, body: { reason: string }, actor?: PackageActor) {
@@ -2044,9 +2080,9 @@ export class PetshopPackagesService {
 
       let contractAvailable = 0;
       let contractTotal = 0;
+      let contractUsed = 0;
 
       for (const item of c.items) {
-        const unitVal = Number(item.unitValueSnapshot || 0);
         totalSessionsContracted += item.totalQuantity;
         totalSessionsUsed += item.usedQuantity;
         totalSessionsReserved += item.reservedQuantity;
@@ -2055,12 +2091,16 @@ export class PetshopPackagesService {
         contractTotal += item.totalQuantity;
         contractAvailable += item.availableQuantity;
 
-        recognizedRevenue += item.usedQuantity * unitVal;
-        deferredRevenue += (item.availableQuantity + item.reservedQuantity) * unitVal;
+        contractUsed += item.usedQuantity;
       }
 
+      const contractCents = Math.round(price * 100);
+      const recognizedCents = contractTotal ? Math.round(contractCents * Math.min(contractUsed, contractTotal) / contractTotal) : 0;
+      recognizedRevenue += recognizedCents / 100;
+      deferredRevenue += (contractCents - recognizedCents) / 100;
+
       const isExpiringSoon = c.status === 'active' && new Date(c.expiresAt) <= sevenDaysFromNow;
-      const isLastSession = c.status === 'active' && contractAvailable <= 1;
+      const isLastSession = c.status === 'active' && contractTotal - contractUsed <= 1;
 
       if (isExpiringSoon || isLastSession) {
         renewalOpportunities.push({

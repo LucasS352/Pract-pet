@@ -86,9 +86,53 @@ export class StationAccessService {
     return op;
   }
 
+  // A shared station that entered PIN mode cannot regain admin rights by dropping
+  // the optional header. Persist the binding across replicas/restarts, without
+  // storing the JWT itself or changing the existing tenant schema.
+  private sessionBindingKey(authorization?: string) {
+    if (!authorization?.startsWith('Bearer ')) return null;
+    return `petshop_auth_session:${createHash('sha256').update(authorization.slice(7)).digest('hex')}`;
+  }
+
+  private async sessionDatabase(tenantId: string) {
+    const tenant = await this.heart.tenant.findUnique({ where: { id: tenantId }, select: { databaseUrl: true } });
+    if (!tenant) throw new UnauthorizedException();
+    return this.manager.getTenantClient(tenantId, tenant.databaseUrl);
+  }
+
+  async bindPetshopSession(tenantId: string, authorization?: string) {
+    const id = this.sessionBindingKey(authorization);
+    if (!id) throw new UnauthorizedException('Sessão da loja inválida.');
+    const payload = this.jwt.verify(authorization!.slice(7));
+    if (payload.tenantId !== tenantId) throw new UnauthorizedException();
+    const db = await this.sessionDatabase(tenantId);
+    const config = { context: 'petshop', expiresAt: Number(payload.exp) * 1000 };
+    await db.tenantSettings.upsert({ where: { id }, create: { id, paymentMethodsConfig: config }, update: { paymentMethodsConfig: config } });
+  }
+
+  private async requireBoundPetshopSession(req: any, path: string) {
+    const id = this.sessionBindingKey(req.headers?.authorization);
+    if (!id || req.user.type) return;
+    const db = await this.sessionDatabase(req.user.tenantId);
+    const row = await db.tenantSettings.findUnique({ where: { id }, select: { paymentMethodsConfig: true } });
+    if (!row) return;
+    // These reads only identify the shop/operator; reidentification must work
+    // after PIN expiry. All administrative writes still require the PIN.
+    if ((path === '/auth/operator-login' && req.method === 'POST') ||
+        (req.method === 'GET' && ['/operators', '/tenants/me', '/auth/access/config'].includes(path))) return;
+    let payload: any;
+    try { payload = this.jwt.verify(req.headers?.['x-operator-token']); }
+    catch { throw new UnauthorizedException({ message: 'Identifique o colaborador com PIN.', errorSource: 'operator_token' }); }
+    if (payload.type !== 'op' || payload.context !== 'petshop' || payload.tenantId !== req.user.tenantId) {
+      throw new UnauthorizedException({ message: 'Identificação do Pet Shop inválida.', errorSource: 'operator_token' });
+    }
+    // Operator activity, PIN version and authorization are checked below.
+  }
+
   async authorizeRequest(req: any) {
     const user = req.user;
     const path = (req.originalUrl || req.url).split('?')[0].replace(/^\/api(?=\/)/, '').replace(/\/$/, '') || '/';
+    await this.requireBoundPetshopSession(req, path);
     if (user.type === 'station-session') {
       if (!stationRouteAllowed(user.station, req.method, path)) throw new ForbiddenException('Acesso restrito ao módulo deste dispositivo.');
       if (user.station !== 'WAITER') return;

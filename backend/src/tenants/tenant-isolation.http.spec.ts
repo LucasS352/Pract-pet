@@ -29,7 +29,7 @@ describe('Tenant administration isolation over HTTP', () => {
         { provide: JwtService, useValue: jwt },
         { provide: TenantsService, useValue: { updateTenant, validatePin } },
         { provide: HeartPrismaService, useValue: { tenant: { findUnique: async () => ({ status: 'active', modulos: {} }) } } },
-        { provide: TenantConnectionManager, useValue: {} },
+        { provide: TenantConnectionManager, useValue: { getTenantClient: async () => ({ tenantSettings: { findUnique: async () => null } }) } },
       ],
     }).compile();
     app = module.createNestApplication();

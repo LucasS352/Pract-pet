@@ -2009,7 +2009,7 @@ export default function PetshopAgendaPage() {
                                           setAppointmentToReschedule(item);
                                         }}
                                         title="Reagendar horário"
-                                        className="h-5 w-5 grid place-items-center rounded text-zinc-400 hover:text-teal-800 hover:bg-teal-50 transition cursor-pointer"
+                                        className="h-11 w-11 sm:h-8 sm:w-8 grid place-items-center rounded text-zinc-400 hover:text-teal-800 hover:bg-teal-50 transition cursor-pointer"
                                       >
                                         <CalendarDays size={11} />
                                       </button>
@@ -2022,7 +2022,7 @@ export default function PetshopAgendaPage() {
                                           setAppointmentToCancel(item);
                                         }}
                                         title="Cancelar agendamento"
-                                        className="h-5 w-5 grid place-items-center rounded text-zinc-400 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
+                                        className="h-11 w-11 sm:h-8 sm:w-8 grid place-items-center rounded text-zinc-400 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
                                       >
                                         <XCircle size={11} />
                                       </button>

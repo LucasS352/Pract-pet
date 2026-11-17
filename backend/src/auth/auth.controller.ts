@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Delete, Param, Body, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Delete, Param, Body, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { StationAccessService } from './station-access.service';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from './jwt-auth.guard';
@@ -38,10 +38,12 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('operator-login')
-  async operatorLogin(@CurrentUser() user: any, @Body() body: { operatorId: string, pin: string, context?: string }) {
+  async operatorLogin(@CurrentUser() user: any, @Body() body: { operatorId: string, pin: string, context?: string }, @Req() req?: any) {
     const context = user.station === 'WAITER' ? 'waiter' : body.context || 'cashier';
     await this.access.assertOperator(user.tenantId, body.operatorId, context);
-    return this.authService.validateOperatorPin(user.tenantId, body.operatorId, body.pin, context);
+    const session = await this.authService.validateOperatorPin(user.tenantId, body.operatorId, body.pin, context);
+    if (context === 'petshop') await this.access.bindPetshopSession(user.tenantId, req?.headers?.authorization);
+    return session;
   }
 
   @UseGuards(JwtAuthGuard)

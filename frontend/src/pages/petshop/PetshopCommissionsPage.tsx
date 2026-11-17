@@ -115,12 +115,12 @@ export default function PetshopCommissionsPage() {
   const [showRulesConfig, setShowRulesConfig] = useState(false);
   const [showAdjustments, setShowAdjustments] = useState(false);
   const [showClosingsHistory, setShowClosingsHistory] = useState(false);
-  const [mobileFormOpen, setMobileFormOpen] = useState(true);
+  const [mobileFormOpen, setMobileFormOpen] = useState(false);
   const [mobileMoreOptions, setMobileMoreOptions] = useState(false);
   const [mobileStageFilter, setMobileStageFilter] = useState('ALL');
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
   const [mobileRuleSearch, setMobileRuleSearch] = useState('');
-  const [mobilePeriodOpen, setMobilePeriodOpen] = useState(false);
+  const [mobilePeriodOpen, setMobilePeriodOpen] = useState(true);
 
   const load = useCallback(async () => {
     try {
@@ -420,354 +420,7 @@ export default function PetshopCommissionsPage() {
           </div>
         </div>
 
-        {/* Card colapsável: Nova / Editar regra de comissão */}
-        <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
-          <button
-            type="button"
-            onClick={() => setMobileFormOpen(v => !v)}
-            className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left transition active:bg-zinc-50"
-          >
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0d6e5a] text-white shadow-2xs">
-                <Tag size={18} />
-              </div>
-              <div className="min-w-0">
-                <h2 className="truncate text-[15px] font-bold text-zinc-900">
-                  {editingRuleId ? 'Editar regra de comissão' : 'Nova regra de comissão'}
-                </h2>
-                <p className="truncate text-xs text-zinc-500">Defina quando e quanto pagar</p>
-              </div>
-            </div>
-            {mobileFormOpen ? (
-              <ChevronUp size={18} className="shrink-0 text-zinc-400" />
-            ) : (
-              <ChevronDown size={18} className="shrink-0 text-zinc-400" />
-            )}
-          </button>
-
-          {mobileFormOpen && (
-            <div className="space-y-3 border-t border-zinc-100 px-4 pt-3 pb-4">
-              <div className="grid grid-cols-2 gap-2.5">
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-600">
-                    Etapa <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
-                    value={rule.stageKey}
-                    onChange={e => setRule({ ...rule, stageKey: e.target.value })}
-                  >
-                    <option value="">Selecione</option>
-                    {stages
-                      .filter(s => s.trackProfessional)
-                      .map(s => (
-                        <option key={s.key} value={s.key}>
-                          {s.label}
-                        </option>
-                      ))}
-                    <option value="service_added">Serviço Extra Adicionado</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-600">
-                    Tipo <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
-                    value={rule.kind}
-                    onChange={e => setRule({ ...rule, kind: e.target.value, value: e.target.value === 'NONE' ? '0' : rule.value })}
-                  >
-                    <option value="FIXED">Valor fixo</option>
-                    {rule.stageKey !== 'service_added' && <option value="PERCENT">Percentual (%)</option>}
-                    <option value="NONE">Sem comissão</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-600">Serviço</label>
-                  <select
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
-                    value={rule.serviceId}
-                    onChange={e => setRule({ ...rule, serviceId: e.target.value })}
-                  >
-                    <option value="">Todos os serviços</option>
-                    {services.map(s => (
-                      <option key={s.id} value={s.id}>
-                        {s.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-600">Porte</label>
-                  <select
-                    disabled={rule.stageKey === 'service_added'}
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-60"
-                    value={rule.stageKey === 'service_added' ? 'all' : rule.size}
-                    onChange={e => setRule({ ...rule, size: e.target.value })}
-                  >
-                    {PET_SIZE_OPTIONS.map(opt => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-600">Profissional</label>
-                  <select
-                    disabled={rule.stageKey === 'service_added'}
-                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-60"
-                    value={rule.stageKey === 'service_added' ? '' : rule.operatorId}
-                    onChange={e => setRule({ ...rule, operatorId: e.target.value })}
-                  >
-                    <option value="">Todos os profissionais</option>
-                    {operators.map(o => (
-                      <option key={o.id} value={o.id}>
-                        {o.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-zinc-600">
-                    Valor da comissão <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative flex items-center">
-                    {rule.kind === 'FIXED' && (
-                      <span className="pointer-events-none absolute left-2.5 text-xs font-semibold text-zinc-500">
-                        R$
-                      </span>
-                    )}
-                    <input
-                      className={`h-10 w-full rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-900 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-50 ${
-                        rule.kind === 'FIXED' ? 'pl-8 pr-2.5' : rule.kind === 'PERCENT' ? 'pl-2.5 pr-7' : 'px-2.5'
-                      }`}
-                      type="number"
-                      inputMode="decimal"
-                      min="0"
-                      max={rule.kind === 'PERCENT' ? 100 : undefined}
-                      step="0.01"
-                      disabled={rule.kind === 'NONE'}
-                      placeholder="0,00"
-                      value={rule.value}
-                      onChange={e => setRule({ ...rule, value: e.target.value })}
-                    />
-                    {rule.kind === 'PERCENT' && (
-                      <span className="pointer-events-none absolute right-2.5 text-xs font-semibold text-zinc-500">
-                        %
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => setMobileMoreOptions(v => !v)}
-                  className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-[#0d6e5a]"
-                >
-                  Mais opções
-                  <ChevronDown size={14} className={`transition ${mobileMoreOptions ? 'rotate-180' : ''}`} />
-                </button>
-                {editingRuleId && (
-                  <button
-                    type="button"
-                    onClick={resetRuleForm}
-                    className="cursor-pointer text-xs font-semibold text-zinc-500 underline"
-                  >
-                    Cancelar edição
-                  </button>
-                )}
-              </div>
-
-              {mobileMoreOptions && (
-                <div className="space-y-2 rounded-xl border border-emerald-100 bg-[#f4fbf8] p-3 text-xs text-zinc-600">
-                  <p className="leading-relaxed">
-                    <strong className="text-[#0d6e5a]">Prioridade automática:</strong> regras específicas por{' '}
-                    <strong>Profissional + Porte + Serviço</strong> têm precedência sobre regras gerais.
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={resetRuleForm}
-                      className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700"
-                    >
-                      Limpar formulário
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setMobilePeriodOpen(true)}
-                      className="rounded-lg border border-[#0d6e5a]/25 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0d6e5a]"
-                    >
-                      Ver resumo do período
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              <button
-                type="button"
-                disabled={busy}
-                onClick={saveRule}
-                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0d6e5a] px-4 text-sm font-semibold text-white shadow-xs transition active:scale-[0.99] disabled:opacity-50"
-              >
-                <Plus size={16} strokeWidth={2.5} />
-                {editingRuleId ? 'Salvar alterações' : 'Salvar regra'}
-              </button>
-            </div>
-          )}
-        </section>
-
-        {/* Seção: Regras cadastradas */}
-        <section className="space-y-3 pt-0.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <List size={18} className="text-[#0d6e5a]" />
-              <h2 className="text-[15px] font-bold text-zinc-900">Regras cadastradas</h2>
-            </div>
-          </div>
-
-          {/* Pills de filtro por etapa + ícone de busca */}
-          <div className="flex items-center gap-2">
-            <div className="flex flex-1 items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              <button
-                type="button"
-                onClick={() => setMobileStageFilter('ALL')}
-                className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
-                  mobileStageFilter === 'ALL'
-                    ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
-                    : 'border-zinc-200 bg-white text-zinc-700'
-                }`}
-              >
-                Todas ({rules.length})
-              </button>
-              {stageFilterOptions.map(opt => (
-                <button
-                  key={opt.key}
-                  type="button"
-                  onClick={() => setMobileStageFilter(opt.key)}
-                  className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
-                    mobileStageFilter === opt.key
-                      ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
-                      : 'border-zinc-200 bg-white text-zinc-700'
-                  }`}
-                >
-                  {opt.label} ({opt.count})
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => setMobileSearchOpen(v => !v)}
-              aria-label="Buscar regra"
-              className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition ${
-                mobileSearchOpen || mobileRuleSearch
-                  ? 'border-[#0d6e5a] bg-[#e6f4ef] text-[#0d6e5a]'
-                  : 'border-zinc-200 bg-white text-zinc-600'
-              }`}
-            >
-              <Search size={16} />
-            </button>
-          </div>
-
-          {mobileSearchOpen && (
-            <div className="relative flex items-center">
-              <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
-              <input
-                type="text"
-                value={mobileRuleSearch}
-                onChange={e => setMobileRuleSearch(e.target.value)}
-                placeholder="Buscar por etapa, porte, serviço ou profissional..."
-                className="h-10 w-full rounded-xl border border-zinc-200 bg-white pr-9 pl-9 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
-              />
-              {mobileRuleSearch && (
-                <button
-                  type="button"
-                  onClick={() => setMobileRuleSearch('')}
-                  aria-label="Limpar busca"
-                  className="absolute right-2.5 text-zinc-400 hover:text-zinc-700"
-                >
-                  <X size={15} />
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Lista de cards das regras */}
-          <div className="space-y-2.5">
-            {filteredMobileRules.map(r => {
-              const stageTitle = resolveStageLabel(r.stageKey, stages);
-              const sizeText = r.size && r.size !== 'all' ? (sizeLabelMap[r.size] || r.size) : '';
-              const porteBadge = sizeLabelMap[r.size || 'all'] || 'Todos os portes';
-              const serviceName = services.find(s => s.id === r.serviceId)?.name || 'Todos os serviços';
-              const operatorName = operators.find(o => o.id === r.operatorId)?.name || 'Qualquer profissional';
-
-              return (
-                <article
-                  key={r.id}
-                  className="rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2.5"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span className="h-4 w-[3px] shrink-0 rounded-full bg-[#0d6e5a]" />
-                      <h3 className="truncate text-[15px] font-bold text-zinc-900">
-                        {stageTitle}
-                        {sizeText ? ` — ${sizeText}` : ''}
-                      </h3>
-                    </div>
-                    <span className="shrink-0 rounded-lg bg-[#e6f4ef] px-2.5 py-1 text-xs font-extrabold text-[#0d6e5a]">
-                      {formatRuleValue(r.kind, r.value)}
-                    </span>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
-                    <span className="rounded-md bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-semibold text-[#0d6e5a]">
-                      {porteBadge}
-                    </span>
-                    <span className="text-zinc-400">·</span>
-                    <span className="text-zinc-600">{serviceName}</span>
-                    <span className="text-zinc-400">·</span>
-                    <span className="text-zinc-600">{operatorName}</span>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2 pt-0.5">
-                    <button
-                      type="button"
-                      onClick={() => editRuleInForm(r)}
-                      className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
-                    >
-                      <Pencil size={13} />
-                      Editar
-                    </button>
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => deleteRule(r)}
-                      className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-rose-200 hover:text-rose-600 disabled:opacity-50"
-                    >
-                      <Trash2 size={13} />
-                      Excluir
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-
-            {!filteredMobileRules.length && (
-              <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-6 text-center text-xs text-zinc-500">
-                Nenhuma regra encontrada para o filtro selecionado.
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Acordeão mobile: Fechamento & Extrato do Período (colapsado por padrão para preservar visão limpa) */}
+        {/* Acordeão mobile: Fechamento & Extrato do Período (prioridade para a conferência diária) */}
         <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
           <button
             type="button"
@@ -1122,6 +775,354 @@ export default function PetshopCommissionsPage() {
               </div>
             </div>
           )}
+        </section>
+
+
+        {/* Card colapsável: Nova / Editar regra de comissão */}
+        <section className="overflow-hidden rounded-2xl border border-zinc-200/80 bg-white shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setMobileFormOpen(v => !v)}
+            className="flex w-full cursor-pointer items-center justify-between gap-3 px-4 py-3.5 text-left transition active:bg-zinc-50"
+          >
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#0d6e5a] text-white shadow-2xs">
+                <Tag size={18} />
+              </div>
+              <div className="min-w-0">
+                <h2 className="truncate text-[15px] font-bold text-zinc-900">
+                  {editingRuleId ? 'Editar regra de comissão' : 'Nova regra de comissão'}
+                </h2>
+                <p className="truncate text-xs text-zinc-500">Defina quando e quanto pagar</p>
+              </div>
+            </div>
+            {mobileFormOpen ? (
+              <ChevronUp size={18} className="shrink-0 text-zinc-400" />
+            ) : (
+              <ChevronDown size={18} className="shrink-0 text-zinc-400" />
+            )}
+          </button>
+
+          {mobileFormOpen && (
+            <div className="space-y-3 border-t border-zinc-100 px-4 pt-3 pb-4">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">
+                    Etapa <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+                    value={rule.stageKey}
+                    onChange={e => setRule({ ...rule, stageKey: e.target.value })}
+                  >
+                    <option value="">Selecione</option>
+                    {stages
+                      .filter(s => s.trackProfessional)
+                      .map(s => (
+                        <option key={s.key} value={s.key}>
+                          {s.label}
+                        </option>
+                      ))}
+                    <option value="service_added">Serviço Extra Adicionado</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">
+                    Tipo <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-medium text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+                    value={rule.kind}
+                    onChange={e => setRule({ ...rule, kind: e.target.value, value: e.target.value === 'NONE' ? '0' : rule.value })}
+                  >
+                    <option value="FIXED">Valor fixo</option>
+                    {rule.stageKey !== 'service_added' && <option value="PERCENT">Percentual (%)</option>}
+                    <option value="NONE">Sem comissão</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">Serviço</label>
+                  <select
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+                    value={rule.serviceId}
+                    onChange={e => setRule({ ...rule, serviceId: e.target.value })}
+                  >
+                    <option value="">Todos os serviços</option>
+                    {services.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">Porte</label>
+                  <select
+                    disabled={rule.stageKey === 'service_added'}
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-60"
+                    value={rule.stageKey === 'service_added' ? 'all' : rule.size}
+                    onChange={e => setRule({ ...rule, size: e.target.value })}
+                  >
+                    {PET_SIZE_OPTIONS.map(opt => (
+                      <option key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">Profissional</label>
+                  <select
+                    disabled={rule.stageKey === 'service_added'}
+                    className="h-10 w-full rounded-xl border border-zinc-200 bg-white px-2.5 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-60"
+                    value={rule.stageKey === 'service_added' ? '' : rule.operatorId}
+                    onChange={e => setRule({ ...rule, operatorId: e.target.value })}
+                  >
+                    <option value="">Todos os profissionais</option>
+                    {operators.map(o => (
+                      <option key={o.id} value={o.id}>
+                        {o.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-xs font-medium text-zinc-600">
+                    Valor da comissão <span className="text-rose-500">*</span>
+                  </label>
+                  <div className="relative flex items-center">
+                    {rule.kind === 'FIXED' && (
+                      <span className="pointer-events-none absolute left-2.5 text-xs font-semibold text-zinc-500">
+                        R$
+                      </span>
+                    )}
+                    <input
+                      className={`h-10 w-full rounded-xl border border-zinc-200 bg-white text-xs font-semibold text-zinc-900 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15 disabled:bg-zinc-100 disabled:opacity-50 ${
+                        rule.kind === 'FIXED' ? 'pl-8 pr-2.5' : rule.kind === 'PERCENT' ? 'pl-2.5 pr-7' : 'px-2.5'
+                      }`}
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max={rule.kind === 'PERCENT' ? 100 : undefined}
+                      step="0.01"
+                      disabled={rule.kind === 'NONE'}
+                      placeholder="0,00"
+                      value={rule.value}
+                      onChange={e => setRule({ ...rule, value: e.target.value })}
+                    />
+                    {rule.kind === 'PERCENT' && (
+                      <span className="pointer-events-none absolute right-2.5 text-xs font-semibold text-zinc-500">
+                        %
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMobileMoreOptions(v => !v)}
+                  className="inline-flex cursor-pointer items-center gap-1 text-xs font-semibold text-[#0d6e5a]"
+                >
+                  Mais opções
+                  <ChevronDown size={14} className={`transition ${mobileMoreOptions ? 'rotate-180' : ''}`} />
+                </button>
+                {editingRuleId && (
+                  <button
+                    type="button"
+                    onClick={resetRuleForm}
+                    className="cursor-pointer text-xs font-semibold text-zinc-500 underline"
+                  >
+                    Cancelar edição
+                  </button>
+                )}
+              </div>
+
+              {mobileMoreOptions && (
+                <div className="space-y-2 rounded-xl border border-emerald-100 bg-[#f4fbf8] p-3 text-xs text-zinc-600">
+                  <p className="leading-relaxed">
+                    <strong className="text-[#0d6e5a]">Prioridade automática:</strong> regras específicas por{' '}
+                    <strong>Profissional + Porte + Serviço</strong> têm precedência sobre regras gerais.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={resetRuleForm}
+                      className="rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-zinc-700"
+                    >
+                      Limpar formulário
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMobilePeriodOpen(true)}
+                      className="rounded-lg border border-[#0d6e5a]/25 bg-white px-2.5 py-1 text-[11px] font-semibold text-[#0d6e5a]"
+                    >
+                      Ver resumo do período
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveRule}
+                className="flex h-11 w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-[#0d6e5a] px-4 text-sm font-semibold text-white shadow-xs transition active:scale-[0.99] disabled:opacity-50"
+              >
+                <Plus size={16} strokeWidth={2.5} />
+                {editingRuleId ? 'Salvar alterações' : 'Salvar regra'}
+              </button>
+            </div>
+          )}
+        </section>
+
+        {/* Seção: Regras cadastradas */}
+        <section className="space-y-3 pt-0.5">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <List size={18} className="text-[#0d6e5a]" />
+              <h2 className="text-[15px] font-bold text-zinc-900">Regras cadastradas</h2>
+            </div>
+          </div>
+
+          {/* Pills de filtro por etapa + ícone de busca */}
+          <div className="flex items-center gap-2">
+            <div className="flex flex-1 items-center gap-2 overflow-x-auto py-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <button
+                type="button"
+                onClick={() => setMobileStageFilter('ALL')}
+                className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                  mobileStageFilter === 'ALL'
+                    ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                    : 'border-zinc-200 bg-white text-zinc-700'
+                }`}
+              >
+                Todas ({rules.length})
+              </button>
+              {stageFilterOptions.map(opt => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setMobileStageFilter(opt.key)}
+                  className={`shrink-0 cursor-pointer rounded-full border px-3.5 py-1.5 text-xs font-semibold transition ${
+                    mobileStageFilter === opt.key
+                      ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                      : 'border-zinc-200 bg-white text-zinc-700'
+                  }`}
+                >
+                  {opt.label} ({opt.count})
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileSearchOpen(v => !v)}
+              aria-label="Buscar regra"
+              className={`flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border transition ${
+                mobileSearchOpen || mobileRuleSearch
+                  ? 'border-[#0d6e5a] bg-[#e6f4ef] text-[#0d6e5a]'
+                  : 'border-zinc-200 bg-white text-zinc-600'
+              }`}
+            >
+              <Search size={16} />
+            </button>
+          </div>
+
+          {mobileSearchOpen && (
+            <div className="relative flex items-center">
+              <Search size={15} className="pointer-events-none absolute left-3 text-zinc-400" />
+              <input
+                type="text"
+                value={mobileRuleSearch}
+                onChange={e => setMobileRuleSearch(e.target.value)}
+                placeholder="Buscar por etapa, porte, serviço ou profissional..."
+                className="h-10 w-full rounded-xl border border-zinc-200 bg-white pr-9 pl-9 text-xs text-zinc-800 outline-none focus:border-[#0d6e5a] focus:ring-2 focus:ring-[#0d6e5a]/15"
+              />
+              {mobileRuleSearch && (
+                <button
+                  type="button"
+                  onClick={() => setMobileRuleSearch('')}
+                  aria-label="Limpar busca"
+                  className="absolute right-2.5 text-zinc-400 hover:text-zinc-700"
+                >
+                  <X size={15} />
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Lista de cards das regras */}
+          <div className="space-y-2.5">
+            {filteredMobileRules.map(r => {
+              const stageTitle = resolveStageLabel(r.stageKey, stages);
+              const sizeText = r.size && r.size !== 'all' ? (sizeLabelMap[r.size] || r.size) : '';
+              const porteBadge = sizeLabelMap[r.size || 'all'] || 'Todos os portes';
+              const serviceName = services.find(s => s.id === r.serviceId)?.name || 'Todos os serviços';
+              const operatorName = operators.find(o => o.id === r.operatorId)?.name || 'Qualquer profissional';
+
+              return (
+                <article
+                  key={r.id}
+                  className="rounded-2xl border border-zinc-200/80 bg-white p-3.5 shadow-2xs space-y-2.5"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="h-4 w-[3px] shrink-0 rounded-full bg-[#0d6e5a]" />
+                      <h3 className="truncate text-[15px] font-bold text-zinc-900">
+                        {stageTitle}
+                        {sizeText ? ` — ${sizeText}` : ''}
+                      </h3>
+                    </div>
+                    <span className="shrink-0 rounded-lg bg-[#e6f4ef] px-2.5 py-1 text-xs font-extrabold text-[#0d6e5a]">
+                      {formatRuleValue(r.kind, r.value)}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-zinc-500">
+                    <span className="rounded-md bg-[#e6f4ef] px-2 py-0.5 text-[11px] font-semibold text-[#0d6e5a]">
+                      {porteBadge}
+                    </span>
+                    <span className="text-zinc-400">·</span>
+                    <span className="text-zinc-600">{serviceName}</span>
+                    <span className="text-zinc-400">·</span>
+                    <span className="text-zinc-600">{operatorName}</span>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={() => editRuleInForm(r)}
+                      className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50"
+                    >
+                      <Pencil size={13} />
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => deleteRule(r)}
+                      className="inline-flex min-h-[34px] cursor-pointer items-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 transition hover:border-rose-200 hover:text-rose-600 disabled:opacity-50"
+                    >
+                      <Trash2 size={13} />
+                      Excluir
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+
+            {!filteredMobileRules.length && (
+              <div className="rounded-2xl border border-dashed border-zinc-200 bg-white p-6 text-center text-xs text-zinc-500">
+                Nenhuma regra encontrada para o filtro selecionado.
+              </div>
+            )}
+          </div>
         </section>
 
         {/* Acordeão mobile: Ajustes Auditáveis do Período */}

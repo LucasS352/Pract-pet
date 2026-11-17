@@ -31,7 +31,7 @@ describe('Reports HTTP authorization and tenant context', () => {
         { provide: HeartPrismaService, useValue: { tenant: {
           findUnique: async ({ where }: any) => ({ id: where.id, databaseUrl: 'unused', modulos: {} }),
         } } },
-        { provide: TenantConnectionManager, useValue: {} },
+        { provide: TenantConnectionManager, useValue: { getTenantClient: async () => ({ tenantSettings: { findUnique: async () => null } }) } },
       ],
     }).compile();
     app = module.createNestApplication();

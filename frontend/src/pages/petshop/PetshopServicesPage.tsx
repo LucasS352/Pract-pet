@@ -394,7 +394,7 @@ export default function PetshopServicesPage() {
 
   // Lista filtrada e ordenada
   const filteredItems = useMemo(() => {
-    let result = parsedItems.filter(item => {
+    const result = parsedItems.filter(item => {
       // Tipo (Individual vs Combo)
       if (selectedType !== 'all') {
         const itType = item.serviceType || 'INDIVIDUAL';

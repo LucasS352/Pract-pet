@@ -2,6 +2,7 @@ import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
+import { randomUUID } from 'crypto';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { StationAccessService } from './station-access.service';
@@ -73,6 +74,7 @@ export class AuthService {
 
   async login(user: any) {
     const payload = {
+      jti: randomUUID(),
       sub: user.id,
       email: user.email,
       tenantId: user.tenant.id,

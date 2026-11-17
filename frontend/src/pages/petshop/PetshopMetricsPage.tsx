@@ -1412,7 +1412,7 @@ export default function PetshopMetricsPage() {
                   <strong className="block text-xs font-extrabold text-teal-800 tabular-nums">
                     {money(pro.revenue)}
                   </strong>
-                  <span className="text-[10px] text-zinc-400">faturado</span>
+                  <span className="text-[10px] text-zinc-400">valor agendado</span>
                 </div>
               </div>
             ))

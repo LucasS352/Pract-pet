@@ -340,7 +340,7 @@ export default function PetshopTeamPage() {
 
   // Filtragem e ordenação
   const filteredItems = useMemo(() => {
-    let result = items.filter(item => {
+    const result = items.filter(item => {
       // Busca
       if (search.trim()) {
         const q = search.toLowerCase();

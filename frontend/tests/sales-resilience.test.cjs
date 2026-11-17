@@ -10,6 +10,7 @@ const root = path.join(__dirname, '../src');
 function load(file, dependencies = {}, globals = {}) {
   const context = { exports: {}, console, crypto, ...globals, require: id => {
     if (id in dependencies) return dependencies[id];
+    if (id === '@/lib/client-id') return load('lib/client-id.ts');
     if (id === 'zustand') return require('zustand');
     throw new Error(`Unexpected dependency: ${id}`);
   } };

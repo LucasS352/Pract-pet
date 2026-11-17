@@ -359,7 +359,7 @@ export class ComandasService {
     const prisma = await this.getPrisma();
 
     // ── Ler configurações do tenant ──────────────────────────────────────────
-    const tenantSettings = await (prisma as any).tenantSettings.findFirst();
+    const tenantSettings = await (prisma as any).tenantSettings.findUnique({ where: { id: 'singleton' } });
     const allowNegativeStock: boolean = tenantSettings?.allowNegativeStock ?? false;
     const features = await this.kds.config();
 

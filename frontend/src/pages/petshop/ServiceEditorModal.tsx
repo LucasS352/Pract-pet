@@ -816,7 +816,7 @@ export function ServiceEditorModal({
         finalDuration = Number(sizePrices.medium?.duration || sizePrices.small?.duration || 60);
       }
 
-      let cleanDesc = description.replace(/\[icon:[a-z_]+\]/gi, '').trim();
+      const cleanDesc = description.replace(/\[icon:[a-z_]+\]/gi, '').trim();
       const descWithIcon = cleanDesc ? `${cleanDesc}\n\n[icon:${selectedIcon}]` : `[icon:${selectedIcon}]`;
 
       const payload: any = {

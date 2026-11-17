@@ -1,3 +1,4 @@
+import { contractMetadata, packageReceiptWindow, receivedInPeriod } from './package-receipts';
 import { SalesService } from '../sales/sales.service';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
@@ -315,7 +316,12 @@ export class PetshopService {
     let prevStart: Date;
     let prevEnd: Date;
 
-    if (customFrom && customTo) {
+    if (customFrom || customTo || period === 'custom') {
+      const validDay = (value?: string) => Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value) &&
+        Number.isFinite(new Date(`${value}T12:00:00Z`).getTime()) && new Date(`${value}T12:00:00Z`).toISOString().slice(0, 10) === value);
+      if (!validDay(customFrom) || !validDay(customTo) || customFrom! > customTo!) {
+        throw new BadRequestException('Informe datas válidas, com a data inicial anterior ou igual à final.');
+      }
       start = new Date(`${customFrom}T00:00:00.000-03:00`);
       end = new Date(`${customTo}T23:59:59.999-03:00`);
       const durationMs = end.getTime() - start.getTime();
@@ -354,12 +360,12 @@ export class PetshopService {
       prevStart = new Date(now.getFullYear() - 1, 0, 1, 0, 0, 0, 0);
       prevEnd = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate(), 23, 59, 59, 999);
     } else if (period === 'week') {
-      start = new Date(now.getTime() - 7 * 86_400_000);
+      start = new Date(now.getTime() - 6 * 86_400_000);
       start.setHours(0, 0, 0, 0);
       end = new Date(now);
       end.setHours(23, 59, 59, 999);
 
-      prevStart = new Date(now.getTime() - 14 * 86_400_000);
+      prevStart = new Date(now.getTime() - 13 * 86_400_000);
       prevStart.setHours(0, 0, 0, 0);
       prevEnd = new Date(now.getTime() - 7 * 86_400_000);
       prevEnd.setHours(23, 59, 59, 999);
@@ -378,7 +384,7 @@ export class PetshopService {
     const isTodayPeriod = (!period || period === 'today') && !customFrom && !customTo;
 
     // 1. Busca transações do período selecionado (movimentações de gaveta restritas ao caixa de Hoje)
-    const [sales, appointments, soldPackages, customPaymentMethods, cashMovements] = await Promise.all([
+    const [sales, appointments, soldPackagesRaw, customPaymentMethods, cashMovements] = await Promise.all([
       prisma.sale.findMany({
         where: { createdAt: { gte: start, lte: end }, status: { not: 'cancelled' } },
         include: {
@@ -392,11 +398,10 @@ export class PetshopService {
       }),
       prisma.customerPetPackage.findMany({
         where: {
-          createdAt: { gte: start, lte: end },
-          status: { not: 'cancelled' },
+          ...packageReceiptWindow(start, end),
           paymentStatus: 'paid',
         },
-        select: { finalPrice: true, paymentMethod: true, saleId: true, notes: true },
+        select: { finalPrice: true, paymentMethod: true, saleId: true, notes: true, createdAt: true, status: true },
       }).catch(() => []),
       prisma.tenantPaymentMethod?.findMany
         ? prisma.tenantPaymentMethod.findMany({ select: { id: true, name: true } }).catch(() => [])
@@ -412,22 +417,24 @@ export class PetshopService {
     ]);
 
     // 2. Busca totais do período anterior para o comparativo
-    const [prevSales, prevPackages] = await Promise.all([
+    const [prevSales, prevPackagesRaw] = await Promise.all([
       prisma.sale.findMany({
         where: { createdAt: { gte: prevStart, lte: prevEnd }, status: { not: 'cancelled' } },
         select: { total: true },
       }),
       prisma.customerPetPackage.findMany({
         where: {
-          createdAt: { gte: prevStart, lte: prevEnd },
-          status: { not: 'cancelled' },
+          ...packageReceiptWindow(prevStart, prevEnd),
           paymentStatus: 'paid',
           saleId: null,
         },
-        select: { finalPrice: true },
+        select: { finalPrice: true, notes: true, createdAt: true, status: true },
       }).catch(() => []),
     ]);
 
+    const hasReceipt = (p: any) => p.status !== 'cancelled' || Boolean(contractMetadata(p.notes).receipt);
+    const soldPackages = soldPackagesRaw.filter(p => hasReceipt(p) && receivedInPeriod(p, start, end));
+    const prevPackages = prevPackagesRaw.filter(p => hasReceipt(p) && receivedInPeriod(p, prevStart, prevEnd));
     let prevRevenue = 0;
     for (const s of prevSales) prevRevenue += Number(s.total || 0);
     for (const p of prevPackages) prevRevenue += Number(p.finalPrice || 0);
@@ -652,8 +659,12 @@ export class PetshopService {
         directPaidPackagesCount += 1;
         packageRevenue += pkgVal;
         if (pkgVal > 0) {
-          const bucket = this.resolvePaymentMixBucket((p as any).paymentMethod, undefined, undefined, customMethodMap);
-          addPaymentMixEntry(bucket.key, bucket.label, pkgVal);
+          const receipt = contractMetadata((p as any).notes).receipt;
+          const payments = Array.isArray(receipt?.payments) ? receipt.payments : [{ method: (p as any).paymentMethod, amount: pkgVal }];
+          for (const payment of payments) {
+            const bucket = this.resolvePaymentMixBucket(payment.method, undefined, undefined, customMethodMap);
+            addPaymentMixEntry(bucket.key, bucket.label, Number(payment.amount));
+          }
         }
       }
 
