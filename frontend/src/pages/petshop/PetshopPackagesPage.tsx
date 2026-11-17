@@ -1698,7 +1698,8 @@ export default function PetshopPackagesPage() {
                               <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
                                 {isGroup && (
                                   <span className="inline-flex items-center gap-1 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-800">
-                                    🐾 Grupo · {members.length} pets
+                                    <PawPrint size={10} className="shrink-0" />
+                                    Grupo · {members.length} pets
                                   </span>
                                 )}
                                 {hasGroupTaxi && (
@@ -1903,8 +1904,9 @@ export default function PetshopPackagesPage() {
                                   {contract.planNameSnapshot}
                                 </h3>
                                 {isGroup && (
-                                  <span className="rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-800">
-                                    🐾 Grupo · {members.length} pets
+                                  <span className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-[11px] font-semibold text-teal-800">
+                                    <PawPrint size={11} className="shrink-0" />
+                                    Grupo · {members.length} pets
                                   </span>
                                 )}
                                 {contract.isShared && (
@@ -2791,61 +2793,112 @@ export default function PetshopPackagesPage() {
 
             {/* Escolha de Modo Multi-Pet (quando 2+ pets marcados) */}
             {selectedPetIds.length >= 2 && (
-              <div className="rounded-xl border border-teal-300 bg-teal-50/50 p-3.5 space-y-2.5">
-                <p className="text-xs font-bold uppercase tracking-wider text-teal-950">
-                  Como deseja aplicar o pacote para estes {selectedPetIds.length} pets?
-                </p>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <div className="rounded-2xl border border-teal-200 bg-teal-50/40 p-4 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-xs font-bold uppercase tracking-wider text-teal-950">
+                    Como deseja aplicar o pacote para estes {selectedPetIds.length} pets?
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                   <button
                     type="button"
                     onClick={() => setMultiPetMode('per_pet')}
-                    className={`cursor-pointer rounded-xl border p-3 text-left transition ${
+                    className={`flex h-full cursor-pointer flex-col justify-between gap-2 rounded-xl border p-3.5 text-left transition ${
                       multiPetMode === 'per_pet'
-                        ? 'border-[#0d6e5a] bg-white ring-2 ring-[#0d6e5a]/25 shadow-2xs'
-                        : 'border-zinc-200 bg-white/70 hover:bg-white'
+                        ? 'border-[#0d6e5a] bg-white ring-2 ring-[#0d6e5a]/20 shadow-xs'
+                        : 'border-zinc-200 bg-white/80 hover:border-zinc-300 hover:bg-white'
                     }`}
                   >
-                    <p className="text-xs font-extrabold text-zinc-900">
-                      🐾 1 pacote igual p/ cada pet (Agrupado)
-                    </p>
-                    <p className="mt-0.5 text-[11px] leading-snug text-zinc-600">
-                      Cada pet recebe seu saldo completo, clona os horários juntos e fica tudo no mesmo card com 1 cobrança.
-                    </p>
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg transition ${
+                          multiPetMode === 'per_pet'
+                            ? 'bg-[#0d6e5a] text-white'
+                            : 'bg-teal-50 text-teal-800'
+                        }`}
+                      >
+                        <Layers size={16} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs font-bold leading-snug text-zinc-900">
+                            1 pacote igual p/ cada pet (Agrupado)
+                          </p>
+                          <span
+                            className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border transition ${
+                              multiPetMode === 'per_pet'
+                                ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white'
+                                : 'border-zinc-300 bg-white'
+                            }`}
+                          >
+                            {multiPetMode === 'per_pet' && <Check size={10} strokeWidth={3} />}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                          Cada pet recebe seu saldo completo, clona os horários juntos e fica tudo no mesmo card com 1 cobrança.
+                        </p>
+                      </div>
+                    </div>
                   </button>
+
                   <button
                     type="button"
                     onClick={() => setMultiPetMode('shared')}
-                    className={`cursor-pointer rounded-xl border p-3 text-left transition ${
+                    className={`flex h-full cursor-pointer flex-col justify-between gap-2 rounded-xl border p-3.5 text-left transition ${
                       multiPetMode === 'shared'
-                        ? 'border-[#0d6e5a] bg-white ring-2 ring-[#0d6e5a]/25 shadow-2xs'
-                        : 'border-zinc-200 bg-white/70 hover:bg-white'
+                        ? 'border-[#0d6e5a] bg-white ring-2 ring-[#0d6e5a]/20 shadow-xs'
+                        : 'border-zinc-200 bg-white/80 hover:border-zinc-300 hover:bg-white'
                     }`}
                   >
-                    <p className="text-xs font-extrabold text-zinc-900">
-                      🤝 Dividir 1 único pacote entre os {selectedPetIds.length} pets
-                    </p>
-                    <p className="mt-0.5 text-[11px] leading-snug text-zinc-600">
-                      Cria 1 pacote com saldo compartilhado entre os pets selecionados (ex: 4 banhos divididos entre eles).
-                    </p>
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg transition ${
+                          multiPetMode === 'shared'
+                            ? 'bg-[#0d6e5a] text-white'
+                            : 'bg-teal-50 text-teal-800'
+                        }`}
+                      >
+                        <Users size={16} />
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-xs font-bold leading-snug text-zinc-900">
+                            Dividir 1 único pacote entre os {selectedPetIds.length} pets
+                          </p>
+                          <span
+                            className={`mt-0.5 grid h-4 w-4 shrink-0 place-items-center rounded-full border transition ${
+                              multiPetMode === 'shared'
+                                ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white'
+                                : 'border-zinc-300 bg-white'
+                            }`}
+                          >
+                            {multiPetMode === 'shared' && <Check size={10} strokeWidth={3} />}
+                          </span>
+                        </div>
+                        <p className="mt-1 text-[11px] leading-relaxed text-zinc-600">
+                          Cria 1 pacote com saldo compartilhado entre os pets selecionados (ex: 4 banhos divididos entre eles).
+                        </p>
+                      </div>
+                    </div>
                   </button>
                 </div>
 
                 {multiPetMode === 'per_pet' && (
-                  <div className="rounded-lg border border-teal-200 bg-white p-2.5 space-y-1.5">
-                    <p className="text-[11px] font-bold text-teal-900">
-                      Valor individual por pet (calculado por porte/pelagem — editável):
+                  <div className="rounded-xl border border-teal-200/80 bg-white p-3 space-y-2">
+                    <p className="text-[11px] font-bold text-teal-950">
+                      Valor individual por pet (calculado por porte/pelagem — editável)
                     </p>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       {selectedPetsList.map(p => (
-                        <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50/70 px-2.5 py-1.5">
-                          <span className="truncate text-xs font-semibold text-zinc-800">
-                            {p.name}{' '}
-                            <span className="text-[10px] font-normal text-zinc-500">
-                              ({SIZE_LABELS[p.size || ''] || p.size || 'P'})
-                            </span>
-                          </span>
-                          <div className="flex items-center gap-1 shrink-0">
-                            <span className="text-[11px] text-zinc-500">R$</span>
+                        <div key={p.id} className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 bg-zinc-50/60 px-3 py-2">
+                          <div className="min-w-0">
+                            <p className="truncate text-xs font-bold text-zinc-900">{p.name}</p>
+                            <p className="truncate text-[10px] text-zinc-500">
+                              {SIZE_LABELS[p.size || ''] || p.size || 'Pequeno (P)'}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs font-semibold text-zinc-500">R$</span>
                             <input
                               type="number"
                               step="0.01"
@@ -2854,7 +2907,7 @@ export default function PetshopPackagesPage() {
                               onChange={e =>
                                 setPerPetCustomPrices(prev => ({ ...prev, [p.id]: e.target.value }))
                               }
-                              className="h-8 w-24 rounded-md border border-zinc-300 bg-white px-2 text-right text-xs font-bold text-zinc-900"
+                              className="h-9 w-24 rounded-lg border border-zinc-300 bg-white px-2.5 text-right text-xs font-bold text-zinc-900 outline-none focus:border-[#0d6e5a]"
                             />
                           </div>
                         </div>
@@ -3192,8 +3245,9 @@ export default function PetshopPackagesPage() {
                 {contractForm.scheduleRecurring && selectedPetIds.length >= 2 && multiPetMode === 'per_pet' && (
                   <div className="rounded-xl border border-teal-200 bg-white p-3 space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                      <span className="font-bold text-teal-950">
-                        🐾 Selecione o pet para visualizar ou personalizar os agendamentos ({selectedPetsList.length} pets):
+                      <span className="inline-flex items-center gap-1.5 font-bold text-teal-950">
+                        <PawPrint size={13} className="text-teal-700" />
+                        Selecione o pet para visualizar ou personalizar os agendamentos ({selectedPetsList.length} pets):
                       </span>
                       {Object.keys(perPetOverrides).length > 0 && (
                         <button
@@ -3235,8 +3289,8 @@ export default function PetshopPackagesPage() {
                             }`}
                           >
                             <span>{p.name}</span>
-                            <span className={`text-[10px] ${isActive ? 'text-emerald-100' : 'text-zinc-500'}`}>
-                              ({scheduledSessions.length}){hasCustom ? ' · ✏️' : ''}
+                            <span className={`inline-flex items-center gap-1 text-[10px] ${isActive ? 'text-emerald-100' : 'text-zinc-500'}`}>
+                              ({scheduledSessions.length}){hasCustom && <Pencil size={10} />}
                             </span>
                           </button>
                         );
@@ -3839,8 +3893,9 @@ export default function PetshopPackagesPage() {
             {selectedGroupContracts.length > 1 && (
               <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-3 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="font-bold text-teal-950">
-                    🐾 Grupo com {selectedGroupContracts.length} pets · Selecione o pet para gerenciar saldo e sessões:
+                  <span className="inline-flex items-center gap-1.5 font-bold text-teal-950">
+                    <PawPrint size={14} className="text-teal-700" />
+                    Grupo com {selectedGroupContracts.length} pets · Selecione o pet para gerenciar saldo e sessões:
                   </span>
                   <span className="font-black text-teal-900">
                     Total do Grupo:{' '}
