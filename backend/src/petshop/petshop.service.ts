@@ -395,9 +395,8 @@ export class PetshopService {
           createdAt: { gte: start, lte: end },
           status: { not: 'cancelled' },
           paymentStatus: 'paid',
-          saleId: null,
         },
-        select: { finalPrice: true, paymentMethod: true },
+        select: { finalPrice: true, paymentMethod: true, saleId: true, notes: true },
       }).catch(() => []),
       prisma.tenantPaymentMethod?.findMany
         ? prisma.tenantPaymentMethod.findMany({ select: { id: true, name: true } }).catch(() => [])
@@ -459,6 +458,10 @@ export class PetshopService {
       paymentMixMap.set(key, current);
     };
 
+    let taxiPdvRevenue = 0;
+    let taxiPdvCount = 0;
+    const paidTaxiSaleIds = new Set<string>();
+
     for (const sale of sales) {
       const saleTotal = Number(sale.total || 0);
       const payments = Array.isArray((sale as any).payments) ? (sale as any).payments : [];
@@ -480,13 +483,29 @@ export class PetshopService {
         }
       }
 
+      const saleItems = Array.isArray(sale.items) ? sale.items : [];
+      for (const item of saleItems) {
+        const isTaxiItem =
+          item?.productId === 'petshop-taxi-dog-fee' ||
+          String(item?.product?.name || (item as any)?.productName || '').trim().toLowerCase() === 'táxi dog';
+        if (isTaxiItem) {
+          const qty = Number(item.quantity || 1);
+          const lineRev = Number(item.subtotal ?? (qty * Number(item.priceUnit || 0)));
+          if (lineRev > 0) {
+            taxiPdvRevenue += lineRev;
+            taxiPdvCount += qty;
+            paidTaxiSaleIds.add(sale.id);
+          }
+        }
+      }
+
       if (sale.source === 'petshop') {
         serviceRevenue += saleTotal;
         continue;
       }
       productRevenue += saleTotal;
-      for (const item of sale.items) {
-        const pName = item.product?.name || item.productName || 'Produto';
+      for (const item of saleItems) {
+        const pName = item.product?.name || (item as any).productName || 'Produto';
         const current = productMap.get(pName) || { name: pName, quantity: 0, revenue: 0 };
         current.quantity += Number(item.quantity || 1);
         current.revenue += Number(item.subtotal || (Number(item.quantity || 1) * Number(item.priceUnit || 0)));
@@ -498,6 +517,14 @@ export class PetshopService {
     let packageCoveredSessionsCount = 0;
     const serviceMap = new Map<string, { name: string; count: number; revenue: number }>();
     const proMap = new Map<string, { name: string; count: number; revenue: number }>();
+    type TaxiModeKey = 'round_trip' | 'pickup_only' | 'dropoff_only';
+    const taxiByMode: Record<TaxiModeKey, { mode: TaxiModeKey; label: string; count: number; revenue: number }> = {
+      round_trip: { mode: 'round_trip', label: 'Buscar e Levar (Ida e Volta)', count: 0, revenue: 0 },
+      pickup_only: { mode: 'pickup_only', label: 'Somente Buscar (Ida)', count: 0, revenue: 0 },
+      dropoff_only: { mode: 'dropoff_only', label: 'Somente Levar (Volta)', count: 0, revenue: 0 },
+    };
+    let taxiCoveredRidesCount = 0;
+    const standaloneTaxiAppointments: Array<{ id: string; status: string; fee: number; mode: TaxiModeKey }> = [];
 
     for (const app of appointments) {
       let appServiceTotal = 0;
@@ -516,6 +543,22 @@ export class PetshopService {
         serviceMap.set(svc.nameSnapshot, current);
       }
 
+      const appTransport = parseAppointmentTransport((app as any).checkInNotes);
+      if (appTransport?.enabled) {
+        const modeKey: TaxiModeKey =
+          appTransport.mode === 'pickup_only' || appTransport.mode === 'dropoff_only'
+            ? appTransport.mode
+            : 'round_trip';
+        if (appTransport.coveredByPackage) {
+          taxiCoveredRidesCount += 1;
+        } else {
+          const fee = Math.max(0, Number(appTransport.fee || 0));
+          if (fee > 0) {
+            standaloneTaxiAppointments.push({ id: app.id, status: app.status, fee, mode: modeKey });
+          }
+        }
+      }
+
       const proName = app.professional?.name || 'Não atribuído';
       const proCurrent = proMap.get(proName) || { name: proName, count: 0, revenue: 0 };
       proCurrent.count += 1;
@@ -523,19 +566,122 @@ export class PetshopService {
       proMap.set(proName, proCurrent);
     }
 
+    // Verifica quais corridas avulsas da agenda já foram quitadas em comandas fechadas para evitar duplicidade com taxiPdvRevenue
+    const paidStandaloneAppSaleMap = new Map<string, string>();
+    if (standaloneTaxiAppointments.length > 0 && prisma?.comanda?.findMany) {
+      try {
+        const sIds = standaloneTaxiAppointments.map((a) => a.id);
+        for (let i = 0; i < sIds.length; i += 50) {
+          const chunk = sIds.slice(i, i + 50);
+          const closedCmds = await prisma.comanda.findMany({
+            where: {
+              status: 'closed',
+              sale: { is: { status: 'completed' } },
+              OR: chunk.map((id) => ({ notes: { contains: id } })),
+            },
+            select: {
+              notes: true,
+              saleId: true,
+              items: { select: { productId: true, notes: true } },
+            },
+          });
+          for (const cmd of closedCmds) {
+            if (!cmd?.notes || !cmd?.saleId) continue;
+            const hasTaxiLineInCmd =
+              !Array.isArray((cmd as any).items) ||
+              (cmd as any).items.some(
+                (ci: any) => ci?.productId === 'petshop-taxi-dog-fee' || ci?.notes === 'Táxi Dog Pet Shop',
+              );
+            if (!hasTaxiLineInCmd) continue;
+            for (const id of chunk) {
+              if (cmd.notes.includes(id) && !paidStandaloneAppSaleMap.has(id)) {
+                paidStandaloneAppSaleMap.set(id, cmd.saleId);
+              }
+            }
+          }
+        }
+      } catch {
+        // Mantém resiliência caso consulta auxiliar de comandas falhe
+      }
+    }
+
+    let taxiAgendaDeliveredRevenue = 0;
+    let taxiAgendaDeliveredCount = 0;
+    let taxiAgendaPendingRevenue = 0;
+    let taxiAgendaPendingCount = 0;
+    let accountedPdvRevenue = 0;
+    let accountedPdvCount = 0;
+
+    for (const aptTaxi of standaloneTaxiAppointments) {
+      const paidSaleId = paidStandaloneAppSaleMap.get(aptTaxi.id);
+      if (paidSaleId) {
+        if (paidTaxiSaleIds.has(paidSaleId)) {
+          taxiByMode[aptTaxi.mode].count += 1;
+          taxiByMode[aptTaxi.mode].revenue += aptTaxi.fee;
+          accountedPdvRevenue += aptTaxi.fee;
+          accountedPdvCount += 1;
+        }
+        continue;
+      }
+      if (aptTaxi.status === 'delivered') {
+        taxiAgendaDeliveredRevenue += aptTaxi.fee;
+        taxiAgendaDeliveredCount += 1;
+      } else {
+        taxiAgendaPendingRevenue += aptTaxi.fee;
+        taxiAgendaPendingCount += 1;
+      }
+      taxiByMode[aptTaxi.mode].count += 1;
+      taxiByMode[aptTaxi.mode].revenue += aptTaxi.fee;
+    }
+
+    if (taxiPdvRevenue > accountedPdvRevenue + 0.009) {
+      const remainderRev = taxiPdvRevenue - accountedPdvRevenue;
+      const remainderCount = Math.max(0, taxiPdvCount - accountedPdvCount);
+      taxiByMode.round_trip.revenue += remainderRev;
+      taxiByMode.round_trip.count += remainderCount > 0 ? remainderCount : 1;
+    }
+
     // Receita de pacotes contratados e pagos no período
     let packageRevenue = 0;
+    let directPaidPackagesCount = 0;
+    let taxiPackageRevenue = 0;
+    let taxiPackageCount = 0;
     for (const p of soldPackages) {
       const pkgVal = Number(p.finalPrice || 0);
-      packageRevenue += pkgVal;
-      if (pkgVal > 0) {
-        const bucket = this.resolvePaymentMixBucket((p as any).paymentMethod, undefined, undefined, customMethodMap);
-        addPaymentMixEntry(bucket.key, bucket.label, pkgVal);
+      if (!(p as any).saleId) {
+        directPaidPackagesCount += 1;
+        packageRevenue += pkgVal;
+        if (pkgVal > 0) {
+          const bucket = this.resolvePaymentMixBucket((p as any).paymentMethod, undefined, undefined, customMethodMap);
+          addPaymentMixEntry(bucket.key, bucket.label, pkgVal);
+        }
+      }
+
+      const rawNotes = (p as any).notes;
+      if (typeof rawNotes === 'string' && rawNotes.trim().startsWith('{')) {
+        try {
+          const parsedNotes = JSON.parse(rawNotes);
+          const pkgTransport = parsedNotes?.transport;
+          if (pkgTransport?.enabled) {
+            const modeKey: TaxiModeKey =
+              pkgTransport.mode === 'pickup_only' || pkgTransport.mode === 'dropoff_only'
+                ? pkgTransport.mode
+                : 'round_trip';
+            const rawFee = Math.max(0, Number(pkgTransport.fee || 0));
+            const effectiveFee = Math.min(pkgVal, rawFee);
+            if (effectiveFee > 0) {
+              taxiPackageRevenue += effectiveFee;
+              taxiPackageCount += 1;
+              taxiByMode[modeKey].count += 1;
+              taxiByMode[modeKey].revenue += effectiveFee;
+            }
+          }
+        } catch {}
       }
     }
 
     const totalRevenue = productRevenue + serviceRevenue + packageRevenue;
-    const totalTransactions = sales.length + soldPackages.length;
+    const totalTransactions = sales.length + directPaidPackagesCount;
     const averageTicket = totalTransactions > 0 ? totalRevenue / totalTransactions : 0;
 
     const vsPreviousPeriod = prevRevenue > 0
@@ -666,6 +812,28 @@ export class PetshopService {
       topServices,
       topProducts,
       professionals,
+      taxiDog: {
+        totalRevenue: Number(
+          (taxiPackageRevenue + taxiPdvRevenue + taxiAgendaDeliveredRevenue + taxiAgendaPendingRevenue).toFixed(2),
+        ),
+        confirmedRevenue: Number((taxiPackageRevenue + taxiPdvRevenue).toFixed(2)),
+        packageRevenue: Number(taxiPackageRevenue.toFixed(2)),
+        packageCount: taxiPackageCount,
+        pdvRevenue: Number(taxiPdvRevenue.toFixed(2)),
+        pdvCount: taxiPdvCount,
+        agendaDeliveredRevenue: Number(taxiAgendaDeliveredRevenue.toFixed(2)),
+        agendaDeliveredCount: taxiAgendaDeliveredCount,
+        agendaPendingRevenue: Number(taxiAgendaPendingRevenue.toFixed(2)),
+        agendaPendingCount: taxiAgendaPendingCount,
+        coveredByPackageRidesCount: taxiCoveredRidesCount,
+        standaloneRidesCount: taxiPdvCount + taxiAgendaDeliveredCount + taxiAgendaPendingCount,
+        byMode: Object.values(taxiByMode).map((entry) => ({
+          mode: entry.mode,
+          label: entry.label,
+          count: entry.count,
+          revenue: Number(entry.revenue.toFixed(2)),
+        })),
+      },
     };
   }
 

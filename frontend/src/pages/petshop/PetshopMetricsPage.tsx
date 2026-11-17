@@ -3,6 +3,7 @@ import {
   ArrowDownRight,
   ArrowUpRight,
   CalendarDays,
+  Car,
   Clock,
   DollarSign,
   Minus,
@@ -165,6 +166,26 @@ interface MetricsData {
   topServices: Array<{ name: string; count: number; revenue: number }>;
   topProducts: Array<{ name: string; quantity: number; revenue: number }>;
   professionals: Array<{ name: string; count: number; revenue: number }>;
+  taxiDog?: {
+    totalRevenue: number;
+    confirmedRevenue: number;
+    packageRevenue: number;
+    packageCount: number;
+    pdvRevenue: number;
+    pdvCount: number;
+    agendaDeliveredRevenue: number;
+    agendaDeliveredCount: number;
+    agendaPendingRevenue: number;
+    agendaPendingCount: number;
+    coveredByPackageRidesCount: number;
+    standaloneRidesCount: number;
+    byMode: Array<{
+      mode: 'round_trip' | 'pickup_only' | 'dropoff_only';
+      label: string;
+      count: number;
+      revenue: number;
+    }>;
+  };
 }
 
 export default function PetshopMetricsPage() {
@@ -1218,6 +1239,143 @@ export default function PetshopMetricsPage() {
           </div>
         </div>
       </section>
+
+      {/* 4B. RELATÓRIO DE RECEITAS E TAXAS DO TÁXI DOG */}
+      {(() => {
+        const taxi = data?.taxiDog || {
+          totalRevenue: 0,
+          confirmedRevenue: 0,
+          packageRevenue: 0,
+          packageCount: 0,
+          pdvRevenue: 0,
+          pdvCount: 0,
+          agendaDeliveredRevenue: 0,
+          agendaDeliveredCount: 0,
+          agendaPendingRevenue: 0,
+          agendaPendingCount: 0,
+          coveredByPackageRidesCount: 0,
+          standaloneRidesCount: 0,
+          byMode: [],
+        };
+        const taxiAgendaTotal = Number((taxi.agendaDeliveredRevenue + taxi.agendaPendingRevenue).toFixed(2));
+        const maxModeRev = Math.max(...(taxi.byMode || []).map((m) => Number(m.revenue || 0)), 1);
+
+        return (
+          <section
+            aria-label="Relatório de taxas do Táxi Dog"
+            className="mt-6 rounded-2xl border border-zinc-200/90 bg-white p-5 shadow-xs space-y-4"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2.5 pb-3 border-b border-zinc-100">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-700">
+                  <Car size={17} />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900">Relatório de Taxas do Táxi Dog (Frete)</h3>
+                  <p className="text-[11px] text-zinc-500">
+                    Fretes cobrados em pacotes pagos, atendimentos quitados no PDV e avulsos na agenda
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center rounded-full border border-emerald-200/80 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 tabular-nums">
+                  Confirmado (Pacotes + Caixa): {money(taxi.confirmedRevenue)}
+                </span>
+                <span className="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-50 px-3 py-1 text-xs font-extrabold text-amber-900 tabular-nums">
+                  Total c/ Agenda: {money(taxi.totalRevenue)}
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+              <div className="rounded-xl border border-amber-200/80 bg-amber-50/35 p-3.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-amber-900/80">
+                  Total Geral (Frete)
+                </span>
+                <strong className="mt-1 block text-lg font-extrabold text-zinc-900 tabular-nums">
+                  {money(taxi.totalRevenue)}
+                </strong>
+                <p className="mt-1 text-[11px] text-zinc-600">
+                  {taxi.packageCount + taxi.standaloneRidesCount} {taxi.packageCount + taxi.standaloneRidesCount === 1 ? 'cobrança' : 'cobranças'} com taxa no período
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-600">
+                  Taxas em Pacotes Pagos
+                </span>
+                <strong className="mt-1 block text-lg font-extrabold text-teal-800 tabular-nums">
+                  {money(taxi.packageRevenue)}
+                </strong>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  {taxi.packageCount} {taxi.packageCount === 1 ? 'pacote c/ frete' : 'pacotes c/ frete'} · {taxi.coveredByPackageRidesCount} {taxi.coveredByPackageRidesCount === 1 ? 'corrida coberta' : 'corridas cobertas'}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-600">
+                  Avulsos Recebidos (PDV)
+                </span>
+                <strong className="mt-1 block text-lg font-extrabold text-emerald-700 tabular-nums">
+                  {money(taxi.pdvRevenue)}
+                </strong>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  {taxi.pdvCount} {taxi.pdvCount === 1 ? 'taxa fechada no caixa' : 'taxas fechadas no caixa'}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5">
+                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-600">
+                  Avulsos na Agenda (s/ PDV)
+                </span>
+                <strong className="mt-1 block text-lg font-extrabold text-zinc-900 tabular-nums">
+                  {money(taxiAgendaTotal)}
+                </strong>
+                <p className="mt-1 text-[11px] text-zinc-500">
+                  {taxi.agendaDeliveredCount} concluído(s) ({money(taxi.agendaDeliveredRevenue)}) · {taxi.agendaPendingCount} agendado(s) ({money(taxi.agendaPendingRevenue)})
+                </p>
+              </div>
+            </div>
+
+            {taxi.totalRevenue > 0 ? (
+              <div className="pt-1 space-y-2.5">
+                <div className="flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-zinc-500">
+                  <span>Por Modalidade de Transporte</span>
+                  <span>Volume e valor</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {(taxi.byMode || []).map((modeItem) => {
+                    const pct = Math.min(100, Math.round((Number(modeItem.revenue || 0) / maxModeRev) * 100));
+                    return (
+                      <div key={modeItem.mode} className="space-y-1 rounded-xl border border-zinc-100 bg-zinc-50/50 p-3">
+                        <div className="flex min-w-0 items-center justify-between gap-2 text-xs">
+                          <span className="min-w-0 font-semibold text-zinc-800 truncate">
+                            {modeItem.label}
+                            <span className="ml-1 font-normal text-zinc-400">({modeItem.count}x)</span>
+                          </span>
+                          <strong className="shrink-0 font-extrabold text-zinc-900 tabular-nums">
+                            {money(modeItem.revenue)}
+                          </strong>
+                        </div>
+                        <div className="h-1.5 w-full rounded-full bg-zinc-200/70 overflow-hidden">
+                          <div
+                            style={{ width: `${modeItem.revenue > 0 ? Math.max(pct, 6) : 0}%` }}
+                            className="h-full bg-amber-500 rounded-full transition-all duration-300"
+                          />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-zinc-400 text-center py-3">
+                Nenhuma taxa de Táxi Dog registrada em pacotes, caixa ou atendimentos neste período.
+              </p>
+            )}
+          </section>
+        );
+      })()}
 
       {/* 5. PRODUTIVIDADE DA EQUIPE DE BANHO E TOSA */}
       <section

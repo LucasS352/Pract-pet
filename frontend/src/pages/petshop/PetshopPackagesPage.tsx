@@ -5,6 +5,7 @@ import {
   ArrowRight,
   Box,
   Calendar,
+  Car,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -18,6 +19,7 @@ import {
   Layers,
   LayoutGrid,
   List,
+  MapPin,
   MoreHorizontal,
   PackageCheck,
   PawPrint,
@@ -85,6 +87,12 @@ const SPECIES_LABELS: Record<string, string> = {
   all: 'Cães e Gatos',
   dog: 'Cachorro',
   cat: 'Gato',
+};
+
+const TAXI_MODE_LABELS: Record<string, string> = {
+  round_trip: 'Buscar e Levar (Ida e Volta)',
+  pickup_only: 'Somente Buscar (Ida)',
+  dropoff_only: 'Somente Levar (Volta)',
 };
 
 const EVENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
@@ -1701,7 +1709,7 @@ export default function PetshopPackagesPage() {
                                 )}
                                 {hasGroupTaxi && (
                                   <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-800">
-                                    🚐 Táxi Dog (+{money(groupTaxiFee)})
+                                    🚐 Táxi Dog {groupTaxiFee > 0 ? `(+${money(groupTaxiFee)})` : '(Incluso)'}
                                   </span>
                                 )}
                                 {contract.isShared && (
@@ -1913,7 +1921,7 @@ export default function PetshopPackagesPage() {
                                 )}
                                 {hasGroupTaxi && (
                                   <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
-                                    🚐 Táxi Dog (+{money(groupTaxiFee)})
+                                    🚐 Táxi Dog {groupTaxiFee > 0 ? `(+${money(groupTaxiFee)})` : '(Incluso)'}
                                   </span>
                                 )}
                               </div>
@@ -1977,6 +1985,11 @@ export default function PetshopPackagesPage() {
                                     >
                                       <span className="font-medium text-zinc-800">
                                         {member.pet?.name || 'Pet'} ({money(member.finalPrice)})
+                                        {Number(member.transport?.fee || 0) > 0 && (
+                                          <span className="ml-1.5 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                                            +{money(member.transport?.fee || 0)} frete
+                                          </span>
+                                        )}
                                       </span>
                                       <div className="flex items-center gap-2">
                                         {mRes > 0 && (
@@ -3729,8 +3742,13 @@ export default function PetshopPackagesPage() {
                     ? 'Valor Total do Grupo'
                     : 'Valor Final do Contrato'}
                 </label>
-                <div className="flex min-h-11 items-center rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-base font-bold text-emerald-900">
-                  {money(computedFinalContractPrice)}
+                <div className="flex min-h-11 items-center justify-between gap-2 rounded-lg border border-emerald-300 bg-emerald-50 px-3 text-base font-bold text-emerald-900">
+                  <span>{money(computedFinalContractPrice)}</span>
+                  {computedTransportFee > 0 && (
+                    <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-900">
+                      +{money(computedTransportFee)} frete
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -3817,83 +3835,188 @@ export default function PetshopPackagesPage() {
           }}
         >
           <div className="space-y-4">
-            {selectedGroupContracts.length > 1 && (
-              <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-3 space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-                  <span className="inline-flex items-center gap-1.5 font-bold text-teal-950">
-                    <PawPrint size={14} className="text-teal-700" />
-                    Grupo com {selectedGroupContracts.length} pets · Selecione o pet para gerenciar saldo e sessões:
-                  </span>
-                  <span className="font-black text-teal-900">
-                    Total do Grupo:{' '}
-                    {money(
-                      selectedGroupContracts.reduce((sum, m) => sum + Number(m.finalPrice || 0), 0),
-                    )}
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {selectedGroupContracts.map(member => {
-                    const active = selectedContract.id === member.id;
-                    const avail = member.items.reduce((s, i) => s + i.availableQuantity, 0);
-                    const total = member.items.reduce((s, i) => s + i.totalQuantity, 0);
-                    return (
-                      <button
-                        key={member.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedContract(member);
-                          setEditingAppointmentId(null);
-                          setRefundTargetItem(null);
-                        }}
-                        className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-                          active
-                            ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
-                            : 'border-teal-200 bg-white text-teal-900 hover:bg-teal-50'
-                        }`}
-                      >
-                        <span>{member.pet?.name || 'Pet'}</span>
-                        <span className={`text-[10px] ${active ? 'text-emerald-100' : 'text-zinc-500'}`}>
-                          ({avail}/{total})
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
+            {(() => {
+              const isGroupModal = selectedGroupContracts.length > 1;
+              const groupTotalValue = isGroupModal
+                ? selectedGroupContracts.reduce((sum, m) => sum + Number(m.finalPrice || 0), 0)
+                : Number(selectedContract.finalPrice || 0);
+              const groupTaxiFeeTotal = isGroupModal
+                ? selectedGroupContracts.reduce(
+                    (sum, m) => sum + (m.transport?.enabled ? Number(m.transport.fee || 0) : 0),
+                    0,
+                  )
+                : 0;
+              const groupTaxiHolder = isGroupModal
+                ? selectedGroupContracts.find(
+                    m => m.transport?.enabled && Number(m.transport.fee || 0) > 0,
+                  ) ||
+                  selectedGroupContracts.find(m => m.transport?.enabled) ||
+                  null
+                : null;
+              const groupPackageNet = Math.max(0, groupTotalValue - groupTaxiFeeTotal);
+              const contractTaxiFee = selectedContract.transport?.enabled
+                ? Number(selectedContract.transport.fee || 0)
+                : 0;
+              const contractPackageBase = Math.max(
+                0,
+                Number(selectedContract.basePriceSnapshot || 0) - contractTaxiFee,
+              );
+              const contractDiscount = Number(selectedContract.discountAmount || 0);
+              const activeTransportInfo = selectedContract.transport?.enabled
+                ? selectedContract.transport
+                : groupTaxiHolder?.transport?.enabled
+                  ? groupTaxiHolder.transport
+                  : null;
 
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-3.5 text-xs">
-              <div>
-                <p className="font-bold text-sm text-[var(--pc-text)]">
-                  {selectedContract.customer?.name} ·{' '}
-                  {selectedContract.pet?.name ||
-                    (selectedContract.packageGroup?.petNames?.length
-                      ? `Compartilhado (${selectedContract.packageGroup.petNames.join(', ')})`
-                      : 'Compartilhado entre pets')}
-                </p>
-                <p className="text-[var(--pc-text-secondary)]">
-                  Contratado em {new Date(selectedContract.startDate).toLocaleDateString('pt-BR')} ·
-                  Vencimento: {new Date(selectedContract.expiresAt).toLocaleDateString('pt-BR')}
-                </p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-bold text-[var(--pc-action)]">
-                  {money(selectedContract.finalPrice)}
-                </p>
-                {selectedContract.paymentStatus === 'pending' && (
-                  <button
-                    type="button"
-                    onClick={() => handleConfirmPayment(selectedContract.id)}
-                    className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
-                  >
-                    <CheckCircle2 size={12} />{' '}
-                    {selectedGroupContracts.length > 1
-                      ? 'Confirmar Recebimento (Grupo)'
-                      : 'Confirmar Recebimento'}
-                  </button>
-                )}
-              </div>
-            </div>
+              return (
+                <>
+                  {isGroupModal && (
+                    <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-3 space-y-2">
+                      <div className="flex flex-wrap items-start justify-between gap-2 text-xs">
+                        <span className="inline-flex items-center gap-1.5 font-bold text-teal-950">
+                          <PawPrint size={14} className="text-teal-700" />
+                          Grupo com {selectedGroupContracts.length} pets · Selecione o pet para gerenciar saldo e sessões:
+                        </span>
+                        <div className="text-right">
+                          <span className="block font-black text-teal-900">
+                            Total do Grupo: {money(groupTotalValue)}
+                          </span>
+                          {groupTaxiHolder && (
+                            <span className="block text-[11px] font-semibold text-amber-800">
+                              Pacotes: {money(groupPackageNet)} · Frete Táxi Dog:{' '}
+                              {groupTaxiFeeTotal > 0
+                                ? `${money(groupTaxiFeeTotal)}${groupTaxiHolder.pet?.name ? ` (em ${groupTaxiHolder.pet.name})` : ''}`
+                                : 'Incluso (R$ 0,00)'}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {selectedGroupContracts.map(member => {
+                          const active = selectedContract.id === member.id;
+                          const avail = member.items.reduce((s, i) => s + i.availableQuantity, 0);
+                          const total = member.items.reduce((s, i) => s + i.totalQuantity, 0);
+                          return (
+                            <button
+                              key={member.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedContract(member);
+                                setEditingAppointmentId(null);
+                                setRefundTargetItem(null);
+                              }}
+                              className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
+                                active
+                                  ? 'border-[#0d6e5a] bg-[#0d6e5a] text-white shadow-2xs'
+                                  : 'border-teal-200 bg-white text-teal-900 hover:bg-teal-50'
+                              }`}
+                            >
+                              <span>{member.pet?.name || 'Pet'}</span>
+                              <span className={`text-[10px] ${active ? 'text-emerald-100' : 'text-zinc-500'}`}>
+                                ({avail}/{total})
+                              </span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-3.5 text-xs">
+                    <div>
+                      <p className="font-bold text-sm text-[var(--pc-text)]">
+                        {selectedContract.customer?.name} ·{' '}
+                        {selectedContract.pet?.name ||
+                          (selectedContract.packageGroup?.petNames?.length
+                            ? `Compartilhado (${selectedContract.packageGroup.petNames.join(', ')})`
+                            : 'Compartilhado entre pets')}
+                      </p>
+                      <p className="text-[var(--pc-text-secondary)]">
+                        Contratado em {new Date(selectedContract.startDate).toLocaleDateString('pt-BR')} ·
+                        Vencimento: {new Date(selectedContract.expiresAt).toLocaleDateString('pt-BR')}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-bold text-[var(--pc-action)]">
+                        {money(selectedContract.finalPrice)}
+                      </p>
+                      {contractTaxiFee > 0 ? (
+                        <p className="mt-0.5 text-[11px] font-semibold text-amber-800">
+                          Pacote {money(contractPackageBase)} + Frete {money(contractTaxiFee)}
+                          {contractDiscount > 0 ? ` − Desc. ${money(contractDiscount)}` : ''}
+                        </p>
+                      ) : isGroupModal && groupTaxiFeeTotal > 0 ? (
+                        <p className="mt-0.5 text-[11px] text-[var(--pc-text-secondary)]">
+                          Só pacote · Frete ({money(groupTaxiFeeTotal)}) em {groupTaxiHolder?.pet?.name || 'grupo'}
+                        </p>
+                      ) : contractDiscount > 0 ? (
+                        <p className="mt-0.5 text-[11px] text-[var(--pc-text-secondary)]">
+                          Pacote {money(contractPackageBase)} − Desc. {money(contractDiscount)}
+                        </p>
+                      ) : null}
+                      {selectedContract.paymentStatus === 'pending' && (
+                        <button
+                          type="button"
+                          onClick={() => handleConfirmPayment(selectedContract.id)}
+                          className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
+                        >
+                          <CheckCircle2 size={12} />{' '}
+                          {isGroupModal
+                            ? 'Confirmar Recebimento (Grupo)'
+                            : 'Confirmar Recebimento'}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {activeTransportInfo && (
+                    <div className="rounded-xl border border-amber-200/90 bg-amber-50/45 p-3.5 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 font-bold text-amber-950">
+                          <span className="grid h-6 w-6 place-items-center rounded-lg bg-amber-100 text-amber-800">
+                            <Car size={14} />
+                          </span>
+                          <span>Frete / Táxi Dog do Pacote</span>
+                        </div>
+                        <span className="rounded-full border border-amber-200 bg-amber-100/80 px-2.5 py-0.5 text-[11px] font-extrabold text-amber-900 tabular-nums">
+                          {contractTaxiFee > 0
+                            ? `Taxa única: +${money(contractTaxiFee)}`
+                            : isGroupModal && groupTaxiFeeTotal > 0
+                              ? `Frete único do grupo: ${money(groupTaxiFeeTotal)} (em ${groupTaxiHolder?.pet?.name || 'grupo'})`
+                              : 'Incluso sem taxa adicional (R$ 0,00)'}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-amber-950/90">
+                        <span className="font-semibold">
+                          Modalidade: {TAXI_MODE_LABELS[activeTransportInfo.mode] || activeTransportInfo.mode}
+                        </span>
+                        {(activeTransportInfo.address || activeTransportInfo.street) && (
+                          <span className="inline-flex items-center gap-1 text-zinc-700">
+                            <MapPin size={12} className="shrink-0 text-amber-700" />
+                            <span>
+                              {activeTransportInfo.address ||
+                                [activeTransportInfo.street, activeTransportInfo.neighborhood]
+                                  .filter(Boolean)
+                                  .join(' - ')}
+                            </span>
+                          </span>
+                        )}
+                      </div>
+                      {(activeTransportInfo.reference || activeTransportInfo.notes) && (
+                        <p className="mt-1 text-[11px] text-zinc-600">
+                          {[
+                            activeTransportInfo.reference ? `Ref.: ${activeTransportInfo.reference}` : '',
+                            activeTransportInfo.notes ? `Obs.: ${activeTransportInfo.notes}` : '',
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* Itens de Saldo com Botão de Estorno de Sessão */}
             <div>

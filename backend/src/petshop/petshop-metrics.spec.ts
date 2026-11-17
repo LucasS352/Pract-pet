@@ -243,4 +243,147 @@ describe('PetshopService.getMetrics — mix de pagamentos', () => {
     expect(resultMonth.cashDrawer).toBeUndefined();
     expect(prismaMock.cashMovement.findMany).not.toHaveBeenCalled();
   });
+
+  it('consolida receitas do Táxi Dog entre pacotes (sem duplicar grupo), vendas no PDV e atendimentos na agenda', async () => {
+    const now = new Date('2026-11-16T15:00:00.000Z');
+    const prismaMock = {
+      sale: {
+        findMany: jest
+          .fn()
+          .mockResolvedValueOnce([
+            // Atendimento avulso pago no PDV (R$ 15 de Táxi Dog + R$ 60 Banho)
+            {
+              id: 'sale-apt-paid',
+              source: 'petshop',
+              total: 75,
+              createdAt: now,
+              items: [
+                { productId: 'petshop-service-1', quantity: 1, subtotal: 60, notes: 'Serviço Pet Shop' },
+                { productId: 'petshop-taxi-dog-fee', quantity: 1, subtotal: 15, notes: 'Táxi Dog Pet Shop' },
+              ],
+              payments: [{ method: 'pix', label: 'Pix', tPag: '17', value: 75, troco: 0 }],
+            },
+          ])
+          .mockResolvedValueOnce([]),
+      },
+      petAppointment: {
+        findMany: jest.fn().mockResolvedValue([
+          // Mesmo atendimento já quitado no PDV acima (não pode duplicar na agenda)
+          {
+            id: 'apt-paid-pdv',
+            status: 'delivered',
+            startsAt: now,
+            checkInNotes: JSON.stringify({
+              transport: { enabled: true, mode: 'pickup_only', fee: 15, coveredByPackage: false, address: 'Rua A, 10' },
+            }),
+            services: [],
+            professional: { id: 'op1', name: 'Sara' },
+          },
+          // Atendimento concluído direto sem passar pelo caixa PDV
+          {
+            id: 'apt-delivered-direct',
+            status: 'delivered',
+            startsAt: now,
+            checkInNotes: JSON.stringify({
+              transport: { enabled: true, mode: 'round_trip', fee: 10, coveredByPackage: false, address: 'Rua B, 20' },
+            }),
+            services: [],
+            professional: { id: 'op1', name: 'Sara' },
+          },
+          // Atendimento agendado pendente de cobrança
+          {
+            id: 'apt-scheduled',
+            status: 'scheduled',
+            startsAt: now,
+            checkInNotes: JSON.stringify({
+              transport: { enabled: true, mode: 'dropoff_only', fee: 12, coveredByPackage: false, address: 'Rua C, 30' },
+            }),
+            services: [],
+            professional: null,
+          },
+          // Corrida coberta por pacote (sem taxa avulsa; só contabiliza volume de corridas)
+          {
+            id: 'apt-pkg-covered',
+            status: 'delivered',
+            startsAt: now,
+            checkInNotes: JSON.stringify({
+              transport: { enabled: true, mode: 'round_trip', fee: 0, coveredByPackage: true, address: 'Rua D, 40' },
+            }),
+            services: [],
+            professional: null,
+          },
+        ]),
+      },
+      comanda: {
+        findMany: jest.fn().mockResolvedValue([
+          {
+            notes: 'PET2:{"v":2,"a":"apt-paid-pdv"}',
+            saleId: 'sale-apt-paid',
+            items: [{ productId: 'petshop-taxi-dog-fee', notes: 'Táxi Dog Pet Shop' }],
+          },
+        ]),
+      },
+      customerPetPackage: {
+        findMany: jest
+          .fn()
+          .mockResolvedValueOnce([
+            // Pacote Família: pet 1 concentra o frete R$ 20 (110 = 90+20); pet 2 tem fee 0 (90)
+            {
+              finalPrice: 110,
+              paymentMethod: 'pix',
+              saleId: null,
+              notes: JSON.stringify({
+                transport: { enabled: true, mode: 'round_trip', fee: 20, address: 'Rua Família, 100' },
+              }),
+            },
+            {
+              finalPrice: 90,
+              paymentMethod: 'pix',
+              saleId: null,
+              notes: JSON.stringify({
+                transport: { enabled: true, mode: 'round_trip', fee: 0, address: 'Rua Família, 100' },
+              }),
+            },
+            // Pacote quitado via PDV (saleId preenchido): não soma novamente no packageSalesRevenue, mas contabiliza a taxa do Táxi Dog
+            {
+              finalPrice: 170,
+              paymentMethod: 'comanda',
+              saleId: 'sale-pkg-comanda',
+              notes: JSON.stringify({
+                transport: { enabled: true, mode: 'round_trip', fee: 30, address: 'Rua E, 50' },
+              }),
+            },
+          ])
+          .mockResolvedValueOnce([]),
+      },
+      tenantPaymentMethod: { findMany: jest.fn().mockResolvedValue([]) },
+    };
+
+    const service = createServiceWithPrisma(prismaMock);
+    const result = await service.getMetrics('today');
+
+    // Pacotes pagos (20 + 30 = 50), PDV avulso (15), Agenda concluído direto (10), Agenda agendado (12)
+    expect(result.taxiDog).toEqual({
+      totalRevenue: 87,
+      confirmedRevenue: 65,
+      packageRevenue: 50,
+      packageCount: 2,
+      pdvRevenue: 15,
+      pdvCount: 1,
+      agendaDeliveredRevenue: 10,
+      agendaDeliveredCount: 1,
+      agendaPendingRevenue: 12,
+      agendaPendingCount: 1,
+      coveredByPackageRidesCount: 1,
+      standaloneRidesCount: 3,
+      byMode: [
+        { mode: 'round_trip', label: 'Buscar e Levar (Ida e Volta)', count: 3, revenue: 60 },
+        { mode: 'pickup_only', label: 'Somente Buscar (Ida)', count: 1, revenue: 15 },
+        { mode: 'dropoff_only', label: 'Somente Levar (Volta)', count: 1, revenue: 12 },
+      ],
+    });
+    // Pacote pago via comanda (170) não é duplicado no packageSalesRevenue
+    expect(result.totals.packageSalesRevenue).toBe(200);
+    expect(result.totals.totalRevenue).toBe(275); // 75 (sale-apt-paid) + 200 (pacotes diretos)
+  });
 });
