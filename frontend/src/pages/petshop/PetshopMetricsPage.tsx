@@ -1257,7 +1257,14 @@ export default function PetshopMetricsPage() {
           standaloneRidesCount: 0,
           byMode: [],
         };
-        const taxiAgendaTotal = Number((taxi.agendaDeliveredRevenue + taxi.agendaPendingRevenue).toFixed(2));
+        const standaloneRevenue = Number(
+          (taxi.pdvRevenue + taxi.agendaDeliveredRevenue + taxi.agendaPendingRevenue).toFixed(2),
+        );
+        const standaloneCompletedCount = taxi.pdvCount + taxi.agendaDeliveredCount;
+        const standaloneCompletedRevenue = Number(
+          (taxi.pdvRevenue + taxi.agendaDeliveredRevenue).toFixed(2),
+        );
+        const totalChargesCount = taxi.packageCount + taxi.standaloneRidesCount;
         const maxModeRev = Math.max(...(taxi.byMode || []).map((m) => Number(m.revenue || 0)), 1);
 
         return (
@@ -1273,21 +1280,18 @@ export default function PetshopMetricsPage() {
                 <div>
                   <h3 className="text-sm font-bold text-zinc-900">Relatório de Taxas do Táxi Dog (Frete)</h3>
                   <p className="text-[11px] text-zinc-500">
-                    Fretes cobrados em pacotes pagos, atendimentos quitados no PDV e avulsos na agenda
+                    Fretes cobrados em pacotes pagos e atendimentos avulsos na agenda
                   </p>
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
-                <span className="inline-flex items-center rounded-full border border-emerald-200/80 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-800 tabular-nums">
-                  Confirmado (Pacotes + Caixa): {money(taxi.confirmedRevenue)}
-                </span>
                 <span className="inline-flex items-center rounded-full border border-amber-200/80 bg-amber-50 px-3 py-1 text-xs font-extrabold text-amber-900 tabular-nums">
-                  Total c/ Agenda: {money(taxi.totalRevenue)}
+                  Total Geral: {money(taxi.totalRevenue)}
                 </span>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div className="rounded-xl border border-amber-200/80 bg-amber-50/35 p-3.5">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-amber-900/80">
                   Total Geral (Frete)
@@ -1296,7 +1300,7 @@ export default function PetshopMetricsPage() {
                   {money(taxi.totalRevenue)}
                 </strong>
                 <p className="mt-1 text-[11px] text-zinc-600">
-                  {taxi.packageCount + taxi.standaloneRidesCount} {taxi.packageCount + taxi.standaloneRidesCount === 1 ? 'cobrança' : 'cobranças'} com taxa no período
+                  {totalChargesCount} {totalChargesCount === 1 ? 'cobrança' : 'cobranças'} com taxa no período
                 </p>
               </div>
 
@@ -1314,25 +1318,13 @@ export default function PetshopMetricsPage() {
 
               <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-600">
-                  Avulsos Recebidos (PDV)
-                </span>
-                <strong className="mt-1 block text-lg font-extrabold text-emerald-700 tabular-nums">
-                  {money(taxi.pdvRevenue)}
-                </strong>
-                <p className="mt-1 text-[11px] text-zinc-500">
-                  {taxi.pdvCount} {taxi.pdvCount === 1 ? 'taxa fechada no caixa' : 'taxas fechadas no caixa'}
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-zinc-200/80 bg-zinc-50/60 p-3.5">
-                <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-600">
-                  Avulsos na Agenda (s/ PDV)
+                  Avulsos na Agenda
                 </span>
                 <strong className="mt-1 block text-lg font-extrabold text-zinc-900 tabular-nums">
-                  {money(taxiAgendaTotal)}
+                  {money(standaloneRevenue)}
                 </strong>
                 <p className="mt-1 text-[11px] text-zinc-500">
-                  {taxi.agendaDeliveredCount} concluído(s) ({money(taxi.agendaDeliveredRevenue)}) · {taxi.agendaPendingCount} agendado(s) ({money(taxi.agendaPendingRevenue)})
+                  {standaloneCompletedCount} concluído(s) ({money(standaloneCompletedRevenue)}) · {taxi.agendaPendingCount} agendado(s) ({money(taxi.agendaPendingRevenue)})
                 </p>
               </div>
             </div>
@@ -1370,7 +1362,7 @@ export default function PetshopMetricsPage() {
               </div>
             ) : (
               <p className="text-xs text-zinc-400 text-center py-3">
-                Nenhuma taxa de Táxi Dog registrada em pacotes, caixa ou atendimentos neste período.
+                Nenhuma taxa de Táxi Dog registrada em pacotes ou atendimentos neste período.
               </p>
             )}
           </section>
