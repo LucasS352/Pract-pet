@@ -74,6 +74,7 @@ export class PetshopController {
   @Post('appointments/:id/reverse-payment') reverseAppointmentPayment(@Param('id') id: string, @Body('reason') reason: string) { return this.petshop.reverseAppointmentPayment(id, reason); }
   @Patch('appointments/:id') updateAppointment(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointment(id, body, req); }
   @Patch('appointments/:id/status') updateAppointmentStatus(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointmentStatus(id, body, req); }
+  @Patch('appointments/:id/stages/:stageKey/assignee') assignAppointmentStage(@Param('id') id: string, @Param('stageKey') stageKey: string, @Body() body: any, @Req() req: any) { return this.petshop.assignAppointmentStage(id, stageKey, body, req); }
   @Post('appointments/batch-taxi-departure') batchTaxiDeparture(@Body() body: any) { return this.whatsapp.sendTaxiDogBatchDeparture(body?.appointmentIds); }
   @Post('appointments/:id/taxi-departure') taxiDeparture(@Param('id') id: string, @Body() body: any) { return this.whatsapp.sendTaxiDogDeparture(id, body?.direction); }
 
@@ -147,13 +148,23 @@ export class PetshopController {
     return this.packages.getAvailablePackagesForPet(petId, date);
   }
 
+  private async resolvePackageActor(req: any, body?: any) {
+    let sessionOp: { id: string; name: string } | null = null;
+    if (req?.headers?.['x-operator-token']) {
+      try {
+        sessionOp = await this.commissions.sessionOperator(req);
+      } catch {}
+    }
+    return {
+      userId: req?.user?.sub || req?.user?.id,
+      operatorId: sessionOp?.id || body?.operatorId,
+      name: sessionOp?.name || body?.operatorName || req?.user?.name || req?.user?.email,
+    };
+  }
+
   @Post('packages/contracts')
-  createPackageContract(@Body() body: any, @Req() req: any) {
-    return this.packages.createContract(body, {
-      userId: req?.user?.id,
-      operatorId: body?.operatorId,
-      name: body?.operatorName || req?.user?.name,
-    });
+  async createPackageContract(@Body() body: any, @Req() req: any) {
+    return this.packages.createContract(body, await this.resolvePackageActor(req, body));
   }
 
   @Post('packages/contracts/:id/confirm-payment')
@@ -162,21 +173,13 @@ export class PetshopController {
   }
 
   @Post('packages/contracts/:id/refund-session')
-  refundPackageSession(@Param('id') id: string, @Body() body: any, @Req() req: any) {
-    return this.packages.refundConsumedSession(id, body, {
-      userId: req?.user?.id,
-      operatorId: body?.operatorId,
-      name: body?.operatorName || req?.user?.name,
-    });
+  async refundPackageSession(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.packages.refundConsumedSession(id, body, await this.resolvePackageActor(req, body));
   }
 
   @Post('packages/contracts/:id/cancel')
-  cancelPackageContract(@Param('id') id: string, @Body() body: any, @Req() req: any) {
-    return this.packages.cancelContract(id, body, {
-      userId: req?.user?.id,
-      operatorId: body?.operatorId,
-      name: body?.operatorName || req?.user?.name,
-    });
+  async cancelPackageContract(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.packages.cancelContract(id, body, await this.resolvePackageActor(req, body));
   }
 
   // ─── Módulo 2: Central WhatsApp & Régua de Disparos ────────────────────────

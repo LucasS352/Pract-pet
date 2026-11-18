@@ -35,7 +35,7 @@ import { api } from '@/lib/api';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
 import { getFullUrl } from '@/lib/getFullUrl';
 import type { Appointment, Pet, Tutor, Vaccination } from './types';
-import { coatLabels, money } from './types';
+import { coatLabels, extractStageOperatorsSummary, getPackageStatusMeta, money } from './types';
 import {
   EmptyState,
   inputClass,
@@ -1828,12 +1828,12 @@ export default function PetshopPetsPage() {
                   </div>
                 </div>
 
-                {/* Pacotes Contratados Ativos */}
+                {/* Pacotes Contratados do Pet */}
                 <div className="rounded-xl border border-teal-200 bg-teal-50/40 p-3 text-xs">
                   <div className="flex items-center justify-between mb-2">
                     <span className="font-bold text-teal-900 flex items-center gap-1.5">
                       <PackageCheck size={14} className="text-teal-700" />
-                      Pacotes de Banho e Tosa Ativos
+                      Pacotes de Banho e Tosa ({selectedPet.petPackages?.length || 0})
                     </span>
                     <button
                       type="button"
@@ -1845,23 +1845,40 @@ export default function PetshopPetsPage() {
                   </div>
                   {selectedPet.petPackages && selectedPet.petPackages.length > 0 ? (
                     <div className="space-y-1.5">
-                      {selectedPet.petPackages.map(pkg => (
-                        <div key={pkg.id} className="flex items-center justify-between rounded-lg bg-white border border-teal-100 px-3 py-2">
-                          <div>
-                            <strong className="font-semibold text-zinc-900">{pkg.planNameSnapshot}</strong>
-                            <p className="text-[11px] text-zinc-500">
-                              {pkg.items?.map(it => `${it.serviceNameSnapshot}: ${it.availableQuantity}/${it.totalQuantity} disp.`).join(' · ')}
-                            </p>
+                      {selectedPet.petPackages.map(pkg => {
+                        const pkgMeta = getPackageStatusMeta(pkg);
+                        return (
+                          <div key={pkg.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white border border-teal-100 px-3 py-2">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <strong className="font-semibold text-zinc-900">{pkg.planNameSnapshot}</strong>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${pkgMeta.cls}`}>
+                                  {pkgMeta.label}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-zinc-500 mt-0.5">
+                                {pkg.items?.map(it => `${it.serviceNameSnapshot}: ${it.usedQuantity}/${it.totalQuantity} realizadas (${it.availableQuantity} livres)`).join(' · ')}
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className="text-[11px] text-teal-800 font-semibold">
+                                Até {formatDate(pkg.expiresAt)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/petshop/pacotes?contractId=${encodeURIComponent(pkg.id)}`)}
+                                className="rounded-md border border-teal-200 bg-teal-50 px-2 py-1 text-[10px] font-bold text-teal-800 hover:bg-teal-100 cursor-pointer"
+                              >
+                                Histórico
+                              </button>
+                            </div>
                           </div>
-                          <span className="text-[11px] text-teal-800 font-semibold">
-                            Até {formatDate(pkg.expiresAt)}
-                          </span>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   ) : (
                     <p className="text-zinc-500 text-[11px]">
-                      Este pet não possui pacotes recorrentes ativos no momento.
+                      Este pet não possui pacotes recorrentes registrados.
                     </p>
                   )}
                 </div>
@@ -1916,52 +1933,83 @@ export default function PetshopPetsPage() {
                   </div>
                 ) : (
                   <div className="divide-y divide-zinc-100 max-h-[380px] overflow-y-auto pr-1">
-                    {selectedPet.appointments.map(app => (
-                      <div key={app.id} className="py-3 flex items-start gap-3">
-                        <div className="grid h-8 w-8 place-items-center rounded-lg bg-teal-50 text-teal-700 shrink-0 mt-0.5">
-                          <CalendarDays size={16} />
-                        </div>
-                        <div className="min-w-0 flex-1 text-xs">
-                          <div className="flex items-center justify-between gap-2">
-                            <strong className="text-zinc-900 font-bold tabular-nums">
-                              {formatDate(app.startsAt)} às {formatTime(app.startsAt)}
-                            </strong>
-                            <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold text-zinc-700">
-                              {app.status === 'ready' ? 'Pronto' : app.status === 'delivered' ? 'Concluído' : app.status}
-                            </span>
+                    {selectedPet.appointments.map(app => {
+                      const stageExecutors = extractStageOperatorsSummary(app.stageHistory, app.customStages);
+                      const linkedPkg = app.services?.find(s => s.customerPackage)?.customerPackage;
+                      return (
+                        <div key={app.id} className="py-3 flex items-start gap-3">
+                          <div className="grid h-8 w-8 place-items-center rounded-lg bg-teal-50 text-teal-700 shrink-0 mt-0.5">
+                            <CalendarDays size={16} />
                           </div>
-
-                          <p className="text-zinc-700 font-medium mt-1">
-                            {app.services?.map(s => s.nameSnapshot).join(' + ') || 'Serviço'} ·{' '}
-                            <span className="font-bold text-teal-800">
-                              {money(app.services?.reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0) || 0)}
-                            </span>
-                          </p>
-
-                          <p className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-1">
-                            <UserRound size={12} />
-                            Profissional: {app.professional?.name || 'Equipe'}
-                          </p>
-
-                          {app.stageNotes && (
-                            <p className="mt-1 text-[11px] text-teal-900 bg-teal-50/70 border border-teal-200/80 rounded-md p-1.5">
-                              Recado: “{app.stageNotes}”
-                            </p>
-                          )}
-
-                          {app.stagePhotoUrl && (
-                            <div className="mt-2 flex items-center gap-2">
-                              <img
-                                src={getFullUrl(app.stagePhotoUrl)}
-                                alt="Foto do atendimento"
-                                className="h-12 w-12 rounded-lg object-cover border border-zinc-200"
-                              />
-                              <span className="text-[10px] text-zinc-400">Foto registrada pela equipe</span>
+                          <div className="min-w-0 flex-1 text-xs">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <strong className="text-zinc-900 font-bold tabular-nums">
+                                {formatDate(app.startsAt)} às {formatTime(app.startsAt)}
+                              </strong>
+                              <div className="flex items-center gap-1.5">
+                                {linkedPkg && (
+                                  <button
+                                    type="button"
+                                    onClick={() => navigate(`/petshop/pacotes?contractId=${encodeURIComponent(linkedPkg.id)}`)}
+                                    className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-800 hover:bg-teal-100 cursor-pointer"
+                                  >
+                                    <PackageCheck size={10} />
+                                    {linkedPkg.planNameSnapshot}
+                                  </button>
+                                )}
+                                <span className="rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[10px] font-semibold text-zinc-700">
+                                  {app.status === 'ready' ? 'Pronto' : app.status === 'delivered' ? 'Concluído' : app.status === 'scheduled' ? 'Agendado' : app.status === 'cancelled' ? 'Cancelado' : app.status}
+                                </span>
+                              </div>
                             </div>
-                          )}
+
+                            <p className="text-zinc-700 font-medium mt-1">
+                              {app.services?.map(s => s.nameSnapshot).join(' + ') || 'Serviço'} ·{' '}
+                              <span className="font-bold text-teal-800">
+                                {linkedPkg
+                                  ? 'Coberto por pacote'
+                                  : money(app.services?.reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0) || 0)}
+                              </span>
+                            </p>
+
+                            <p className="text-[11px] text-zinc-500 mt-0.5 flex items-center gap-1">
+                              <UserRound size={12} />
+                              Profissional: {app.professional?.name || 'Equipe'}
+                            </p>
+
+                            {stageExecutors.length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                {stageExecutors.map(ex => (
+                                  <span
+                                    key={ex.status}
+                                    className="rounded border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] text-zinc-700"
+                                  >
+                                    {ex.label}: <strong>{ex.userName}</strong>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+
+                            {app.stageNotes && (
+                              <p className="mt-1 text-[11px] text-teal-900 bg-teal-50/70 border border-teal-200/80 rounded-md p-1.5">
+                                Recado: “{app.stageNotes}”
+                              </p>
+                            )}
+
+                            {app.stagePhotoUrl && (
+                              <div className="mt-2 flex items-center gap-2">
+                                <img
+                                  src={getFullUrl(app.stagePhotoUrl)}
+                                  alt="Foto do atendimento"
+                                  className="h-12 w-12 rounded-lg object-cover border border-zinc-200"
+                                />
+                                <span className="text-[10px] text-zinc-400">Foto registrada pela equipe</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>

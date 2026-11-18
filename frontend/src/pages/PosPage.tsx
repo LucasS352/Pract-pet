@@ -1646,12 +1646,47 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
 export function PosPage({ experience }: { experience?: 'food' }) {
   const navigate = useNavigate();
   const [allowed, setAllowed] = useState<boolean | null>(null);
-  useEffect(() => { api.get('/tenants/me').then(({ data }) => {
-    const modules = typeof data.modulos === 'string' ? JSON.parse(data.modulos) : data.modulos || {};
-    if (modules.pdv === false) { navigate('/petshop', { replace: true }); return; }
-    setAllowed(true);
-  }).catch(() => setAllowed(false)); }, [navigate]);
+  const [retryCount, setRetryCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setAllowed(null);
+    apiGet('/tenants/me')
+      .then(({ data }) => {
+        if (cancelled) return;
+        const modules = typeof data.modulos === 'string' ? JSON.parse(data.modulos) : data.modulos || {};
+        if (modules.pdv === false) { navigate('/petshop', { replace: true }); return; }
+        setAllowed(true);
+      })
+      .catch(() => {
+        if (!cancelled) setAllowed(false);
+      });
+    return () => { cancelled = true; };
+  }, [navigate, retryCount]);
   if (allowed === null) return <div className="p-6">Carregando módulos…</div>;
-  if (!allowed) return <div className="p-6">Não foi possível verificar o acesso ao PDV. Atualize a página.</div>;
+  if (!allowed) {
+    return (
+      <div className="p-6 max-w-md space-y-3">
+        <p className="text-sm font-medium text-zinc-800">
+          Não foi possível verificar os módulos de acesso do PDV (tempo limite ou falha de conexão).
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setRetryCount(c => c + 1)}
+            className="rounded-lg bg-teal-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-teal-500 cursor-pointer"
+          >
+            Tentar novamente
+          </button>
+          <button
+            type="button"
+            onClick={() => { useAuthStore.getState().logout(); navigate('/login', { replace: true }); }}
+            className="rounded-lg border border-zinc-300 bg-white px-3.5 py-2 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+          >
+            Voltar ao Login
+          </button>
+        </div>
+      </div>
+    );
+  }
   return <PosPageContent experience={experience} />;
 }

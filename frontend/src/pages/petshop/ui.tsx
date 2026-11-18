@@ -38,12 +38,12 @@ export function PetAvatar({
   alt = '',
 }: {
   pet: { name: string; species?: string | null; breed?: string | null; photoUrl?: string | null };
-  size?: 'sm' | 'md' | 'lg';
+  size?: 'xs' | 'sm' | 'md' | 'lg';
   alt?: string;
 }) {
   const [failed, setFailed] = useState(false);
   const src = resolvePetAvatarUrl(pet);
-  const dims = size === 'sm' ? 'h-9 w-9 text-xs' : size === 'lg' ? 'h-12 w-12 text-sm' : 'h-11 w-11 text-xs';
+  const dims = size === 'xs' ? 'h-6 w-6 text-[10px]' : size === 'sm' ? 'h-9 w-9 text-xs' : size === 'lg' ? 'h-12 w-12 text-sm' : 'h-11 w-11 text-xs';
 
   useEffect(() => {
     setFailed(false);

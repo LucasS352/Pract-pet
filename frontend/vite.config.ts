@@ -58,6 +58,8 @@ export default defineConfig({
       workbox: {
         // Pré-cacheia todos os assets do build (JS, CSS, HTML)
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        cleanupOutdatedCaches: true,
+        navigateFallbackDenylist: [/^\/api\//, /^\/uploads\//, /^\/sw\.js$/, /^\/manifest\.webmanifest$/],
 
         // Sem limite de tamanho para o precache (bundle pode ser grande)
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5 MB

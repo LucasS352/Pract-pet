@@ -77,6 +77,23 @@ import { NetworkStatusBanner } from './components/NetworkStatusBanner';
 // ── PWA Service Worker ──────────────────────────────────────────────────────
 import { registerSW } from 'virtual:pwa-register';
 
+const CHUNK_RELOAD_KEY = '7bar_chunk_reload_at';
+function triggerSafeReload() {
+  try {
+    const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) || '0');
+    if (Date.now() - last < 15_000) return;
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  } catch { /* ignore */ }
+  window.location.reload();
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('vite:preloadError', (event) => {
+    event.preventDefault();
+    triggerSafeReload();
+  });
+}
+
 const updateSW = registerSW({
   onNeedRefresh() {
     updateSW(true);
@@ -93,7 +110,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('controllerchange', () => {
     if (!refreshing) {
       refreshing = true;
-      window.location.reload();
+      triggerSafeReload();
     }
   });
 
@@ -112,6 +129,44 @@ document.addEventListener('visibilitychange', () => {
     updateSW();
   }
 });
+
+class AppErrorBoundary extends React.Component<
+  { children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: '' };
+  }
+
+  static getDerivedStateFromError(error: unknown) {
+    return {
+      hasError: true,
+      message: error instanceof Error ? error.message : 'Erro inesperado ao carregar a interface.',
+    };
+  }
+
+  render() {
+    if (!this.state.hasError) return this.props.children;
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-zinc-950 text-zinc-100 p-6">
+        <div className="max-w-md w-full rounded-2xl border border-zinc-800 bg-zinc-900 p-6 space-y-4 shadow-2xl">
+          <h1 className="text-lg font-bold">Não foi possível carregar esta tela</h1>
+          <p className="text-sm text-zinc-400">
+            Uma atualização recente ou cache antigo interrompeu a renderização ({this.state.message}).
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="w-full rounded-xl bg-teal-600 hover:bg-teal-500 px-4 py-2.5 text-sm font-semibold text-white cursor-pointer"
+          >
+            Recarregar sistema
+          </button>
+        </div>
+      </div>
+    );
+  }
+}
 
 // ── Proteção Anti-Zoom Nativo iOS WebKit / PWA ───────────────────────────────
 if (typeof window !== 'undefined' && typeof document !== 'undefined') {
@@ -291,6 +346,8 @@ function App() {
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
+    <AppErrorBoundary>
+      <App />
+    </AppErrorBoundary>
   </React.StrictMode>
 );

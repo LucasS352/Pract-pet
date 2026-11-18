@@ -69,6 +69,38 @@ describe('PetshopCommissionsService', () => {
     expect(created.every(row => row.appointmentId === 'a')).toBe(true);
   });
 
+  it('transfere comissão pendente ao executor indicado sem mudar a data nem a base do pacote', async () => {
+    const executedAt = new Date('2026-11-17T11:00:00Z');
+    const tx = {
+      petCommissionRule: { findMany: jest.fn().mockResolvedValue([rule('PERCENT', '10')]) },
+      petCommission: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'commission-1', state: 'PENDING', executedAt }),
+        update: jest.fn(), createMany: jest.fn(),
+      },
+    } as any;
+    await service.recordExecution(tx, { id: 'appointment-1', pet: { size: 'small' }, services: [{
+      id: 'session-1', serviceId: 'bath', priceSnapshot: D(0), coverageStatus: 'consumed',
+      customerPackageItem: { unitValueSnapshot: D('30.00') },
+    }] }, 'bathing', 'banhista', new Date('2026-11-17T16:00:00Z'));
+    expect(tx.petCommission.update).toHaveBeenCalledWith({ where: { id: 'commission-1' }, data: expect.objectContaining({
+      operatorId: 'banhista', executedAt, baseAmount: D('30.00'), amount: D('3.00'),
+    }) });
+    expect(tx.petCommission.createMany).not.toHaveBeenCalled();
+  });
+
+  it('preserva comissão pendente antiga se o novo executor não tem regra aplicável', async () => {
+    const tx = {
+      petCommissionRule: { findMany: jest.fn().mockResolvedValue([rule('FIXED', '5', null, 'outro-operador')]) },
+      petCommission: {
+        findUnique: jest.fn().mockResolvedValue({ id: 'commission-1', state: 'PENDING' }),
+        update: jest.fn(), createMany: jest.fn(),
+      },
+    } as any;
+    await expect(service.recordExecution(tx, { id: 'appointment-1', services: [{ id: 'session-1', serviceId: 'bath', priceSnapshot: D(50) }] }, 'bathing', 'banhista', new Date())).rejects.toThrow('não possui regra');
+    expect(tx.petCommission.update).not.toHaveBeenCalled();
+    expect(tx.petCommission.createMany).not.toHaveBeenCalled();
+  });
+
   it('recusa regras monetárias inválidas', () => {
     const validate = (service as any).validateRule.bind(service);
     expect(() => validate({ stageKey: 'bathing', kind: 'PERCENT', value: '100.1' })).toThrow();

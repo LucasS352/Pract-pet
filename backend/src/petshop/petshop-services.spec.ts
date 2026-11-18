@@ -400,6 +400,14 @@ describe('PetshopPricingService - Serviços & Combos', () => {
       // Retroceder status não marca como pulado
       const skippedBack = pricing.getSkippedStages('finishing', 'bathing', pipeline);
       expect(skippedBack).toEqual([]);
+
+      // Avanço de scheduled direto para ready pula checked_in, bathing e finishing
+      const skippedFromScheduled = pricing.getSkippedStages('scheduled', 'ready', pipeline);
+      expect(skippedFromScheduled).toEqual(['checked_in', 'bathing', 'finishing']);
+
+      // Conclusão direta de bathing para delivered pula finishing e ready
+      const skippedToDelivered = pricing.getSkippedStages('bathing', 'delivered', pipeline);
+      expect(skippedToDelivered).toEqual(['finishing', 'ready']);
     });
 
     it('deve preservar a imutabilidade do snapshot em agendamentos existentes', () => {

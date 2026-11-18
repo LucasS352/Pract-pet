@@ -43,21 +43,39 @@ describe('Pet Shop checkout integrity', () => {
     await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, comanda)).rejects.toThrow('já pago antecipadamente');
   });
 
-  it('permite cobrar adicional em atendimento delivered somente com comanda addon:1 e sem venda ativa vinculada', async () => {
+  it('permite cobrar apenas serviço adicional novo em atendimento concluído já pago', async () => {
     const db = tx('delivered') as any;
     db.comanda = { findFirst: jest.fn().mockResolvedValue(null) };
     const addonComanda = { notes: 'PET2:{"v":2,"a":"apt","addon":1}' };
 
     expect(await claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, addonComanda)).toBe('apt');
-    await completePetshopCheckout(db, 'apt', 'cashier', 'tenant', false);
+    await completePetshopCheckout(db, 'apt', 'cashier', 'tenant', false, 'sale-extra', addonComanda);
     expect(db.petAppointment.update).toHaveBeenCalledWith(expect.objectContaining({
       data: {
         stageHistory: [expect.objectContaining({ kind: 'additional_charge', status: 'delivered', userId: 'cashier' })],
       },
     }));
 
-    // Se já existir uma venda fechada anterior, bloqueia cobrança em duplicidade mesmo com addon:1
+    // Uma venda anterior não impede a cobrança complementar de um item ainda não pago.
     db.comanda = { findFirst: jest.fn().mockResolvedValue({ id: 'already-paid' }) };
-    await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, addonComanda)).rejects.toThrow('Cobrança em duplicidade');
+    db.petAppointmentService = { count: jest.fn().mockResolvedValue(1) };
+    const newAddon = { ...addonComanda, items: [{ notes: 'Serviço Pet Shop:extra-1' }] };
+    await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, newAddon)).resolves.toBe('apt');
+    db.petAppointmentService.count.mockResolvedValue(0);
+    await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, newAddon)).rejects.toThrow('já cobrado');
+    await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, addonComanda)).rejects.toThrow('sem serviços novos');
+  });
+  it('cobra um adicional depois do pré-pagamento sem concluir o atendimento', async () => {
+    const db = tx('scheduled') as any;
+    db.petAppointment.findUnique.mockResolvedValue({ status: 'scheduled', stageHistory: [{ kind: 'prepayment' }] });
+    db.comanda = { findFirst: jest.fn().mockResolvedValue({ id: 'paid' }) };
+    db.petAppointmentService = { count: jest.fn().mockResolvedValue(1), updateMany: jest.fn() };
+    const addon = { notes: 'PET2:{"a":"apt","addon":1}', items: [{ notes: 'Serviço Pet Shop:extra-1' }] };
+    expect(await claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, addon)).toBe('apt');
+    await completePetshopCheckout(db, 'apt', 'cashier', 'tenant', false, 'sale-extra', addon);
+    expect(db.petAppointment.update.mock.calls[0][0].data.status).toBeUndefined();
+    expect(db.petAppointment.update.mock.calls[0][0].data.stageHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'additional_charge', status: 'scheduled', saleId: 'sale-extra' }),
+    ]));
   });
 });

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
+import { useAuthStore } from '@/store/auth';
 import { CollaboratorAccessModal } from './CollaboratorAccessModal';
 import { EmptyState, inputClass, labelClass, ListSkeleton, Modal, pageClass, PageHeader, primaryButton, secondaryButton, TeamTabs } from './ui';
 
@@ -35,6 +36,7 @@ export type Operator = {
   name: string;
   active: boolean;
   isManager: boolean;
+  canManageAppointmentCommissions?: boolean;
   jobTitle?: string | null;
   hasOpenRegister?: boolean;
   createdAt?: string;
@@ -46,9 +48,10 @@ type FormState = {
   jobTitle: string;
   pin: string;
   isManager: boolean;
+  canManageAppointmentCommissions: boolean;
 };
 
-const emptyForm: FormState = { name: '', jobTitle: '', pin: '', isManager: false };
+const emptyForm: FormState = { name: '', jobTitle: '', pin: '', isManager: false, canManageAppointmentCommissions: false };
 const roleSuggestions = [
   'Banhista',
   'Tosadora',
@@ -235,7 +238,9 @@ function TeamRowActionsMenu({
 }
 
 export default function PetshopTeamPage() {
+  const user = useAuthStore(state => state.user);
   const [items, setItems] = useState<Operator[]>([]);
+  const canGrantCommissionPermission = ['admin', 'superadmin'].includes(user?.role || '');
   const [users, setUsers] = useState<Array<{ id: string; name: string; email: string; role: string; active: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -420,6 +425,7 @@ export default function PetshopTeamPage() {
       jobTitle: item.jobTitle || '',
       pin: pinCache[item.id] || '',
       isManager: item.isManager,
+      canManageAppointmentCommissions: Boolean(item.canManageAppointmentCommissions),
     });
     setFormOpen(true);
   };
@@ -445,6 +451,7 @@ export default function PetshopTeamPage() {
         name: form.name.trim(),
         jobTitle: form.jobTitle.trim() || null,
         isManager: form.isManager,
+        ...(canGrantCommissionPermission ? { canManageAppointmentCommissions: form.canManageAppointmentCommissions } : {}),
       };
       if (form.pin) payload.pin = form.pin;
 
@@ -1265,6 +1272,16 @@ export default function PetshopTeamPage() {
                 </span>
               </span>
             </label>
+
+            {canGrantCommissionPermission && (
+              <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-[var(--pc-border)] bg-slate-50/70 p-4">
+                <input type="checkbox" checked={form.canManageAppointmentCommissions}
+                  onChange={e => setForm({ ...form, canManageAppointmentCommissions: e.target.checked })}
+                  className="mt-0.5 h-5 w-5 rounded border-slate-300 accent-[var(--pc-action)]" />
+                <span><strong className="block text-sm font-semibold text-slate-900">PIN administrativo do Pet Shop</strong>
+                  <span className="mt-1 block text-xs text-slate-500">Ao entrar com o PIN deste colaborador, permite lançar serviços após a conclusão e indicar quem recebe a comissão. O campo acima altera o PIN; deixe vazio para manter o atual.</span></span>
+              </label>
+            )}
 
             <div className="flex flex-col-reverse gap-2 border-t border-[var(--pc-border)] pt-4 sm:flex-row sm:justify-end">
               <button type="button" onClick={closeForm} disabled={saving} className={secondaryButton}>

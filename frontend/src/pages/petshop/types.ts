@@ -415,16 +415,24 @@ export function resolveAppointmentSteps(apt?: Appointment | null): Array<{ key: 
 
 export type StageHistoryEntry = {
   status: string;
-  kind?: 'service_added' | string;
+  kind?: 'service_added' | 'prepayment' | 'additional_charge' | 'additional_charge_reversed' | string;
   appointmentServiceId?: string;
+  commissionRecipientName?: string | null;
+  commissionAmount?: number;
+  commissionState?: string | null;
+  serviceId?: string;
   label?: string | null;
   at: string;
   photoUrl?: string | null;
   notes?: string | null;
   userId?: string | null;
   userName?: string | null;
+  operatorId?: string | null;
+  operatorName?: string | null;
   skipped?: boolean;
   reason?: string | null;
+  rescheduledFrom?: string | null;
+  rescheduledTo?: string | null;
 };
 
 export type AppointmentServiceItem = {
@@ -441,6 +449,7 @@ export type AppointmentServiceItem = {
   customerPackageItemId?: string | null;
   coverageStatus?: 'none' | 'reserved' | 'consumed' | 'released' | 'refunded' | string;
   coveredAmount?: string | number;
+  chargedSaleId?: string | null;
   customerPackage?: {
     id: string;
     planNameSnapshot: string;
@@ -546,7 +555,14 @@ export type CustomerPetPackageLedger = {
   createdAt: string;
   appointmentId?: string | null;
   pet?: { id: string; name: string } | null;
-  appointment?: { id: string; startsAt: string; status: string } | null;
+  customerPackageItem?: { id: string; serviceNameSnapshot: string } | null;
+  appointment?: {
+    id: string;
+    startsAt: string;
+    endsAt?: string;
+    status: string;
+    professional?: { id: string; name: string } | null;
+  } | null;
 };
 
 export type PackageScheduledAppointment = {
@@ -554,8 +570,16 @@ export type PackageScheduledAppointment = {
   startsAt: string;
   endsAt: string;
   status: string;
+  checkedInAt?: string | null;
+  readyAt?: string | null;
+  completedAt?: string | null;
+  stageNotes?: string | null;
+  stagePhotoUrl?: string | null;
+  customStages?: (string | PetshopStageItem)[] | null;
+  notes?: string | null;
   updatedAt: string;
-  stageHistory?: unknown;
+  stageHistory?: StageHistoryEntry[] | null;
+  professional?: { id: string; name: string } | null;
   pet: { id: string; name: string };
   services: Array<{ id: string; nameSnapshot: string; coverageStatus: string; customerPackageItemId?: string | null }>;
 };
@@ -595,7 +619,10 @@ export type CustomerPetPackage = {
   packageGroup?: CustomerPetPackageGroup | null;
   allowedPetIds?: string[] | null;
   groupContracts?: CustomerPetPackage[];
+  createdByOperatorId?: string | null;
+  createdByOperatorName?: string | null;
   createdAt: string;
+  updatedAt?: string;
   customer: { id: string; name: string; phone: string; address?: string | null; reference?: string | null };
   pet?: {
     id: string;
@@ -680,3 +707,85 @@ export const stripServiceInternalTags = (raw?: string | null): string =>
     .replace(/\[(cat|categoria):[^\]]*\]/gi, '')
     .replace(/\[icon:[a-z0-9_-]+\]/gi, '')
     .trim();
+
+export const PACKAGE_EVENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
+  CONTRACT_CREATED: { label: 'Contratação Inicial', color: 'bg-teal-50 text-teal-700 border-teal-200' },
+  RESERVE: { label: 'Reserva em Agenda', color: 'bg-sky-50 text-sky-700 border-sky-200' },
+  CONSUME: { label: 'Sessão Realizada', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
+  RELEASE_RESERVATION: { label: 'Reserva Liberada', color: 'bg-slate-100 text-slate-700 border-slate-200' },
+  REFUND: { label: 'Estorno de Sessão', color: 'bg-amber-50 text-amber-800 border-amber-200' },
+  CANCEL: { label: 'Cancelamento', color: 'bg-rose-50 text-rose-700 border-rose-200' },
+};
+
+export function getPackageStatusMeta(contract: Pick<CustomerPetPackage, 'status' | 'paymentStatus' | 'expiresAt'>) {
+  const expired =
+    contract.status === 'expired' ||
+    (contract.status === 'active' && Boolean(contract.expiresAt) && new Date(contract.expiresAt) < new Date());
+  if (expired) {
+    return { label: 'Vencido', cls: 'bg-rose-50 text-rose-700 border border-rose-200/70' };
+  }
+  if (contract.status === 'cancelled') {
+    return { label: 'Cancelado', cls: 'bg-zinc-100 text-zinc-600 border border-zinc-200' };
+  }
+  if (contract.status === 'completed') {
+    return { label: 'Concluído', cls: 'bg-sky-50 text-sky-700 border border-sky-200/70' };
+  }
+  if (contract.paymentStatus === 'pending') {
+    return { label: 'Pendente', cls: 'bg-amber-50 text-amber-800 border border-amber-200/70' };
+  }
+  return { label: 'Ativo', cls: 'bg-emerald-50 text-emerald-700 border border-emerald-200/70' };
+}
+
+export function extractStageOperatorsSummary(
+  stageHistory?: unknown,
+  customStages?: (string | PetshopStageItem)[] | null,
+): Array<{ status: string; label: string; userName: string; at: string }> {
+  if (!Array.isArray(stageHistory)) return [];
+  const byStage = new Map<string, { status: string; label: string; userName: string; at: string }>();
+  const ignoredKeys = new Set(['scheduled', 'requested', 'cancelled', 'no_show']);
+  for (const entry of stageHistory as StageHistoryEntry[]) {
+    if (!entry || entry.skipped || entry.kind === 'service_added' || entry.kind === 'prepayment' || entry.kind === 'additional_charge') {
+      continue;
+    }
+    const responsibleName = entry.operatorName || entry.userName;
+    if (!responsibleName || ignoredKeys.has(entry.status)) continue;
+    const label = entry.kind === 'stage_assigned' ? getStageLabel(entry.status, customStages) : entry.label || getStageLabel(entry.status, customStages);
+    byStage.set(entry.status, {
+      status: entry.status,
+      label,
+      userName: responsibleName,
+      at: entry.at,
+    });
+  }
+  const all = Array.from(byStage.values());
+  const operational = all.filter(item => !['checked_in', 'ready', 'delivered'].includes(item.status));
+  return operational.length > 0 ? operational : all;
+}
+
+export function getHistoryEntryBadge(entry: StageHistoryEntry): { label: string; cls: string } {
+  if (entry.kind === 'stage_assigned') {
+    return { label: 'Responsável', cls: 'bg-teal-50 border-teal-200 text-teal-800' };
+  }
+  if (entry.kind === 'service_added') {
+    return { label: 'Adicionado', cls: 'bg-sky-50 border-sky-200 text-sky-800' };
+  }
+  if (entry.kind === 'prepayment' || entry.kind === 'additional_charge') {
+    return { label: 'Pagamento', cls: 'bg-emerald-50 border-emerald-200 text-emerald-800' };
+  }
+  if (entry.kind === 'additional_charge_reversed') {
+    return { label: 'Estorno', cls: 'bg-rose-50 border-rose-200 text-rose-800' };
+  }
+  if (entry.rescheduledFrom) {
+    return { label: 'Reagendado', cls: 'bg-amber-50 border-amber-200 text-amber-900' };
+  }
+  if (entry.skipped) {
+    return { label: 'Etapa Pulada', cls: 'bg-amber-100 border-amber-300 text-amber-900 font-bold' };
+  }
+  if (entry.status === 'scheduled' || entry.status === 'requested') {
+    return { label: 'Agendado', cls: 'bg-zinc-100 border-zinc-200 text-zinc-700' };
+  }
+  if (entry.status === 'cancelled' || entry.status === 'no_show') {
+    return { label: 'Cancelado', cls: 'bg-rose-50 border-rose-200 text-rose-800' };
+  }
+  return { label: 'Concluída', cls: 'bg-teal-50 border-teal-200 text-teal-800' };
+}

@@ -32,7 +32,9 @@ export function normalizeTransport(input: any): PetTransport | null {
   const address = text(input.address) || [street, neighborhood].filter(Boolean).join(' - ');
   if (!address) throw new BadRequestException('Informe o endereço do Táxi Dog.');
   const fee = Number(input.fee || 0);
-  if (!Number.isFinite(fee) || fee < 0) throw new BadRequestException('Taxa do Táxi Dog inválida.');
+  if (!Number.isFinite(fee) || fee < 0 || fee > 99_999_999.99 || Math.abs(Math.round(fee * 100) - fee * 100) > 0.00001) {
+    throw new BadRequestException('Taxa do Táxi Dog inválida. Informe até duas casas decimais.');
+  }
   return {
     enabled: true, mode, fee, coveredByPackage: Boolean(input.coveredByPackage),
     street: street || null, neighborhood: neighborhood || null, address,

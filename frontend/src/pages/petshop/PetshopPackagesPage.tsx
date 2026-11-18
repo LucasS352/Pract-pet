@@ -50,9 +50,18 @@ import type {
   PetPackagePlan,
   PetPackagePricingRule,
   PetService,
+  StageHistoryEntry,
   Tutor,
 } from './types';
-import { dateTime, money } from './types';
+import {
+  dateTime,
+  extractStageOperatorsSummary,
+  getHistoryEntryBadge,
+  getPackageStatusMeta,
+  getStageLabel,
+  money,
+  PACKAGE_EVENT_TYPE_LABELS,
+} from './types';
 import {
   EmptyState,
   inputClass,
@@ -96,14 +105,7 @@ const TAXI_MODE_LABELS: Record<string, string> = {
   dropoff_only: 'Somente Levar (Volta)',
 };
 
-const EVENT_TYPE_LABELS: Record<string, { label: string; color: string }> = {
-  CONTRACT_CREATED: { label: 'Contratação Inicial', color: 'bg-teal-50 text-teal-700 border-teal-200' },
-  RESERVE: { label: 'Reserva em Agenda', color: 'bg-sky-50 text-sky-700 border-sky-200' },
-  CONSUME: { label: 'Sessão Realizada', color: 'bg-emerald-50 text-emerald-700 border-emerald-200' },
-  RELEASE_RESERVATION: { label: 'Reserva Liberada', color: 'bg-slate-100 text-slate-700 border-slate-200' },
-  REFUND: { label: 'Estorno de Sessão', color: 'bg-amber-50 text-amber-800 border-amber-200' },
-  CANCEL: { label: 'Cancelamento', color: 'bg-rose-50 text-rose-700 border-rose-200' },
-};
+const EVENT_TYPE_LABELS = PACKAGE_EVENT_TYPE_LABELS;
 
 const localDateTimeInput = (value: string) => {
   const date = new Date(value);
@@ -321,6 +323,26 @@ export default function PetshopPackagesPage() {
   useEffect(() => {
     loadAll();
   }, [loadAll]);
+
+  // Se vier ?contractId=... pela URL, abre o histórico/detalhes daquele contrato diretamente
+  useEffect(() => {
+    const preContractId = searchParams.get('contractId');
+    if (!preContractId || loading) return;
+    const found = contracts.find(c => c.id === preContractId);
+    if (found) {
+      openContractDetailsModal(found);
+      setSearchParams({}, { replace: true });
+      return;
+    }
+    api
+      .get<CustomerPetPackage>(`/petshop/packages/contracts/${preContractId}`)
+      .then(({ data }) => {
+        setSelectedGroupContracts([data]);
+        setSelectedContract(data);
+        setSearchParams({}, { replace: true });
+      })
+      .catch(() => {});
+  }, [searchParams, loading, contracts, setSearchParams]);
 
   // Se vier ?petId=... ou ?newContract=1 pela URL, abre o modal de contratação pré-selecionado
   useEffect(() => {
@@ -600,11 +622,14 @@ export default function PetshopPackagesPage() {
 
   const contractCounts = useMemo(() => {
     let active = 0;
+    let completed = 0;
     let pending = 0;
     let expired = 0;
     contracts.forEach(c => {
       if (isContractExpired(c)) {
         expired += 1;
+      } else if (c.status === 'completed') {
+        completed += 1;
       } else if (c.status === 'active') {
         active += 1;
         if (c.paymentStatus === 'pending') pending += 1;
@@ -612,7 +637,7 @@ export default function PetshopPackagesPage() {
         pending += 1;
       }
     });
-    return { all: contracts.length, active, pending, expired };
+    return { all: contracts.length, active, completed, pending, expired };
   }, [contracts, isContractExpired]);
 
   const contractServiceOptions = useMemo(() => {
@@ -986,7 +1011,7 @@ export default function PetshopPackagesPage() {
                       startsAt: new Date(`${d}T${t}:00`).toISOString(),
                       serviceIds: s.serviceId ? [s.serviceId] : undefined,
                       completed: isPast,
-                      stageOperators: isPast ? (ov?.stageOperators || s.stageOperators) : undefined,
+                      stageOperators: isPast ? (ov?.stageOperators || s.stageOperators || defaultPastOperators) : undefined,
                     };
                   })
                   .filter(Boolean)
@@ -1013,7 +1038,7 @@ export default function PetshopPackagesPage() {
                   startsAt: new Date(`${s.date}T${s.time}:00`).toISOString(),
                   serviceIds: s.serviceId ? [s.serviceId] : undefined,
                   completed: isPast,
-                  stageOperators: isPast ? s.stageOperators : undefined,
+                  stageOperators: isPast ? (s.stageOperators || defaultPastOperators) : undefined,
                 };
               })
           : [];
@@ -1560,6 +1585,7 @@ export default function PetshopPackagesPage() {
               {[
                 { key: 'all', label: `Todos (${contractCounts.all})` },
                 { key: 'active', label: `Ativos (${contractCounts.active})` },
+                { key: 'completed', label: `Concluídos (${contractCounts.completed})` },
                 { key: 'pending_payment', label: `Pendentes (${contractCounts.pending})` },
                 { key: 'expired', label: `Vencidos (${contractCounts.expired})` },
               ].map(pill => (
@@ -1856,17 +1882,17 @@ export default function PetshopPackagesPage() {
                                       <span>Agendar Sessão</span>
                                     </button>
                                   )}
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      setOpenMenuId(null);
-                                      openContractDetailsModal(contract, members);
-                                    }}
-                                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
-                                  >
-                                    <History size={14} />
-                                    <span>Extrato, Detalhes & Estorno</span>
-                                  </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setOpenMenuId(null);
+                                        openContractDetailsModal(contract, members);
+                                      }}
+                                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-zinc-700 hover:bg-zinc-50 cursor-pointer"
+                                    >
+                                      <History size={14} />
+                                      <span>Histórico, Extrato & Estorno</span>
+                                    </button>
                                   {isPendingPayment && (
                                     <button
                                       type="button"
@@ -2082,7 +2108,7 @@ export default function PetshopPackagesPage() {
                             className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-zinc-700 transition hover:bg-zinc-50 cursor-pointer"
                           >
                             <History size={13} />
-                            Extrato & Estorno
+                            Histórico & Extrato
                           </button>
                         </div>
                       </div>
@@ -3928,21 +3954,30 @@ export default function PetshopPackagesPage() {
                     </div>
                   )}
 
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-3.5 text-xs">
-                    <div>
-                      <p className="font-bold text-sm text-[var(--pc-text)]">
-                        {selectedContract.customer?.name} ·{' '}
-                        {selectedContract.pet?.name ||
-                          (selectedContract.packageGroup?.petNames?.length
-                            ? `Compartilhado (${selectedContract.packageGroup.petNames.join(', ')})`
-                            : 'Compartilhado entre pets')}
-                      </p>
-                      <p className="text-[var(--pc-text-secondary)]">
-                        Contratado em {new Date(selectedContract.startDate).toLocaleDateString('pt-BR')} ·
-                        Vencimento: {new Date(selectedContract.expiresAt).toLocaleDateString('pt-BR')}
-                      </p>
-                    </div>
-                    <div className="text-right">
+                  {(() => {
+                    const modalStatusMeta = getPackageStatusMeta(selectedContract);
+                    return (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-3.5 text-xs">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-bold text-sm text-[var(--pc-text)]">
+                              {selectedContract.customer?.name} ·{' '}
+                              {selectedContract.pet?.name ||
+                                (selectedContract.packageGroup?.petNames?.length
+                                  ? `Compartilhado (${selectedContract.packageGroup.petNames.join(', ')})`
+                                  : 'Compartilhado entre pets')}
+                            </p>
+                            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${modalStatusMeta.cls}`}>
+                              {modalStatusMeta.label}
+                            </span>
+                          </div>
+                          <p className="text-[var(--pc-text-secondary)] mt-0.5">
+                            Contratado em {new Date(selectedContract.startDate).toLocaleDateString('pt-BR')} ·
+                            Vencimento: {new Date(selectedContract.expiresAt).toLocaleDateString('pt-BR')}
+                            {selectedContract.createdByOperatorName ? ` · Por ${selectedContract.createdByOperatorName}` : ''}
+                          </p>
+                        </div>
+                        <div className="text-right">
                       <p className="text-sm font-bold text-[var(--pc-action)]">
                         {money(selectedContract.finalPrice)}
                       </p>
@@ -3972,8 +4007,10 @@ export default function PetshopPackagesPage() {
                             : 'Confirmar Recebimento'}
                         </button>
                       )}
-                    </div>
-                  </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
 
                   {activeTransportInfo && (
                     <div className="rounded-xl border border-amber-200/90 bg-amber-50/45 p-3.5 text-xs">
@@ -4144,46 +4181,144 @@ export default function PetshopPackagesPage() {
                       ['scheduled', 'requested'].includes(appointment.status) &&
                       appointment.services.some(service => service.coverageStatus === 'reserved');
                     const isEditing = editingAppointmentId === appointment.id;
-                    const latestReschedule = Array.isArray(appointment.stageHistory)
-                      ? [...appointment.stageHistory].reverse().find(entry =>
-                          entry && typeof entry.at === 'string' && typeof entry.rescheduledFrom === 'string')
-                      : null;
+                    const historyList = Array.isArray(appointment.stageHistory)
+                      ? (appointment.stageHistory as StageHistoryEntry[])
+                      : [];
+                    const latestReschedule = [...historyList].reverse().find(entry =>
+                      entry && typeof entry.at === 'string' && typeof entry.rescheduledFrom === 'string');
+                    const stageExecutors = extractStageOperatorsSummary(historyList, appointment.customStages);
+                    const isRealized =
+                      appointment.status === 'delivered' ||
+                      appointment.services.every(service => service.coverageStatus === 'consumed');
+                    const agendaDateYmd = (() => {
+                      const d = new Date(appointment.startsAt);
+                      if (Number.isNaN(d.getTime())) return '';
+                      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+                    })();
+
                     return (
-                      <div key={appointment.id} className="rounded-xl border border-[var(--pc-border)] bg-white p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div key={appointment.id} className="rounded-xl border border-[var(--pc-border)] bg-white p-3 space-y-2.5">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="text-xs font-semibold text-[var(--pc-text-secondary)]">
-                              Sessão {index + 1} · {appointment.services.map(service => service.nameSnapshot).join(', ')}
-                              {selectedContract.isShared ? ` · ${appointment.pet.name}` : ''}
-                            </p>
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <p className="text-xs font-semibold text-[var(--pc-text-secondary)]">
+                                Sessão {index + 1} · {appointment.services.map(service => service.nameSnapshot).join(', ')}
+                                {selectedContract.isShared ? ` · ${appointment.pet.name}` : ''}
+                              </p>
+                              {isRealized ? (
+                                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+                                  Concluída
+                                </span>
+                              ) : canReschedule ? (
+                                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
+                                  Agendada
+                                </span>
+                              ) : (
+                                <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-800">
+                                  Em andamento
+                                </span>
+                              )}
+                            </div>
                             <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-[var(--pc-text)]">
                               <Calendar size={15} aria-hidden="true" /> {dateTime(appointment.startsAt)}
                             </p>
-                            {latestReschedule && (
-                              <p className="mt-1 text-[11px] text-[var(--pc-text-secondary)]">
-                                Reagendado em {dateTime(latestReschedule.at)} · data anterior: {dateTime(latestReschedule.rescheduledFrom)}
+                            {appointment.professional?.name && (
+                              <p className="mt-0.5 text-[11px] text-[var(--pc-text-secondary)]">
+                                Profissional responsável: <strong className="text-[var(--pc-text)]">{appointment.professional.name}</strong>
                               </p>
                             )}
-                            {appointment.status === 'delivered' || appointment.services.every(service => service.coverageStatus === 'consumed') ? (
-                              <p className="mt-1 text-xs text-emerald-700">Realizada</p>
-                            ) : !canReschedule ? (
-                              <p className="mt-1 text-xs text-[var(--pc-text-secondary)]">Atendimento em andamento</p>
-                            ) : null}
+                            {stageExecutors.length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap gap-1">
+                                {stageExecutors.map(ex => (
+                                  <span
+                                    key={ex.status}
+                                    className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50/50 px-1.5 py-0.5 text-[10px] text-teal-900"
+                                  >
+                                    <span className="text-zinc-500">{ex.label}:</span>
+                                    <strong>{ex.userName}</strong>
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                            {latestReschedule && (
+                              <p className="mt-1 text-[11px] text-[var(--pc-text-secondary)]">
+                                Reagendado em {dateTime(latestReschedule.at)}
+                                {latestReschedule.rescheduledFrom
+                                  ? ` · data anterior: ${dateTime(latestReschedule.rescheduledFrom)}`
+                                  : ''}
+                              </p>
+                            )}
                           </div>
-                          {canReschedule && !isEditing && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setEditingAppointmentId(appointment.id);
-                                setRescheduleStartsAt(localDateTimeInput(appointment.startsAt));
-                              }}
-                              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs font-semibold text-teal-800 hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
-                              aria-label={`Alterar data da sessão ${index + 1}`}
-                            >
-                              <Pencil size={13} aria-hidden="true" /> Alterar data
-                            </button>
-                          )}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {agendaDateYmd && (
+                              <button
+                                type="button"
+                                onClick={() => navigate(`/petshop/agenda?date=${agendaDateYmd}`)}
+                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-100 cursor-pointer"
+                              >
+                                <span>Ver na Agenda</span>
+                                <ArrowRight size={12} />
+                              </button>
+                            )}
+                            {canReschedule && !isEditing && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingAppointmentId(appointment.id);
+                                  setRescheduleStartsAt(localDateTimeInput(appointment.startsAt));
+                                }}
+                                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                                aria-label={`Alterar data da sessão ${index + 1}`}
+                              >
+                                <Pencil size={13} aria-hidden="true" /> Alterar data
+                              </button>
+                            )}
+                          </div>
                         </div>
+
+                        {historyList.length > 0 && (
+                          <div className="rounded-lg border border-zinc-200/80 bg-zinc-50/70 p-2.5 space-y-1.5">
+                            <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-zinc-600">
+                              <History size={12} className="text-teal-700" />
+                              Histórico de alterações e execução ({historyList.length})
+                            </p>
+                            <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
+                              {historyList.map((h, hIdx) => {
+                                const stageLabel = h.label || getStageLabel(h.status, appointment.customStages) || h.status;
+                                const badge = getHistoryEntryBadge(h);
+                                return (
+                                  <div
+                                    key={hIdx}
+                                    className={`flex items-start justify-between gap-2 rounded border px-2 py-1 text-[11px] ${
+                                      h.skipped
+                                        ? 'border-amber-200 bg-amber-50/70 text-amber-950'
+                                        : 'border-zinc-200 bg-white text-zinc-800'
+                                    }`}
+                                  >
+                                    <div className="min-w-0">
+                                      <div className="flex flex-wrap items-center gap-1.5">
+                                        <strong className="font-semibold">{stageLabel}</strong>
+                                        <span className={`rounded border px-1.5 py-0.2 text-[9px] font-semibold ${badge.cls}`}>
+                                          {badge.label}
+                                        </span>
+                                        {h.userName && (
+                                          <span className="text-zinc-500">
+                                            por <strong className="text-zinc-700">{h.userName}</strong>
+                                          </span>
+                                        )}
+                                      </div>
+                                      {h.notes && <p className="text-[10px] text-zinc-500 italic mt-0.5">"{h.notes}"</p>}
+                                      {h.reason && <p className="text-[10px] text-amber-800 mt-0.5">{h.reason}</p>}
+                                    </div>
+                                    <span className="text-[10px] text-zinc-400 tabular-nums shrink-0">
+                                      {dateTime(h.at)}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
                         {isEditing && (
                           <form onSubmit={handleSavePackageReschedule} className="mt-3 border-t border-[var(--pc-border)] pt-3">
                             <label htmlFor="package-reschedule-date" className="mb-1 block text-xs font-semibold text-[var(--pc-text)]">
@@ -4236,11 +4371,23 @@ export default function PetshopPackagesPage() {
                       className="flex items-start justify-between gap-3 rounded-lg border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-2.5 text-xs"
                     >
                       <div>
-                        <span
-                          className={`inline-block rounded border px-2 py-0.5 text-[10px] font-semibold ${meta.color}`}
-                        >
-                          {meta.label}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`inline-block rounded border px-2 py-0.5 text-[10px] font-semibold ${meta.color}`}
+                          >
+                            {meta.label}
+                          </span>
+                          {ev.customerPackageItem?.serviceNameSnapshot && (
+                            <span className="rounded bg-white border border-zinc-200 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700">
+                              {ev.customerPackageItem.serviceNameSnapshot}
+                            </span>
+                          )}
+                          {ev.pet?.name && (
+                            <span className="rounded bg-teal-50 border border-teal-200 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
+                              {ev.pet.name}
+                            </span>
+                          )}
+                        </div>
                         <p className="mt-1 font-medium text-[var(--pc-text)]">
                           {ev.reason || 'Movimentação registrada'}
                         </p>
@@ -4248,9 +4395,10 @@ export default function PetshopPackagesPage() {
                           {ev.operatorName ? `Operador: ${ev.operatorName} · ` : ''}
                           Registrado em {dateTime(ev.createdAt)}
                         </p>
-                        {ev.eventType === 'RESERVE' && ev.appointment && (
+                        {ev.appointment && ['RESERVE', 'CONSUME', 'RELEASE_RESERVATION', 'REFUND'].includes(ev.eventType) && (
                           <p className="mt-1 text-[11px] text-sky-800">
-                            Data atual da sessão: {dateTime(ev.appointment.startsAt)}
+                            Sessão na agenda: {dateTime(ev.appointment.startsAt)}
+                            {ev.appointment.professional?.name ? ` · Prof.: ${ev.appointment.professional.name}` : ''}
                           </p>
                         )}
                       </div>

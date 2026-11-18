@@ -9,10 +9,18 @@ import { randomUUID } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
+import { HeartPrismaService } from '../prisma/heart-prisma.service';
 import { hasTaxiDropoff, hasTaxiPickup, type TaxiMode } from './petshop-transport';
 import { allocatePackagePayments, contractMetadata, moneyCents, normalizePackagePayments, receiptNotes } from './package-receipts';
 import { readTaxiDefaultFee } from './taxi-default-fee';
 import { PetshopCommissionsService } from './petshop-commissions.service';
+import { PetshopPricingService } from './petshop-pricing.service';
+import {
+  buildPastSessionStageHistory,
+  enrichAppointmentHistory,
+  resolveChosenServicesStages,
+  resolvePrimaryStageOperatorId,
+} from './appointment-history.helper';
 
 const VALID_SPECIES = new Set(['all', 'dog', 'cat']);
 const VALID_SIZES = new Set(['all', 'small', 'medium', 'large', 'giant']);
@@ -58,11 +66,48 @@ export class PetshopPackagesService {
     private readonly tenantManager: TenantConnectionManager,
     private readonly tenantContext: TenantContextService,
     @Optional() private readonly commissions?: PetshopCommissionsService,
+    @Optional() private readonly pricing?: PetshopPricingService,
+    @Optional() private readonly heart?: HeartPrismaService,
   ) {}
 
   private async prisma() {
     const { tenantId, databaseUrl } = this.tenantContext.get();
     return this.tenantManager.getTenantClient(tenantId, databaseUrl);
+  }
+
+  private async resolveActor(prisma: any, actor?: PackageActor): Promise<PackageActor | undefined> {
+    if (!actor) return undefined;
+    const rawName = actor.name ? String(actor.name).trim() : '';
+    const looksLikeEmail = rawName.includes('@');
+    if (rawName && !looksLikeEmail) return actor;
+
+    if (actor.operatorId && prisma?.operator?.findUnique) {
+      try {
+        const op = await prisma.operator.findUnique({ where: { id: actor.operatorId }, select: { name: true } });
+        if (op?.name) return { ...actor, name: op.name };
+      } catch {}
+    }
+    if (actor.userId && this.heart?.user?.findUnique) {
+      try {
+        const user = await this.heart.user.findUnique({ where: { id: actor.userId }, select: { name: true } });
+        if (user?.name) return { ...actor, name: user.name };
+      } catch {}
+    }
+    return actor;
+  }
+
+  private formatSessionDateLabel(dateValue?: Date | string | null): string {
+    if (!dateValue) return '';
+    const d = new Date(dateValue);
+    if (Number.isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(d);
   }
 
   // ===========================================================================
@@ -589,6 +634,8 @@ export class PetshopPackagesService {
           take: 25,
           include: {
             pet: { select: { id: true, name: true } },
+            customerPackageItem: { select: { id: true, serviceNameSnapshot: true } },
+            appointment: { select: { id: true, startsAt: true, status: true } },
           },
         },
       },
@@ -611,13 +658,22 @@ export class PetshopPackagesService {
           orderBy: { createdAt: 'desc' },
           include: {
             pet: { select: { id: true, name: true } },
-            appointment: { select: { id: true, startsAt: true, status: true } },
+            customerPackageItem: { select: { id: true, serviceNameSnapshot: true } },
+            appointment: {
+              select: {
+                id: true,
+                startsAt: true,
+                endsAt: true,
+                status: true,
+                professional: { select: { id: true, name: true } },
+              },
+            },
           },
         },
       },
     });
     if (!contract) throw new NotFoundException('Contrato de pacote não encontrado.');
-    const scheduledAppointments = await prisma.petAppointment.findMany({
+    const rawScheduledAppointments = await prisma.petAppointment.findMany({
       where: {
         services: {
           some: {
@@ -631,19 +687,41 @@ export class PetshopPackagesService {
         startsAt: true,
         endsAt: true,
         status: true,
+        checkedInAt: true,
+        readyAt: true,
+        completedAt: true,
+        stageNotes: true,
+        stagePhotoUrl: true,
+        customStages: true,
+        notes: true,
         updatedAt: true,
         stageHistory: true,
+        professional: { select: { id: true, name: true } },
         pet: { select: { id: true, name: true } },
         services: {
           where: {
             customerPackageId: id,
             coverageStatus: { in: ['reserved', 'consumed'] },
           },
-          select: { id: true, nameSnapshot: true, coverageStatus: true, customerPackageItemId: true },
+          select: {
+            id: true,
+            nameSnapshot: true,
+            coverageStatus: true,
+            customerPackageItemId: true,
+            service: { select: { id: true, name: true, category: true, customStages: true } },
+          },
+        },
+        commissions: {
+          where: { state: { not: 'REVERSED' } },
+          select: { stageKey: true, executedAt: true, operator: { select: { id: true, name: true } } },
+          orderBy: { executedAt: 'asc' },
         },
       },
       orderBy: { startsAt: 'asc' },
     });
+    const scheduledAppointments = (Array.isArray(rawScheduledAppointments) ? rawScheduledAppointments : []).map(
+      (apt: any) => enrichAppointmentHistory(apt, this.pricing),
+    );
     return { ...this.enrichContractTransport(contract), scheduledAppointments };
   }
 
@@ -732,7 +810,7 @@ export class PetshopPackagesService {
     },
   ) {
     if (!params.scheduledSessions.length) return;
-    const professionals = [...new Set(params.scheduledSessions.map(s => s.professionalId).filter(id => id && id !== 'none'))].sort();
+    const professionals = [...new Set(params.scheduledSessions.map(s => s.professionalId).filter((id): id is string => Boolean(id) && id !== 'none'))].sort();
     for (const id of professionals) {
       const rows: any[] = await tx.$queryRaw(Prisma.sql`SELECT id FROM operators WHERE id = ${id} AND active = 1 FOR UPDATE`);
       if (!rows.length) throw new BadRequestException('Profissional inválido para a sessão.');
@@ -740,6 +818,25 @@ export class PetshopPackagesService {
     const remainingCountByService = new Map<string, number>();
     for (const pi of params.plan.items) {
       remainingCountByService.set(pi.serviceId, Number(pi.quantity));
+    }
+
+    const stageOperatorIds = new Set<string>(professionals);
+    for (const sess of params.scheduledSessions) {
+      if (sess?.stageOperators && typeof sess.stageOperators === 'object') {
+        for (const opId of Object.values(sess.stageOperators)) {
+          if (opId && opId !== 'none') stageOperatorIds.add(String(opId));
+        }
+      }
+    }
+    const operatorMap = new Map<string, { id: string; name: string }>();
+    if (stageOperatorIds.size > 0 && tx.operator?.findMany) {
+      const opRows: Array<{ id: string; name: string }> = await tx.operator.findMany({
+        where: { id: { in: [...stageOperatorIds] } },
+        select: { id: true, name: true },
+      });
+      for (const op of opRows) {
+        operatorMap.set(op.id, op);
+      }
     }
 
     for (let idx = 0; idx < params.scheduledSessions.length; idx++) {
@@ -807,11 +904,43 @@ export class PetshopPackagesService {
         } });
         if (conflict) throw new ConflictException(`O profissional já possui atendimento no horário da sessão ${idx + 1}.`);
       }
+
+      const resolvedStages = resolveChosenServicesStages(chosenServices, this.pricing);
+      const effectiveProfessionalId = isSessionCompleted
+        ? resolvePrimaryStageOperatorId(sess.professionalId, sess.stageOperators)
+        : sess.professionalId && sess.professionalId !== 'none'
+          ? String(sess.professionalId)
+          : null;
+
+      const stageHistory = isSessionCompleted
+        ? buildPastSessionStageHistory({
+            resolvedStages,
+            startsAt: sessStart,
+            endsAt: sessEnd,
+            stageOperators: sess.stageOperators,
+            operatorMap,
+            fallbackOperatorId: sess.professionalId && sess.professionalId !== 'none' ? String(sess.professionalId) : null,
+            actor: params.actor,
+            notes: `Sessão ${idx + 1} concluída na contratação do pacote ${params.plan.name}`,
+          })
+        : [
+            {
+              status: 'scheduled',
+              label: 'Agendado',
+              at: new Date().toISOString(),
+              photoUrl: null,
+              notes: `Sessão ${idx + 1} agendada automaticamente no pacote ${params.plan.name}`,
+              userId: params.actor?.operatorId || params.actor?.userId || null,
+              userName: params.actor?.name || null,
+              skipped: false,
+            },
+          ];
+
       const createdAppt = await tx.petAppointment.create({
         data: {
           petId: sessPetId,
           customerId: params.customerId,
-          professionalId: sess.professionalId && sess.professionalId !== 'none' ? String(sess.professionalId) : null,
+          professionalId: effectiveProfessionalId,
           startsAt: sessStart,
           endsAt: sessEnd,
           status: isSessionCompleted ? 'delivered' : 'scheduled',
@@ -820,6 +949,8 @@ export class PetshopPackagesService {
           completedAt: isSessionCompleted ? sessEnd : null,
           notes: `Sessão ${idx + 1} do pacote ${params.plan.name}`,
           checkInNotes: appointmentCheckInNotes,
+          customStages: resolvedStages,
+          stageHistory,
           services: {
             create: chosenServices.map((svc: any) => ({
               serviceId: svc.id,
@@ -880,8 +1011,9 @@ export class PetshopPackagesService {
     }
   }
 
-  async createContract(data: any, actor?: PackageActor) {
+  async createContract(data: any, rawActor?: PackageActor) {
     const prisma = await this.prisma();
+    const actor = await this.resolveActor(prisma, rawActor);
     const customerId = String(data?.customerId ?? '').trim();
     const packagePlanId = String(data?.packagePlanId ?? '').trim();
     if (!customerId) throw new BadRequestException('Selecione o tutor.');
@@ -1626,6 +1758,7 @@ export class PetshopPackagesService {
         },
       });
 
+      const reserveDateLabel = this.formatSessionDateLabel(params.startsAt);
       await tx.customerPetPackageLedger.create({
         data: {
           idempotencyKey,
@@ -1640,7 +1773,9 @@ export class PetshopPackagesService {
           reservedAfter: nextReserved,
           operatorId: params.actor?.operatorId || params.actor?.userId || null,
           operatorName: params.actor?.name || null,
-          reason: `Sessão reservada no agendamento`,
+          reason: reserveDateLabel
+            ? `Sessão reservada: ${pkgItem.serviceNameSnapshot} (${reserveDateLabel})`
+            : `Sessão reservada: ${pkgItem.serviceNameSnapshot}`,
         },
       });
 
@@ -1737,6 +1872,7 @@ export class PetshopPackagesService {
         },
       });
 
+      const consumeDateLabel = this.formatSessionDateLabel(appointment.startsAt);
       await tx.customerPetPackageLedger.create({
         data: {
           idempotencyKey,
@@ -1751,7 +1887,9 @@ export class PetshopPackagesService {
           reservedAfter: nextReserved,
           operatorId: actor?.operatorId || actor?.userId || null,
           operatorName: actor?.name || null,
-          reason: `Sessão efetivada na conclusão do atendimento`,
+          reason: consumeDateLabel
+            ? `Sessão efetivada na conclusão do atendimento: ${pkgItem.serviceNameSnapshot} (${consumeDateLabel})`
+            : `Sessão efetivada na conclusão do atendimento: ${pkgItem.serviceNameSnapshot}`,
         },
       });
 
@@ -1888,6 +2026,8 @@ export class PetshopPackagesService {
 
     if (!body.appointmentId) throw new BadRequestException('Selecione a sessão consumida que deseja estornar.');
     const prisma = await this.prisma();
+    const resolvedActor = await this.resolveActor(prisma, actor);
+    actor = resolvedActor;
     await prisma.$transaction(async tx => {
       const contractRows: any[] = await tx.$queryRaw(
         Prisma.sql`SELECT id, status, expiresAt FROM customer_pet_packages WHERE id = ${contractId} FOR UPDATE`,
@@ -1973,6 +2113,8 @@ export class PetshopPackagesService {
       throw new BadRequestException('Informe o motivo do cancelamento (mínimo 3 caracteres).');
     }
     const prisma = await this.prisma();
+    const resolvedActor = await this.resolveActor(prisma, actor);
+    actor = resolvedActor;
 
     return prisma.$transaction(async tx => {
       const contract = await tx.customerPetPackage.findUnique({

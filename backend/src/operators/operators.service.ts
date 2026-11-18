@@ -26,6 +26,7 @@ export class OperatorsService {
         jobTitle: true,
         active: true,
         isManager: true,
+        canManageAppointmentCommissions: true,
         createdAt: true,
         updatedAt: true,
         cashRegisters: {
@@ -55,7 +56,7 @@ export class OperatorsService {
     return operator;
   }
 
-  async create(tenantId: string, data: { name: string; pin: string; isManager?: boolean; jobTitle?: string }) {
+  async create(tenantId: string, data: { name: string; pin: string; isManager?: boolean; jobTitle?: string; canManageAppointmentCommissions?: boolean }) {
     if (!data.pin || data.pin.length < 4 || data.pin.length > 6) {
       throw new BadRequestException('O PIN deve ter entre 4 e 6 dígitos.');
     }
@@ -69,6 +70,7 @@ export class OperatorsService {
         jobTitle: data.jobTitle || null,
         active: true,
         isManager: data.isManager || false,
+        canManageAppointmentCommissions: data.canManageAppointmentCommissions === true,
       },
     });
     
@@ -77,13 +79,14 @@ export class OperatorsService {
     return result;
   }
 
-  async update(tenantId: string, id: string, data: { name?: string; pin?: string; active?: boolean; isManager?: boolean; jobTitle?: string }) {
+  async update(tenantId: string, id: string, data: { name?: string; pin?: string; active?: boolean; isManager?: boolean; jobTitle?: string; canManageAppointmentCommissions?: boolean }) {
     const prisma = await this.getPrisma(tenantId);
     
     const updateData: any = {};
     if (data.name) updateData.name = data.name;
     if (data.active !== undefined) updateData.active = data.active;
     if (data.isManager !== undefined) updateData.isManager = data.isManager;
+    if (data.canManageAppointmentCommissions !== undefined) updateData.canManageAppointmentCommissions = data.canManageAppointmentCommissions;
     if (data.jobTitle !== undefined) updateData.jobTitle = data.jobTitle || null;
     
     if (data.pin) {

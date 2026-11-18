@@ -10,7 +10,8 @@ export class OperatorsController {
   constructor(private readonly operatorsService: OperatorsService, private readonly access: StationAccessService) {}
 
   @Post()
-  create(@Request() req: any, @Body() body: { name: string; pin: string; isManager?: boolean; jobTitle?: string }) {
+  async create(@Request() req: any, @Body() body: { name: string; pin: string; isManager?: boolean; jobTitle?: string; canManageAppointmentCommissions?: boolean }) {
+    if (body.canManageAppointmentCommissions) this.access.assertPetshopCommissionGrantAdmin(req);
     return this.operatorsService.create(req.user.tenantId, body);
   }
 
@@ -55,8 +56,9 @@ export class OperatorsController {
   }
 
   @Patch(':id')
-  update(@Request() req: any, @Param('id') id: string, @Body() body: { name?: string; pin?: string; active?: boolean; isManager?: boolean; jobTitle?: string }) {
+  async update(@Request() req: any, @Param('id') id: string, @Body() body: { name?: string; pin?: string; active?: boolean; isManager?: boolean; jobTitle?: string; canManageAppointmentCommissions?: boolean }) {
     if (body.pin && !['admin', 'superadmin'].includes(req.user.role)) throw new ForbiddenException('Apenas administradores podem trocar o PIN.');
+    if (body.canManageAppointmentCommissions !== undefined) this.access.assertPetshopCommissionGrantAdmin(req);
     return this.operatorsService.update(req.user.tenantId, id, body);
   }
 

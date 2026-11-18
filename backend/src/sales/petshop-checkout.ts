@@ -1,9 +1,15 @@
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 
-export async function recordAddedServiceCommissions(tx: any, appointment: any, tenantId: string, at: Date) {
+const serviceIdFromNote = (note: unknown) => typeof note === 'string' && note.startsWith('Serviço Pet Shop:')
+  ? note.slice('Serviço Pet Shop:'.length) : null;
+export const chargedServiceIds = (comanda: any): string[] => (comanda?.items || [])
+  .map((item: any) => serviceIdFromNote(item.notes)).filter((id: string | null): id is string => Boolean(id));
+
+export async function recordAddedServiceCommissions(tx: any, appointment: any, tenantId: string, at: Date, serviceIds?: string[], activatePending = false) {
   const history = Array.isArray(appointment.stageHistory) ? appointment.stageHistory : [];
-  const entries = history.filter((entry: any) => entry?.kind === 'service_added' && entry.operatorId && entry.commissionRuleId);
+  const entries = history.filter((entry: any) => entry?.kind === 'service_added' && entry.operatorId && entry.commissionRuleId &&
+    (!serviceIds || serviceIds.includes(entry.appointmentServiceId)));
   if (!entries.length) return;
   const services = await tx.petAppointmentService.findMany({ where: { appointmentId: appointment.id, id: { in: entries.map((entry: any) => entry.appointmentServiceId) } } });
   const byId = new Map<string, any>(services.map((service: any) => [service.id, service]));
@@ -15,6 +21,17 @@ export async function recordAddedServiceCommissions(tx: any, appointment: any, t
     const base = new Prisma.Decimal(service.priceSnapshot);
     const amount = (rule.kind === 'FIXED' ? new Prisma.Decimal(rule.value) : base.mul(rule.value).div(100))
       .toDecimalPlaces(2, Prisma.Decimal.ROUND_HALF_UP);
+    const existing = tx.petCommission.findUnique ? await tx.petCommission.findUnique({
+      where: { appointmentServiceId_stageKey: { appointmentServiceId: service.id, stageKey: 'service_added' } },
+    }) : null;
+    if (existing) {
+      if (existing.state === 'AWAITING_PAYMENT' && activatePending) await tx.petCommission.update({ where: { id: existing.id }, data: { state: 'PENDING', executedAt: at } });
+      if (existing.state === 'REVERSED' && activatePending) await tx.petCommission.update({ where: { id: existing.id }, data: {
+        state: 'PENDING', executedAt: at, closingId: null, approvedAt: null, approvedById: null,
+        paidAt: null, paidById: null, reversedAt: null, reversedById: null, reversalReason: null,
+      } });
+      continue;
+    }
     await tx.petCommission.createMany({ data: [{
       tenantId, appointmentId: appointment.id, appointmentServiceId: service.id,
       operatorId: entry.operatorId, stageKey: 'service_added', executedAt: at,
@@ -58,15 +75,22 @@ export async function claimPetshopCheckout(tx: any, data: any, comanda: any) {
   const activePayment = tx.comanda?.findFirst
     ? await tx.comanda.findFirst({ where: { notes: { contains: linkedId }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })
     : null;
+  if (isAddon && activePayment) {
+    const serviceIds = chargedServiceIds(comanda);
+    if (!serviceIds.length || new Set(serviceIds).size !== serviceIds.length) throw new ConflictException('Adicional sem serviços novos para cobrar.');
+    const available = await tx.petAppointmentService.count({ where: { id: { in: serviceIds }, appointmentId: linkedId,
+      chargedSaleId: null, coverageStatus: { notIn: ['reserved', 'consumed'] }, priceSnapshot: { gt: 0 } } });
+    if (available !== serviceIds.length) throw new ConflictException('Serviço adicional já cobrado. Reabra a Agenda.');
+  }
 
   if (appointment.status === 'delivered' || appointment.completedAt) {
-    // Permite apenas cobrança de adicional em atendimento concluído por pacote sem venda avulsa paga vinculada
-    if (!(isAddon && !activePayment && !data.petshopPrepayment)) {
+    if (!(isAddon && !data.petshopPrepayment)) {
       throw new ConflictException('Atendimento já cobrado e concluído. Cobrança em duplicidade bloqueada.');
     }
     return linkedId;
   }
   if (Array.isArray(appointment.stageHistory) && appointment.stageHistory.some((event: any) => event?.kind === 'prepayment')) {
+    if (activePayment && isAddon && !data.petshopPrepayment) return linkedId;
     if (activePayment) throw new ConflictException('Agendamento já pago antecipadamente. Cobrança em duplicidade bloqueada.');
   }
   if (data.petshopPrepayment) {
@@ -75,7 +99,7 @@ export async function claimPetshopCheckout(tx: any, data: any, comanda: any) {
   return linkedId;
 }
 
-export async function completePetshopCheckout(tx: any, appointmentId: string | null, actorId: string | null, tenantId: string, prepayment = false) {
+export async function completePetshopCheckout(tx: any, appointmentId: string | null, actorId: string | null, tenantId: string, prepayment = false, saleId?: string, comanda?: any) {
   if (!appointmentId) return;
   const appointment = await tx.petAppointment.findUnique({ where: { id: appointmentId } });
   const now = new Date();
@@ -87,16 +111,22 @@ export async function completePetshopCheckout(tx: any, appointmentId: string | n
     } });
     return;
   }
-  if (appointment?.status === 'delivered') {
-    await recordAddedServiceCommissions(tx, appointment, tenantId, appointment.completedAt || now);
+  const serviceIds = chargedServiceIds(comanda);
+  const isAddon = appointmentLinkFromComanda(comanda?.notes)?.isAddon === true;
+  if (saleId && tx.petAppointmentService?.updateMany) await tx.petAppointmentService.updateMany({
+    where: { appointmentId, chargedSaleId: null, ...(serviceIds.length ? { id: { in: serviceIds } } : {}) },
+    data: { chargedSaleId: saleId },
+  });
+  if (isAddon) {
+    await recordAddedServiceCommissions(tx, appointment, tenantId, now, isAddon && serviceIds.length ? serviceIds : undefined, true);
     await tx.petAppointment.update({ where: { id: appointmentId }, data: {
       stageHistory: [...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []), {
-        kind: 'additional_charge', status: 'delivered', label: 'Adicional cobrado no caixa', at: now.toISOString(), userId: actorId, skipped: false,
+        kind: 'additional_charge', status: appointment.status, label: 'Adicional cobrado no caixa', at: now.toISOString(), userId: actorId, serviceIds, saleId, skipped: false,
       }],
     } });
     return;
   }
-  await recordAddedServiceCommissions(tx, appointment, tenantId, now);
+  await recordAddedServiceCommissions(tx, appointment, tenantId, now, serviceIds.length ? serviceIds : undefined, true);
   await tx.petAppointment.update({ where: { id: appointmentId }, data: {
     status: 'delivered', completedAt: now,
     stageHistory: [...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []), {

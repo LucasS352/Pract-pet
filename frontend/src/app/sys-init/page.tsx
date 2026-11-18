@@ -483,6 +483,7 @@ export default function SysInitPage() {
   };
 
   const handlePinPaste = (e: React.ClipboardEvent) => {
+    e.preventDefault();
     const pasted = e.clipboardData.getData("text").slice(0, PIN_LENGTH);
     const next = Array(PIN_LENGTH).fill("");
     pasted.split("").forEach((c, i) => (next[i] = c));
@@ -497,7 +498,7 @@ export default function SysInitPage() {
     if (pin.length < 4) { setpinError("Digite o PIN completo."); triggerShake(); return; }
     setPinLoading(true); setpinError("");
     try {
-      await api.post("/tenants/setup/validate-pin", { pin });
+      await api.post("/tenants/setup/validate-pin", { pin }, { timeout: 10_000 });
       try { sessionStorage.setItem('7bar_sysinit_pin', pin); } catch {}
       setTimeout(() => setStep("list"), 300);
     } catch (err: any) {

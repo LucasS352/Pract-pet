@@ -207,6 +207,7 @@ model Operator {
   jobTitle  String? // Função/cargo do colaborador (ex: Motoqueiro, Garçom)
   active    Boolean  @default(true)
   isManager Boolean  @default(false) // Pode auditar fechamentos e ver totais
+  canManageAppointmentCommissions Boolean @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -394,6 +395,7 @@ model PetAppointmentService {
   customerPackageItem   CustomerPetPackageItem? @relation(fields: [customerPackageItemId], references: [id], onDelete: SetNull)
   coverageStatus        String                  @default("none") // none, reserved, consumed, released, refunded
   coveredAmount         Decimal                 @default(0) @db.Decimal(10, 2)
+  chargedSaleId         String?                 @db.VarChar(191)
 
   isCombo               Boolean                 @default(false)
   comboParentId         String?

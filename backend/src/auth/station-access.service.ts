@@ -86,6 +86,31 @@ export class StationAccessService {
     return op;
   }
 
+  async assertPetshopCommissionAdmin(req: any) {
+    if (req?.user?.type || !['admin', 'superadmin', 'operator'].includes(req?.user?.role)) {
+      throw new ForbiddenException('Atribuição de comissão restrita à administração.');
+    }
+    const token = req.headers?.['x-operator-token'];
+    if (!token) throw new ForbiddenException('Entre com o PIN do administrador do Pet Shop.');
+    let payload: any;
+    try { payload = this.jwt.verify(token); }
+    catch { throw new UnauthorizedException({ message: 'Identifique o colaborador novamente.', errorSource: 'operator_token' }); }
+    if (payload?.type !== 'op' || payload.context !== 'petshop' || payload.tenantId !== req.user.tenantId) {
+      throw new ForbiddenException('Sessão do Pet Shop inválida.');
+    }
+    const operator = await this.assertOperator(req.user.tenantId, payload.opId, 'petshop');
+    if (!payload.pinVersion || payload.pinVersion !== pinVersion(operator.pin || '', process.env.JWT_SECRET!)) {
+      throw new UnauthorizedException({ message: 'PIN alterado. Identifique-se novamente.', errorSource: 'operator_token' });
+    }
+    if (!operator.canManageAppointmentCommissions) throw new ForbiddenException('Colaborador sem permissão para atribuir comissões.');
+  }
+
+  assertPetshopCommissionGrantAdmin(req: any) {
+    if (req?.user?.type || !['admin', 'superadmin'].includes(req?.user?.role)) {
+      throw new ForbiddenException('Apenas o administrador do sistema pode definir o PIN administrativo do Pet Shop.');
+    }
+  }
+
   // A shared station that entered PIN mode cannot regain admin rights by dropping
   // the optional header. Persist the binding across replicas/restarts, without
   // storing the JWT itself or changing the existing tenant schema.

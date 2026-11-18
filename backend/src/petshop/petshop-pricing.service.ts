@@ -730,6 +730,17 @@ export class PetshopPricingService {
     if (currIdx !== -1 && nextIdx !== -1 && nextIdx > currIdx + 1) {
       return stages.slice(currIdx + 1, nextIdx);
     }
+    if (currIdx === -1 && nextIdx > 0 && ['requested', 'scheduled', 'confirmed'].includes(currentStatus)) {
+      return stages.slice(0, nextIdx);
+    }
+    if (nextStatus === 'delivered' && currentStatus !== 'ready') {
+      if (currIdx !== -1 && currIdx < keys.length - 1) {
+        return stages.slice(currIdx + 1);
+      }
+      if (currIdx === -1 && ['requested', 'scheduled', 'confirmed'].includes(currentStatus)) {
+        return stages;
+      }
+    }
     return [];
   }
 }

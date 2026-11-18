@@ -4,10 +4,12 @@ import { CancelAppointmentModal } from './CancelAppointmentModal';
 import { RescheduleAppointmentModal } from './RescheduleAppointmentModal';
 import { buildWhatsAppMessage } from './appointment-media';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
+import { useAuthStore } from '@/store/auth';
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle,
+  ArrowRight,
   ArrowUp,
   BarChart3,
   BellRing,
@@ -46,8 +48,19 @@ import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
 
 
-import type { Appointment, CustomerPetPackage, Pet, PetService, Tutor } from './types';
-import { coatLabels, money, resolveAppointmentStages, resolveAppointmentSteps, getStageLabel } from './types';
+import type { Appointment, CustomerPetPackage, Pet, PetService, PetshopStageItem, Tutor } from './types';
+import {
+  coatLabels,
+  dateTime,
+  extractStageOperatorsSummary,
+  getHistoryEntryBadge,
+  getPackageStatusMeta,
+  getStageLabel,
+  money,
+  PACKAGE_EVENT_TYPE_LABELS,
+  resolveAppointmentStages,
+  resolveAppointmentSteps,
+} from './types';
 import {
   EmptyState,
   inputClass,
@@ -104,6 +117,32 @@ const STAGE_LABELS: Record<string, string> = {
 
 function getAppointmentSteps(apt: Appointment) {
   return resolveAppointmentSteps(apt);
+}
+
+function payableServiceAmount(appointment: Appointment, service: Appointment['services'][number]): number {
+  if (service.comboParentId || ['reserved', 'consumed'].includes(service.coverageStatus || '') || service.chargedSaleId) return 0;
+  const amount = Math.max(0, Number(service.priceSnapshot || 0) - Number(service.coveredAmount || 0));
+  if (amount <= 0) return 0;
+  if (appointment.paidAmount == null) return amount;
+  const paidAt = appointment.paidAt ? new Date(appointment.paidAt).getTime() : 0;
+  return appointment.stageHistory?.some(entry => entry.kind === 'service_added' && entry.appointmentServiceId === service.id &&
+    new Date(entry.at).getTime() > paidAt) ? amount : 0;
+}
+
+function amountToCharge(appointment: Appointment): number {
+  const services = (appointment.services || []).reduce((sum, service) => sum + payableServiceAmount(appointment, service), 0);
+  const taxi = appointment.paidAmount == null && appointment.transport?.enabled && !appointment.transport.coveredByPackage
+    ? Math.max(0, Number(appointment.transport.fee || 0)) : 0;
+  return Math.round((services + taxi) * 100) / 100;
+}
+
+function keepPaymentStatus(updated: Appointment, previous: Appointment): Appointment {
+  return {
+    ...updated,
+    isPaid: updated.isPaid ?? previous.isPaid,
+    paidAmount: updated.paidAmount === undefined ? previous.paidAmount : updated.paidAmount,
+    paidAt: updated.paidAt === undefined ? previous.paidAt : updated.paidAt,
+  };
 }
 
 function hasTaxiDogReturn(apt: Appointment) {
@@ -217,6 +256,7 @@ const timeStr = (value: string) => {
 };
 
 export default function PetshopAgendaPage() {
+  const user = useAuthStore(state => state.user);
   const navigate = useNavigate();
   const { tenant, isRestrictedStaff, isOperatorAccount, operator, openOperatorModal } = usePetshopContext();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -269,6 +309,9 @@ export default function PetshopAgendaPage() {
   }, []);
   const [services, setServices] = useState<PetService[]>([]);
   const [operators, setOperators] = useState<any[]>([]);
+  const [trackedStageKeys, setTrackedStageKeys] = useState<Set<string>>(new Set(['bathing', 'grooming', 'finishing']));
+  const canManageCommissions = ['admin', 'superadmin', 'operator'].includes(user?.role || '') &&
+    Boolean(operator && operators.some(op => op.id === operator.id && op.active && op.canManageAppointmentCommissions));
   const [loading, setLoading] = useState(true);
   const appointmentsRequest = useRef(0);
 
@@ -299,7 +342,30 @@ export default function PetshopAgendaPage() {
   }, [openNew]);
 
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [stageAssignment, setStageAssignment] = useState<{ appointment: Appointment; key: string; label: string; advance: boolean } | null>(null);
+  const [stageAssigneeId, setStageAssigneeId] = useState('');
+  const [savingStageAssignment, setSavingStageAssignment] = useState(false);
+  const [editingTaxi, setEditingTaxi] = useState(false);
+  const [savingTaxi, setSavingTaxi] = useState(false);
+  const [taxiForm, setTaxiForm] = useState({ mode: 'round_trip', fee: '', street: '', neighborhood: '', reference: '', notes: '' });
+  useEffect(() => {
+    setEditingTaxi(false);
+    if (!selectedAppointment) return;
+    const transport = selectedAppointment.transport;
+    const address = selectedAppointment.customer?.address || '';
+    const parts = address.split(' - ');
+    setTaxiForm({
+      mode: transport?.mode || 'round_trip',
+      fee: String(transport?.fee ?? taxiDefaultFee),
+      street: transport?.street || parts[0] || '',
+      neighborhood: transport?.neighborhood || parts.slice(1).join(' - ') || '',
+      reference: transport?.reference || selectedAppointment.customer?.reference || '',
+      notes: transport?.notes || '',
+    });
+  }, [selectedAppointment?.id, taxiDefaultFee]);
   const [appointmentPayment, setAppointmentPayment] = useState<{ saleId: string; total: number; paidAt: string; nfceStatus?: string | null } | null>(null);
+  const [linkedPackageContracts, setLinkedPackageContracts] = useState<CustomerPetPackage[]>([]);
+  const [loadingLinkedPackages, setLoadingLinkedPackages] = useState(false);
   const [reversePaymentOpen, setReversePaymentOpen] = useState(false);
   const [reverseReason, setReverseReason] = useState('');
   const [reversingPayment, setReversingPayment] = useState(false);
@@ -312,6 +378,40 @@ export default function PetshopAgendaPage() {
       .catch(() => { if (!controller.signal.aborted) setAppointmentPayment(null); });
     return () => controller.abort();
   }, [selectedAppointment?.id, isRestrictedStaff]);
+
+  useEffect(() => {
+    const pkgIds = Array.from(
+      new Set(
+        (selectedAppointment?.services || [])
+          .map(s => s.customerPackageId)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    if (!selectedAppointment?.id || pkgIds.length === 0) {
+      setLinkedPackageContracts([]);
+      setLoadingLinkedPackages(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLoadingLinkedPackages(true);
+    Promise.all(
+      pkgIds.map(pkgId =>
+        api
+          .get<CustomerPetPackage>(`/petshop/packages/contracts/${pkgId}`, { signal: controller.signal })
+          .then(res => res.data)
+          .catch(() => null),
+      ),
+    )
+      .then(results => {
+        if (!controller.signal.aborted) {
+          setLinkedPackageContracts(results.filter((c): c is CustomerPetPackage => Boolean(c)));
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoadingLinkedPackages(false);
+      });
+    return () => controller.abort();
+  }, [selectedAppointment?.id, selectedAppointment?.status]);
   const [updatingId, setUpdatingId] = useState('');
   const [notifyingId, setNotifyingId] = useState('');
   const [paymentItem, setPaymentItem] = useState<{ appointment: Appointment; total: number; prepay?: boolean } | null>(null);
@@ -337,6 +437,7 @@ export default function PetshopAgendaPage() {
   const [addingExtraService, setAddingExtraService] = useState(false);
   const [extraServiceId, setExtraServiceId] = useState('');
   const [extraServicePrice, setExtraServicePrice] = useState('');
+  const [extraServiceRecipientId, setExtraServiceRecipientId] = useState('');
   const [savingExtraService, setSavingExtraService] = useState(false);
 
   useEffect(() => {
@@ -347,6 +448,7 @@ export default function PetshopAgendaPage() {
       setAddingExtraService(false);
       setExtraServiceId('');
       setExtraServicePrice('');
+      setExtraServiceRecipientId('');
       try {
         const dt = new Date(selectedAppointment.startsAt);
         const pad = (n: number) => String(n).padStart(2, '0');
@@ -365,6 +467,7 @@ export default function PetshopAgendaPage() {
     stageNotes: '',
     notifyTutor: false,
   });
+  const [stagePhotoAssigneeId, setStagePhotoAssigneeId] = useState('');
   const [savingStage, setSavingStage] = useState(false);
 
   // Formulário de novo agendamento
@@ -471,6 +574,9 @@ export default function PetshopAgendaPage() {
         setOperators(Array.isArray(opRes.data) ? opRes.data : []);
       })
       .catch(() => toast.error('Erro ao carregar dados auxiliares.'));
+    api.get<PetshopStageItem[]>('/petshop/stages')
+      .then(({ data }) => setTrackedStageKeys(new Set(data.filter(stage => stage.trackProfessional).map(stage => stage.key))))
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -943,29 +1049,63 @@ export default function PetshopAgendaPage() {
     }
   };
 
+  const handleSaveTaxi = async () => {
+    if (!selectedAppointment || savingTaxi) return;
+    const street = taxiForm.street.trim();
+    const neighborhood = taxiForm.neighborhood.trim();
+    const fee = Number(taxiForm.fee.replace(',', '.'));
+    if (!street || !neighborhood) { toast.error('Informe rua, número e bairro para o Táxi Dog.'); return; }
+    if (!Number.isFinite(fee) || fee < 0 || Math.abs(Math.round(fee * 100) - fee * 100) > 0.00001) { toast.error('Informe uma taxa válida, com até duas casas decimais.'); return; }
+    setSavingTaxi(true);
+    try {
+      const { data: updated } = await api.patch<Appointment>(`/petshop/appointments/${selectedAppointment.id}`, { transport: {
+        enabled: true, mode: taxiForm.mode, fee, coveredByPackage: false,
+        street, neighborhood, address: `${street} - ${neighborhood}`,
+        reference: taxiForm.reference.trim(), notes: taxiForm.notes.trim(),
+      } });
+      const visibleUpdate = keepPaymentStatus(updated, selectedAppointment);
+      setItems(curr => curr.map(row => row.id === updated.id ? visibleUpdate : row));
+      setSelectedAppointment(visibleUpdate);
+      setEditingTaxi(false);
+      toast.success('Táxi Dog incluído no atendimento. A taxa será cobrada separadamente.');
+      loadAppointments(false);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível incluir o Táxi Dog.');
+    } finally { setSavingTaxi(false); }
+  };
+
   // Adicionar serviço extra no meio do atendimento (ex: banho anti-pulgas, desembolo, hidratação)
   const handleAddExtraService = async () => {
     if (!selectedAppointment || !extraServiceId) {
       toast.error('Selecione o serviço a ser adicionado.');
       return;
     }
+    const selectedService = services.find(service => service.id === extraServiceId);
+    if (canManageCommissions && selectedService?.commissionOnAdd && !extraServiceRecipientId) {
+      toast.error('Escolha o funcionário que receberá a comissão.');
+      return;
+    }
     setSavingExtraService(true);
     try {
       const customPriceNum = extraServicePrice.trim() !== '' ? Number(extraServicePrice) : undefined;
-      const { data: updated } = await api.patch(`/petshop/appointments/${selectedAppointment.id}`, {
+      const { data: updated } = await api.patch<Appointment>(`/petshop/appointments/${selectedAppointment.id}`, {
         addServices: [
           {
             serviceId: extraServiceId,
             priceSnapshot: Number.isFinite(customPriceNum) ? customPriceNum : undefined,
+            ...(canManageCommissions && extraServiceRecipientId ? { commissionRecipientId: extraServiceRecipientId } : {}),
           },
         ],
       });
-      setItems(curr => curr.map(row => (row.id === selectedAppointment.id ? updated : row)));
-      setSelectedAppointment(updated);
+      const visibleUpdate = keepPaymentStatus(updated, selectedAppointment);
+      setItems(curr => curr.map(row => (row.id === selectedAppointment.id ? visibleUpdate : row)));
+      setSelectedAppointment(visibleUpdate);
       setAddingExtraService(false);
       setExtraServiceId('');
       setExtraServicePrice('');
+      setExtraServiceRecipientId('');
       toast.success('Serviço adicional incluído no atendimento!');
+      if (visibleUpdate.status === 'delivered' && amountToCharge(visibleUpdate) > 0) void handleChargeAppointment(visibleUpdate, false);
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Erro ao adicionar serviço.');
     } finally {
@@ -1018,13 +1158,7 @@ export default function PetshopAgendaPage() {
 
   // Cobrar Atendimento (Valida caixa aberto e carrega no PDV)
   const handleChargeAppointment = async (item: Appointment, prepay = false) => {
-    const hasUncoveredPending =
-      (item.services || []).some(
-        s => !s.comboParentId && s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed' && Number(s.priceSnapshot || 0) > 0,
-      ) ||
-      Boolean(item.transport?.enabled && !item.transport.coveredByPackage && Number(item.transport.fee || 0) > 0);
-    const hasExistingSale = item.paidAmount !== null && item.paidAmount !== undefined;
-    if (item.status === 'delivered' && (!hasUncoveredPending || hasExistingSale)) {
+    if (item.status === 'delivered' && amountToCharge(item) <= 0) {
       toast.info('Atendimento já foi cobrado e concluído!', {
         description: `O atendimento de ${item.pet?.name} já foi finalizado. Não é permitida cobrança em duplicidade.`,
       });
@@ -1033,15 +1167,13 @@ export default function PetshopAgendaPage() {
     setChargingId(item.id);
     try {
       // Filtra apenas os serviços que NÃO estão cobertos por pacote (avulsos/extras)
-      const billableServices = (item.services || []).filter(
-        s => !s.comboParentId && s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed',
-      );
+      const billableServices = (item.services || []).filter(s => payableServiceAmount(item, s) > 0);
       const hasCoveredServices = (item.services || []).some(
         s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed',
       );
 
       const transportExtra =
-        item.transport?.enabled && !item.transport.coveredByPackage && Number(item.transport.fee || 0) > 0
+        item.paidAmount == null && item.transport?.enabled && !item.transport.coveredByPackage && Number(item.transport.fee || 0) > 0
           ? Number(item.transport.fee)
           : 0;
 
@@ -1092,10 +1224,11 @@ export default function PetshopAgendaPage() {
 
     setUpdatingId(item.id);
     try {
-      const { data: updated } = await api.patch(`/petshop/appointments/${item.id}/status`, { status: newStatus });
-      setItems(curr => curr.map(row => (row.id === item.id ? updated : row)));
+      const { data: updated } = await api.patch<Appointment>(`/petshop/appointments/${item.id}/status`, { status: newStatus });
+      const visibleUpdate = keepPaymentStatus(updated, item);
+      setItems(curr => curr.map(row => (row.id === item.id ? visibleUpdate : row)));
       if (selectedAppointment?.id === item.id) {
-        setSelectedAppointment(updated);
+        setSelectedAppointment(visibleUpdate);
       }
 
       if (newStatus === 'ready') {
@@ -1117,6 +1250,42 @@ export default function PetshopAgendaPage() {
       toast.error(msg);
     } finally {
       setUpdatingId('');
+    }
+  };
+
+  const handleStageClick = (item: Appointment, key: string, label: string) => {
+    if (!canManageCommissions || !trackedStageKeys.has(key) || ['cancelled', 'no_show'].includes(item.status)) {
+      void changeStatus(item, key);
+      return;
+    }
+    const steps = getAppointmentSteps(item);
+    const currentIndex = item.status === 'delivered' ? steps.length : steps.findIndex(step => step.key === item.status);
+    const stageIndex = steps.findIndex(step => step.key === key);
+    const prior = [...(item.stageHistory || [])].reverse().find(entry => entry.status === key && entry.operatorId && !entry.skipped);
+    setStageAssigneeId(prior?.operatorId || '');
+    setStageAssignment({ appointment: item, key, label, advance: item.status !== 'delivered' && stageIndex > currentIndex });
+  };
+
+  const saveStageAssignment = async () => {
+    if (!stageAssignment || !stageAssigneeId) return;
+    const { appointment, key, label, advance } = stageAssignment;
+    setSavingStageAssignment(true);
+    try {
+      const url = advance
+        ? `/petshop/appointments/${appointment.id}/status`
+        : `/petshop/appointments/${appointment.id}/stages/${encodeURIComponent(key)}/assignee`;
+      const payload = advance ? { status: key, commissionOperatorId: stageAssigneeId } : { operatorId: stageAssigneeId };
+      const { data: updated } = await api.patch<Appointment>(url, payload);
+      const visibleUpdate = keepPaymentStatus(updated, appointment);
+      setItems(current => current.map(item => item.id === appointment.id ? visibleUpdate : item));
+      setSelectedAppointment(current => current?.id === appointment.id ? visibleUpdate : current);
+      setStageAssignment(null);
+      toast.success(`${label}: ${operators.find(op => op.id === stageAssigneeId)?.name || 'funcionário'} apontado(a).`);
+    } catch (error: any) {
+      toast.error(error.response?.data?.message || 'Não foi possível apontar o funcionário nesta etapa.');
+      if ([401, 403].includes(error.response?.status)) openOperatorModal();
+    } finally {
+      setSavingStageAssignment(false);
     }
   };
 
@@ -1145,6 +1314,7 @@ export default function PetshopAgendaPage() {
   // Modal Foto / Recado
   const openStageModal = (item: Appointment) => {
     setStageModalItem(item);
+    setStagePhotoAssigneeId('');
     setStageForm({
       status: item.status === 'scheduled' || item.status === 'confirmed' || item.status === 'requested' ? 'bathing' : item.status,
       stagePhotoUrl: item.stagePhotoUrl || '',
@@ -1156,6 +1326,10 @@ export default function PetshopAgendaPage() {
   const submitStageModal = async (event: FormEvent) => {
     event.preventDefault();
     if (!stageModalItem) return;
+    if (canManageCommissions && stageForm.status !== stageModalItem.status && trackedStageKeys.has(stageForm.status) && !stagePhotoAssigneeId) {
+      toast.error('Selecione quem executou esta etapa para registrar a comissão corretamente.');
+      return;
+    }
 
     if (isOperatorAccount && !operator) {
       openOperatorModal(() => {
@@ -1166,15 +1340,18 @@ export default function PetshopAgendaPage() {
 
     setSavingStage(true);
     try {
-      const { data: updated } = await api.patch(`/petshop/appointments/${stageModalItem.id}/status`, {
+      const { data: updated } = await api.patch<Appointment>(`/petshop/appointments/${stageModalItem.id}/status`, {
         status: stageForm.status,
+        ...(canManageCommissions && stageForm.status !== stageModalItem.status && trackedStageKeys.has(stageForm.status)
+          ? { commissionOperatorId: stagePhotoAssigneeId } : {}),
         stagePhotoUrl: stageForm.stagePhotoUrl || null,
         stageNotes: stageForm.stageNotes || null,
         notifyTutor: stageForm.notifyTutor && Boolean(stageForm.stagePhotoUrl),
       });
-      setItems(curr => curr.map(row => (row.id === stageModalItem.id ? updated : row)));
+      const visibleUpdate = keepPaymentStatus(updated, stageModalItem);
+      setItems(curr => curr.map(row => (row.id === stageModalItem.id ? visibleUpdate : row)));
       if (selectedAppointment?.id === stageModalItem.id) {
-        setSelectedAppointment(updated);
+        setSelectedAppointment(visibleUpdate);
       }
       toast.success('Foto e etapa salvas no painel do cliente!');
       setStageModalItem(null);
@@ -1203,55 +1380,88 @@ export default function PetshopAgendaPage() {
     return (
       <span
         title={paidTitle}
-        className={`inline-flex items-center gap-0.5 rounded-md bg-emerald-600 font-extrabold text-white shadow-2xs shrink-0 ${
-          compact ? 'px-1.5 py-0.5 text-[9px]' : 'px-2 py-0.5 text-[10px]'
+        className={`inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 font-semibold text-emerald-700 whitespace-nowrap shrink-0 ${
+          compact ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-[10px]'
         }`}
       >
-        <CheckCircle2 size={compact ? 9 : 10} strokeWidth={2.6} />
+        <Check size={10} strokeWidth={2.5} aria-hidden="true" />
         Pago
       </span>
     );
   };
 
+  const renderChargeBadge = (appointment: Appointment) => {
+    const amount = amountToCharge(appointment);
+    if (amount <= 0 || ['cancelled', 'no_show'].includes(appointment.status)) return null;
+    const readyToCharge = ['ready', 'delivered'].includes(appointment.status);
+    return (
+      <span title={readyToCharge ? 'Pagamento pendente para este atendimento' : 'Valor a cobrar quando o atendimento estiver pronto'}
+        className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${
+          readyToCharge ? 'border-rose-300 bg-rose-50 text-rose-800' : 'border-amber-200 bg-amber-50 text-amber-800'
+        }`}>
+        <CreditCard size={10} aria-hidden="true" /> {readyToCharge ? 'A cobrar' : 'Pendente'} {money(amount)}
+      </span>
+    );
+  };
+
   // Badge visual de status dos cards
-  const renderStatusBadge = (status: string, appointment?: Appointment) => {
+  const renderStatusBadge = (status: string, appointment?: Appointment, compact = false) => {
     switch (status) {
       case 'ready':
         return (
-          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 shadow-2xs">
-            <Sparkles size={10} /> {appointment && hasTaxiDogReturn(appointment) ? 'Pronto p/ levar' : 'Pronto p/ buscar'}
+          <span className="inline-flex items-center gap-1 rounded-md border border-emerald-300 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 whitespace-nowrap shrink-0">
+            <Sparkles size={10} aria-hidden="true" />
+            {compact
+              ? 'Pronto'
+              : appointment && hasTaxiDogReturn(appointment)
+              ? 'Pronto p/ levar'
+              : 'Pronto p/ buscar'}
           </span>
         );
       case 'checked_in':
+      case 'bath':
       case 'bathing':
+      case 'drying':
       case 'grooming':
       case 'finishing':
         return (
-          <span className="inline-block rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-semibold text-sky-700">
-            {status === 'checked_in' ? 'Check-in' : status === 'bathing' ? 'No Banho' : status === 'grooming' ? 'Na Tosa' : 'Em atendimento'}
+          <span className="inline-block rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 whitespace-nowrap shrink-0">
+            {compact
+              ? 'Em atend.'
+              : status === 'checked_in'
+              ? 'Check-in'
+              : status === 'bath' || status === 'bathing'
+              ? 'No Banho'
+              : status === 'drying'
+              ? 'Secagem'
+              : status === 'grooming'
+              ? 'Na Tosa'
+              : status === 'finishing'
+              ? 'Finalização'
+              : 'Em atendimento'}
           </span>
         );
       case 'requested':
         return (
-          <span className="inline-block rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+          <span className="inline-block rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 whitespace-nowrap shrink-0">
             Pendente
           </span>
         );
       case 'delivered':
         return (
-          <span className="inline-block rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700">
+          <span className="inline-block rounded-md border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 whitespace-nowrap shrink-0">
             Concluído
           </span>
         );
       case 'cancelled':
         return (
-          <span className="inline-block rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-700">
+          <span className="inline-block rounded-md border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 whitespace-nowrap shrink-0">
             Cancelado
           </span>
         );
       default:
         return (
-          <span className="inline-block rounded-md border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
+          <span className="inline-block rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 whitespace-nowrap shrink-0">
             Agendado
           </span>
         );
@@ -1262,20 +1472,22 @@ export default function PetshopAgendaPage() {
   const getCardBorderStripe = (status: string) => {
     switch (status) {
       case 'ready':
-        return 'border-l-4 border-l-emerald-600 ring-1 ring-emerald-300';
+        return 'border-l-[3px] border-l-emerald-600 ring-1 ring-emerald-200';
       case 'checked_in':
+      case 'bath':
       case 'bathing':
+      case 'drying':
       case 'grooming':
       case 'finishing':
-        return 'border-l-4 border-l-sky-500';
+        return 'border-l-[3px] border-l-amber-500';
       case 'requested':
-        return 'border-l-4 border-l-amber-500';
+        return 'border-l-[3px] border-l-rose-400';
       case 'delivered':
-        return 'border-l-4 border-l-emerald-500';
+        return 'border-l-[3px] border-l-emerald-500';
       case 'cancelled':
-        return 'border-l-4 border-l-rose-500 opacity-60';
+        return 'border-l-[3px] border-l-rose-400 opacity-60';
       default:
-        return 'border-l-4 border-l-zinc-300';
+        return '';
     }
   };
 
@@ -1837,7 +2049,7 @@ export default function PetshopAgendaPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-7 gap-3 flex-1 items-stretch md:min-h-[calc(100vh-250px)]">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[repeat(7,minmax(168px,1fr))] gap-2 flex-1 items-stretch md:min-h-[calc(100vh-250px)]">
               {weekDays.map(dayDate => {
                 const dayKey = formatISOYMD(dayDate);
                 const dayList = appointmentsByDay.get(dayKey) || [];
@@ -1856,7 +2068,7 @@ export default function PetshopAgendaPage() {
                   >
                     {/* Cabeçalho do Dia */}
                     <div
-                      className={`sticky top-0 z-10 flex items-center justify-between p-3 border-b rounded-t-2xl backdrop-blur-xs ${
+                      className={`sticky top-0 z-10 flex items-center justify-between px-2.5 py-2.5 border-b rounded-t-2xl backdrop-blur-xs ${
                         isTodayActive
                           ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900'
                           : 'border-zinc-200/70 bg-white text-zinc-800'
@@ -1887,7 +2099,7 @@ export default function PetshopAgendaPage() {
                     </div>
 
                     {/* Lista de Atendimentos do Dia */}
-                    <div className="p-2.5 flex-1 space-y-2 pr-1.5 xl:min-h-[820px] xl:max-h-[1200px] xl:overflow-y-auto xl:overscroll-contain focus:outline-none custom-scrollbar">
+                    <div className="p-1.5 flex-1 space-y-2 xl:min-h-[820px] xl:max-h-[1200px] xl:overflow-y-auto xl:overscroll-contain focus:outline-none custom-scrollbar">
                       {loading ? (
                         <div className="space-y-2 py-4">
                           <div className="h-20 bg-zinc-200/60 rounded-xl animate-pulse" />
@@ -1906,129 +2118,125 @@ export default function PetshopAgendaPage() {
                         </div>
                       ) : (
                         dayList.map(item => {
-                          const primaryService = item.services[0]?.nameSnapshot || 'Serviço';
-                          const hasMoreServices = item.services.length > 1;
+                          const visibleServices = (item.services || []).filter(s => !s.comboParentId);
+                          const isPackageCovered = item.services?.some(
+                            s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed',
+                          );
+                          const hasFooterTags = Boolean(item.isPaid || isPackageCovered || item.transport?.enabled || amountToCharge(item) > 0);
 
                           return (
                             <article
                               key={item.id}
                               onClick={() => setSelectedAppointment(item)}
-                              className={`group relative rounded-xl border p-2.5 shadow-2xs hover:shadow-md transition cursor-pointer select-none ${
-                                item.isPaid
-                                  ? 'border-emerald-300/90 bg-emerald-50/25'
-                                  : 'border-zinc-200/90 bg-white'
-                              } ${getCardBorderStripe(
+                              className={`group relative rounded-xl border border-zinc-200/90 bg-white px-2.5 py-2 shadow-2xs hover:border-teal-300 hover:shadow-md transition cursor-pointer select-none ${getCardBorderStripe(
                                 item.status,
                               )}`}
                             >
-                              {/* Topo do Card: Horário + Nome do Pet */}
-                              <div className="flex items-center justify-between gap-1.5 mb-1.5">
-                                <span className="text-xs font-extrabold text-zinc-900 tabular-nums">
-                                  {timeStr(item.startsAt)}
-                                </span>
-                                <div className="flex items-center gap-1.5 flex-1 justify-end min-w-0">
-                                  <h4 className="text-xs font-bold text-zinc-900 truncate">
+                              {/* 1. Topo do Card: Horário + Nome do Pet + Status (sem cortar o nome) */}
+                              <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-1.5 gap-y-1">
+                                <div className="flex min-w-0 items-baseline gap-1">
+                                  <span className="shrink-0 text-[11px] font-bold text-zinc-900 tabular-nums">
+                                    {timeStr(item.startsAt)}
+                                  </span>
+                                  <h4 className="text-[12.5px] font-bold leading-tight text-zinc-950 break-words">
                                     {item.pet?.name}
                                   </h4>
-                                  {item.pet?.sex === 'male' && (
-                                    <span className="inline-flex items-center rounded-md bg-sky-100 border border-sky-300 px-1.5 py-0.5 text-[9px] font-extrabold text-sky-900 shrink-0" title="Macho (Gravatinha)">Macho</span>
-                                  )}
-                                  {item.pet?.sex === 'female' && (
-                                    <span className="inline-flex items-center rounded-md bg-pink-100 border border-pink-300 px-1.5 py-0.5 text-[9px] font-extrabold text-pink-900 shrink-0" title="Fêmea (Lacinho)">Fêmea</span>
-                                  )}
+                                </div>
+                                <div className="ml-auto shrink-0">
+                                  {renderStatusBadge(item.status, item, true)}
                                 </div>
                               </div>
 
-                              {/* Centro: Avatar + Serviço + Profissional */}
-                              <div className="flex items-center gap-2 mb-2">
-                                <div className="shrink-0">
-                                  <PetAvatar pet={item.pet} size="sm" />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <p className="text-[11px] font-semibold text-zinc-800 truncate" title={primaryService}>
-                                    {primaryService}
-                                    {hasMoreServices && <span className="text-zinc-400"> +{item.services.length - 1}</span>}
-                                  </p>
-                                  <p className="text-[10px] text-zinc-500 truncate">
-                                    {item.professional?.name || 'Equipe'}
-                                  </p>
-                                </div>
-                              </div>
-
-                                {/* Badges informativos de Serviços */}
-                                {item.services && item.services.length > 0 && (
-                                  <div className="flex flex-wrap gap-1 mb-1.5">
-                                    {item.services.filter(s => !s.comboParentId).slice(0, 3).map(s => (
-                                      <span
-                                        key={s.id}
-                                        className="inline-block rounded bg-zinc-100 border border-zinc-200/80 px-1.5 py-0.2 text-[9px] font-semibold text-zinc-700 truncate max-w-[140px]"
-                                        title={s.nameSnapshot}
-                                      >
-                                        {s.nameSnapshot}
-                                      </span>
-                                    ))}
+                              {/* 2. Serviços: 1 item por serviço com quebra de linha completa (sem truncar) */}
+                              <div className="mb-2 space-y-0.5">
+                                {(visibleServices.length > 0 ? visibleServices.slice(0, 4) : [{ id: 'fallback', nameSnapshot: 'Serviço' }]).map(s => (
+                                  <div key={s.id} className="flex min-w-0 items-start gap-1.5 text-[11px] text-zinc-600">
+                                    <Scissors size={11} className="mt-0.5 shrink-0 text-zinc-400" aria-hidden="true" />
+                                    <span className="min-w-0 flex-1 font-medium leading-snug text-zinc-700 break-words">
+                                      {s.nameSnapshot}
+                                    </span>
                                   </div>
+                                ))}
+                                {visibleServices.length > 4 && (
+                                  <p className="pl-4 text-[10px] font-medium text-zinc-400">
+                                    +{visibleServices.length - 4} serviço(s)
+                                  </p>
                                 )}
+                              </div>
 
-                                {/* Rodapé: Badge de Status + Pacote + Transporte + Ações Rápidas */}
-                                <div className="flex items-center justify-between pt-1 border-t border-zinc-100 gap-1">
-                                  <div className="flex items-center gap-1 flex-wrap">
-                                    {renderStatusBadge(item.status, item)}
-                                    {renderPaidBadge(item, true)}
-                                    {item.services?.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && (
-                                      <span
-                                        title="Serviço coberto por pacote de cliente"
-                                        className="inline-flex items-center gap-0.5 rounded-md border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[9px] font-bold text-teal-800"
-                                      >
-                                        <PackageCheck size={9} /> Pacote
-                                      </span>
-                                    )}
-                                    {item.transport?.enabled && (
-                                      <span
-                                        title={`Transporte (${item.transport.mode === 'pickup' ? 'Apenas Buscar' : item.transport.mode === 'dropoff' ? 'Apenas Levar' : 'Buscar e Levar'})${item.transport.address ? ` · ${item.transport.address}` : ''}`}
-                                        className="inline-flex items-center gap-0.5 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold text-amber-800"
-                                      >
-                                        🚐 Táxi Dog
-                                      </span>
-                                    )}
-                                  </div>
-                                  <div className="flex items-center gap-1">
-                                    {item.stagePhotoUrl && (
-                                      <span
-                                        title="Foto da etapa registrada"
-                                        className="text-teal-700 text-[10px] flex items-center gap-0.5"
-                                      >
-                                        <Camera size={11} />
-                                      </span>
-                                    )}
-                                    {item.status !== 'delivered' && (
-                                      <button
-                                        type="button"
-                                        onClick={e => {
-                                          e.stopPropagation();
-                                          setAppointmentToReschedule(item);
-                                        }}
-                                        title="Reagendar horário"
-                                        className="h-11 w-11 sm:h-8 sm:w-8 grid place-items-center rounded text-zinc-400 hover:text-teal-800 hover:bg-teal-50 transition cursor-pointer"
-                                      >
-                                        <CalendarDays size={11} />
-                                      </button>
-                                    )}
-                                    {item.status !== 'delivered' && item.status !== 'cancelled' && (
-                                      <button
-                                        type="button"
-                                        onClick={e => {
-                                          e.stopPropagation();
-                                          setAppointmentToCancel(item);
-                                        }}
-                                        title="Cancelar agendamento"
-                                        className="h-11 w-11 sm:h-8 sm:w-8 grid place-items-center rounded text-zinc-400 hover:text-rose-700 hover:bg-rose-50 transition cursor-pointer"
-                                      >
-                                        <XCircle size={11} />
-                                      </button>
-                                    )}
-                                  </div>
+                              {/* 3. Profissional / Avatar compacto + ações rápidas apenas quando visíveis */}
+                              <div className="flex items-center justify-between gap-1.5">
+                                <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                  <PetAvatar pet={item.pet} size="xs" />
+                                  <span
+                                    className="min-w-0 flex-1 text-[11px] font-medium leading-tight text-zinc-600 break-words"
+                                    title={item.professional?.name || 'Equipe'}
+                                  >
+                                    {item.professional?.name || 'Equipe'}
+                                  </span>
                                 </div>
+                                <div className="flex shrink-0 items-center gap-0.5 sm:hidden sm:group-hover:flex group-focus-within:flex">
+                                  {item.stagePhotoUrl && (
+                                    <span title="Foto da etapa registrada" className="p-0.5 text-teal-700">
+                                      <Camera size={11} />
+                                    </span>
+                                  )}
+                                  {item.status !== 'delivered' && item.status !== 'cancelled' && (
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setAppointmentToReschedule(item);
+                                      }}
+                                      title="Reagendar horário"
+                                      aria-label={`Reagendar ${item.pet?.name || 'atendimento'}`}
+                                      className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-teal-50 hover:text-teal-800 transition cursor-pointer"
+                                    >
+                                      <CalendarDays size={11} />
+                                    </button>
+                                  )}
+                                  {item.status !== 'delivered' && item.status !== 'cancelled' && (
+                                    <button
+                                      type="button"
+                                      onClick={e => {
+                                        e.stopPropagation();
+                                        setAppointmentToCancel(item);
+                                      }}
+                                      title="Cancelar agendamento"
+                                      aria-label={`Cancelar ${item.pet?.name || 'atendimento'}`}
+                                      className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-rose-50 hover:text-rose-700 transition cursor-pointer"
+                                    >
+                                      <XCircle size={11} />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 4. Rodapé compacto: Pago · Pacote · Táxi Dog sem quebra de linha */}
+                              {hasFooterTags && (
+                                <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-zinc-100 pt-1.5">
+                                  {renderPaidBadge(item, true)}
+                                  {renderChargeBadge(item)}
+                                  {isPackageCovered && (
+                                    <span
+                                      title="Serviço coberto por pacote de cliente"
+                                      className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700"
+                                    >
+                                      <PackageCheck size={10} className="text-zinc-500" aria-hidden="true" />
+                                      <span>Pacote</span>
+                                    </span>
+                                  )}
+                                  {item.transport?.enabled && (
+                                    <span
+                                      title={`Transporte (${item.transport.mode === 'pickup' || item.transport.mode === 'pickup_only' ? 'Apenas Buscar' : item.transport.mode === 'dropoff' || item.transport.mode === 'dropoff_only' ? 'Apenas Levar' : 'Buscar e Levar'})${item.transport.address ? ` · ${item.transport.address}` : ''}`}
+                                      className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800"
+                                    >
+                                      <Car size={10} className="text-amber-600" aria-hidden="true" />
+                                      <span>Táxi Dog</span>
+                                    </span>
+                                  )}
+                                </div>
+                              )}
                             </article>
                           );
                         })
@@ -2144,21 +2352,27 @@ export default function PetshopAgendaPage() {
       {viewMode === 'day' && (
         <div className="flex flex-col 2xl:flex-row gap-4 items-stretch">
           <section className="flex-1 min-w-0 w-full pc-panel overflow-hidden bg-white rounded-2xl border border-zinc-200" aria-label="Atendimentos do dia">
-          <div className="p-4 border-b border-zinc-200 flex flex-wrap items-center justify-between gap-3 bg-zinc-50/70">
-            <div>
-              <h2 className="text-base font-bold text-zinc-900">
-                Atendimentos em {anchorDate.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' })}
+          <div className="px-4 py-3.5 border-b border-zinc-200 flex flex-wrap items-center justify-between gap-3 bg-white">
+            <div className="flex flex-wrap items-center gap-2.5 min-w-0">
+              <CalendarDays size={17} className="text-teal-700 shrink-0" aria-hidden="true" />
+              <h2 className="text-sm sm:text-base font-bold text-zinc-900">
+                Atendimentos de {anchorDate.toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long' })}
               </h2>
-              <p className="text-xs text-zinc-500">
-                {filteredItems.length} atendimento{filteredItems.length !== 1 ? 's' : ''} programado{filteredItems.length !== 1 ? 's' : ''}
-              </p>
+              <span className="rounded-md border border-zinc-200 bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600">
+                {filteredItems.length} programado{filteredItems.length !== 1 ? 's' : ''}
+              </span>
+              {filteredItems.filter(item => ['ready', 'delivered'].includes(item.status) && amountToCharge(item) > 0).length > 0 && (
+                <span className="rounded-md border border-rose-200 bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-800">
+                  {filteredItems.filter(item => ['ready', 'delivered'].includes(item.status) && amountToCharge(item) > 0).length} a cobrar
+                </span>
+              )}
             </div>
             <button
               type="button"
               onClick={() => handleOpenNewForDay(anchorDate)}
-              className="flex items-center gap-1.5 rounded-lg bg-teal-700 px-3.5 py-2 text-xs font-semibold text-white hover:bg-teal-800 transition cursor-pointer"
+              className="flex items-center gap-1.5 rounded-xl bg-teal-800 px-3.5 py-2 text-xs font-semibold text-white hover:bg-teal-900 transition cursor-pointer shadow-2xs"
             >
-              <Plus size={15} /> Novo agendamento neste dia
+              <Plus size={14} strokeWidth={2.5} /> Novo agendamento
             </button>
           </div>
 
@@ -2182,172 +2396,265 @@ export default function PetshopAgendaPage() {
           ) : (
             <div className="divide-y divide-zinc-200">
               {filteredItems.map(item => {
-                const stepIdx = stageProgressSteps.findIndex(s => s.key === item.status);
-                const isInCare = stepIdx !== -1;
+                const steps = getAppointmentSteps(item);
+                const isDelivered = item.status === 'delivered';
+                const currentStepIdx = isDelivered ? steps.length : steps.findIndex(s => s.key === item.status);
+                const isInCare = currentStepIdx !== -1 && !isDelivered;
+                const isPendingArrival = item.status === 'scheduled' || item.status === 'confirmed' || item.status === 'requested';
+                const avulsoTotal = item.services
+                  .filter(s => s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
+                  .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0);
+                const isPackageCovered = item.services.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed');
+                const visibleServicesLabel = item.services.filter(s => !s.comboParentId).map(s => s.nameSnapshot).join(' + ') || 'Serviço';
+                const needsPaymentNow = ['ready', 'delivered'].includes(item.status) && amountToCharge(item) > 0;
+
+                const nextAction = (() => {
+                  if (isPendingArrival) {
+                    return { status: steps[0]?.key || 'checked_in', label: 'Iniciar Check-in', title: 'Fazer check-in (receber pet)' };
+                  }
+                  if (isInCare && currentStepIdx < steps.length - 1) {
+                    const nextStep = steps[currentStepIdx + 1];
+                    return { status: nextStep.key, label: 'Avançar etapa', title: `Avançar para: ${nextStep.label}` };
+                  }
+                  if (isInCare && currentStepIdx === steps.length - 1) {
+                    return { status: 'delivered', label: 'Concluir entrega', title: 'Marcar como Concluído e Entregue' };
+                  }
+                  return null;
+                })();
 
                 return (
                   <article
                     key={item.id}
-                    className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4 hover:bg-zinc-50/60 transition"
+                    className="px-4 py-3.5 flex flex-col xl:flex-row xl:items-center justify-between gap-3.5 hover:bg-zinc-50/70 transition"
                   >
-                    <div className="flex items-start gap-4 min-w-0 flex-1">
-                      <div className="flex shrink-0 flex-col items-center gap-0.5 pt-1 min-w-[65px]">
+                    {/* Bloco Esquerdo: Horário + Avatar + Dados do Pet */}
+                    <div className="flex items-center gap-3 min-w-0 xl:w-[280px] shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAppointment(item)}
+                        aria-label={`Abrir atendimento de ${item.pet?.name || 'pet'} às ${timeStr(item.startsAt)}`}
+                        className="flex shrink-0 flex-col items-start gap-0.5 rounded-lg px-1 py-1 min-w-[56px] text-left hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700 cursor-pointer"
+                      >
                         <span className="text-sm font-bold tabular-nums text-zinc-900">
                           {timeStr(item.startsAt)}
                         </span>
                         <span className="text-[11px] tabular-nums text-zinc-400">
                           até {timeStr(item.endsAt)}
                         </span>
-                      </div>
+                      </button>
 
                       <div className="shrink-0 relative">
-                        <PetAvatar pet={item.pet} size="lg" />
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAppointment(item)}
+                          className="block rounded-full cursor-pointer focus-visible:outline-2 focus-visible:outline-teal-700"
+                          title="Abrir ficha do atendimento"
+                        >
+                          <PetAvatar pet={item.pet} size="md" />
+                        </button>
                         {item.stagePhotoUrl && (
                           <button
                             type="button"
                             onClick={() => openStageModal(item)}
                             title="Ver/trocar foto enviada"
-                            className="absolute -bottom-1 -right-1 grid h-6 w-6 place-items-center rounded-full border-2 border-white bg-teal-700 text-white shadow-xs"
+                            className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-teal-700 text-white shadow-xs cursor-pointer"
                           >
-                            <Camera size={12} />
+                            <Camera size={10} />
                           </button>
                         )}
                       </div>
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-sm font-bold text-zinc-900">{item.pet?.name}</h3>
+                      <div className="min-w-0 flex-1 space-y-0.5">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedAppointment(item)}
+                            className="text-sm font-bold text-zinc-950 hover:text-teal-800 transition cursor-pointer text-left"
+                          >
+                            {item.pet?.name}
+                          </button>
                           {item.pet?.sex === 'male' && (
-                            <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold bg-sky-50 text-sky-700 border border-sky-200" title="Macho (gravata/adereço azul)">
+                            <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-sky-700" title="Macho (gravata/adereço azul)">
                               ♂ Macho
                             </span>
                           )}
                           {item.pet?.sex === 'female' && (
-                            <span className="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200" title="Fêmea (laço/adereço rosa)">
+                            <span className="inline-flex items-center gap-0.5 text-[11px] font-semibold text-rose-700" title="Fêmea (laço/adereço rosa)">
                               ♀ Fêmea
                             </span>
                           )}
-                          <span className="text-xs text-zinc-500">Tutor: {item.customer?.name}</span>
-                          {renderStatusBadge(item.status, item)}
-                          {renderPaidBadge(item, false)}
                         </div>
 
-                        <p className="mt-1 text-xs text-zinc-600 truncate">
-                          {item.services.map(s => s.nameSnapshot).join(' + ') || 'Serviço'} ·{' '}
-                          <strong className="font-semibold text-zinc-800">
-                            {money(
-                              item.services
-                                .filter(s => s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
-                                .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0),
-                            )}
-                          </strong>
-                          {item.services.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && (
-                            <span className="ml-2 inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-bold text-teal-800">
-                              <PackageCheck size={10} /> Pacote
-                            </span>
-                          )}
-                          {item.transport?.enabled && (
-                            <span className="ml-2 inline-flex items-center gap-1 rounded-md border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">
-                              🚐 Táxi Dog ({item.transport.mode === 'pickup' ? 'Buscar' : item.transport.mode === 'dropoff' ? 'Levar' : 'Buscar/Levar'})
-                              {!item.transport.coveredByPackage && item.transport.fee > 0 ? ` + ${money(item.transport.fee)}` : ''}
-                            </span>
-                          )}
+                        <p className="text-xs text-zinc-500 truncate" title={`Tutor: ${item.customer?.name}`}>
+                          Tutor: {item.customer?.name}
                         </p>
 
-                        <div className="mt-1.5 flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-                          <span className="flex items-center gap-1">
-                            <UserRound size={13} /> {item.professional?.name || 'Profissional a definir'}
+                        <p className="flex items-start gap-1.5 text-xs text-zinc-700 font-medium leading-snug">
+                          <Scissors size={11} className="mt-0.5 shrink-0 text-zinc-400" aria-hidden="true" />
+                          <span className="min-w-0 flex-1 break-words">
+                            {visibleServicesLabel}
+                            {avulsoTotal > 0 && (
+                              <strong className="ml-1 font-semibold text-zinc-900">· {money(avulsoTotal)}</strong>
+                            )}
                           </span>
-                          {item.stageNotes && (
-                            <span className="rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-700 truncate max-w-md">
-                              Recado: "{item.stageNotes}"
-                            </span>
-                          )}
-                        </div>
+                        </p>
 
-                        {/* Barra de Etapas Operacionais Dinâmicas do Serviço */}
-                        {isInCare ? (() => {
-                          const steps = getAppointmentSteps(item);
-                          const currentStepIdx = steps.findIndex(s => s.key === item.status);
-                          return (
-                            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-                              {steps.map((step, idx) => {
-                                const done = currentStepIdx !== -1 && idx <= currentStepIdx;
-                                const current = idx === currentStepIdx;
-                                return (
-                                  <button
-                                    key={step.key}
-                                    type="button"
-                                    disabled={updatingId === item.id}
-                                    onClick={() => changeStatus(item, step.key)}
-                                    className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${
-                                      current
-                                        ? step.key === 'ready'
-                                          ? 'bg-emerald-600 text-white shadow-xs'
-                                          : 'bg-teal-700 text-white shadow-xs'
-                                        : done
-                                          ? 'bg-teal-50 text-teal-800 hover:bg-teal-100'
-                                          : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
-                                    }`}
-                                  >
-                                    {idx + 1}. {step.label}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          );
-                        })() : (item.status === 'scheduled' || item.status === 'confirmed' || item.status === 'requested') ? (
-                          <div className="mt-3 flex items-center gap-2">
-                            <button
-                              type="button"
-                              disabled={updatingId === item.id}
-                              onClick={() => changeStatus(item, 'checked_in')}
-                              className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl bg-teal-700 px-3.5 py-1.5 text-xs font-semibold text-white shadow-xs transition hover:bg-teal-800 disabled:opacity-50"
-                            >
-                              <CheckCircle2 size={14} /> Fazer Check-in (Receber Pet)
-                            </button>
-                          </div>
-                        ) : null}
+                        <p className="flex items-center gap-1.5 text-xs text-zinc-500 truncate">
+                          <UserRound size={11} className="shrink-0 text-zinc-400" aria-hidden="true" />
+                          <span className="truncate">{item.professional?.name || 'Profissional a definir'}</span>
+                        </p>
+
+                        {item.stageNotes && (
+                          <p className="mt-0.5 rounded bg-zinc-100 px-2 py-0.5 text-[11px] text-zinc-700 truncate max-w-full" title={item.stageNotes}>
+                            Recado: &quot;{item.stageNotes}&quot;
+                          </p>
+                        )}
                       </div>
                     </div>
 
-                    {/* Ações Rápidas: Foto + WhatsApp + Select */}
-                    <div className="flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end">
+                    {/* Bloco Central: Status + Stepper Horizontal Conectado + Tags Compactas */}
+                    <div className="min-w-0 flex-1 flex flex-col gap-2 xl:px-2">
+                      <div className="flex flex-wrap sm:flex-nowrap items-center gap-3 min-w-0">
+                        <div className="flex shrink-0 flex-wrap items-center gap-1">
+                          {renderStatusBadge(item.status, item, false)}
+                          {renderChargeBadge(item)}
+                        </div>
+
+                        {item.status !== 'cancelled' && item.status !== 'no_show' && (
+                          <div className="flex flex-1 min-w-[200px] items-start">
+                            {steps.map((step, idx) => {
+                              const done = isDelivered || (currentStepIdx !== -1 && idx <= currentStepIdx);
+                              const current = !isDelivered && idx === currentStepIdx;
+                              const connectorDone = isDelivered || (currentStepIdx !== -1 && idx < currentStepIdx);
+                              const isLast = idx === steps.length - 1;
+                              const assignedEntry = [...(item.stageHistory || [])].reverse().find(entry => entry.status === step.key && entry.operatorId && !entry.skipped);
+                              const assignedName = assignedEntry?.operatorName || operators.find(op => op.id === assignedEntry?.operatorId)?.name;
+
+                              return (
+                                <div key={step.key} className="flex flex-1 items-start last:flex-none min-w-0">
+                                  <button
+                                    type="button"
+                                    disabled={updatingId === item.id || (isDelivered && !(canManageCommissions && trackedStageKeys.has(step.key)))}
+                                    onClick={() => handleStageClick(item, step.key, step.label)}
+                                    title={canManageCommissions && trackedStageKeys.has(step.key) ? `Apontar funcionário em: ${step.label}` : `Mudar para: ${step.label}`}
+                                    className="group/step flex flex-col items-center gap-1 cursor-pointer disabled:opacity-50 focus:outline-none"
+                                  >
+                                    <span
+                                      className={`h-3 w-3 rounded-full transition-all ${
+                                        current
+                                          ? step.key === 'ready'
+                                            ? 'bg-emerald-600 ring-4 ring-emerald-100'
+                                            : 'bg-teal-700 ring-4 ring-teal-100'
+                                          : done
+                                            ? 'bg-teal-700'
+                                            : 'border-2 border-zinc-300 bg-white group-hover/step:border-teal-500'
+                                      }`}
+                                    />
+                                    <span
+                                      className={`text-[10.5px] whitespace-nowrap leading-none ${
+                                        current
+                                          ? 'font-bold text-zinc-900'
+                                          : done
+                                            ? 'font-semibold text-teal-800'
+                                            : 'font-medium text-zinc-400 group-hover/step:text-zinc-600'
+                                      }`}
+                                    >
+                                      {step.label}
+                                    </span>
+                                    {assignedName && <span className="max-w-20 truncate text-[9px] font-semibold text-teal-700" title={`Responsável: ${assignedName}`}>{assignedName}</span>}
+                                  </button>
+                                  {!isLast && (
+                                    <div
+                                      className={`mt-[5px] h-[1.5px] flex-1 min-w-[12px] mx-1 ${
+                                        connectorDone ? 'bg-teal-700' : 'bg-zinc-200'
+                                      }`}
+                                    />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+
+                      {(item.isPaid || isPackageCovered || item.transport?.enabled) && (
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {renderPaidBadge(item, true)}
+                          {isPackageCovered && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-1.5 py-0.5 text-[10px] font-medium text-zinc-700 whitespace-nowrap">
+                              <PackageCheck size={10} className="text-zinc-500" aria-hidden="true" />
+                              Pacote
+                            </span>
+                          )}
+                          {item.transport?.enabled && (
+                            <span
+                              title={`Transporte (${item.transport.mode === 'pickup' || item.transport.mode === 'pickup_only' ? 'Apenas Buscar' : item.transport.mode === 'dropoff' || item.transport.mode === 'dropoff_only' ? 'Apenas Levar' : 'Buscar e Levar'})${item.transport.address ? ` · ${item.transport.address}` : ''}`}
+                              className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 whitespace-nowrap"
+                            >
+                              <Car size={10} className="text-amber-600" aria-hidden="true" />
+                              Táxi Dog
+                              {!item.transport.coveredByPackage && item.transport.fee > 0 ? ` · ${money(item.transport.fee)}` : ''}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Bloco Direito: Foto · Avisar · Avançar etapa > */}
+                    <div className="flex flex-wrap items-center gap-2 xl:shrink-0 xl:justify-end">
                       <button
                         type="button"
                         onClick={() => openStageModal(item)}
-                        className="flex min-h-10 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
+                        className="inline-flex h-9 items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-semibold text-zinc-700 hover:bg-zinc-50 transition cursor-pointer"
                       >
-                        <Camera size={14} className="text-teal-700" />
-                        {item.stagePhotoUrl ? 'Foto / Etapa' : 'Enviar Foto'}
+                        <Camera size={14} className="text-zinc-500" aria-hidden="true" />
+                        {item.stagePhotoUrl ? 'Foto ✓' : 'Foto'}
                       </button>
 
-                      {!(item.status === 'ready' && hasTaxiDogReturn(item)) && <button
-                        type="button"
-                        disabled={notifyingId === item.id}
-                        onClick={() => notifyTutorWhatsApp(item)}
-                        className={`flex min-h-10 items-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition cursor-pointer ${
-                          item.status === 'ready'
-                            ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
-                            : 'border border-teal-200 bg-teal-50 text-teal-800 hover:bg-teal-100'
-                        }`}
-                      >
-                        {item.status === 'ready' ? <BellRing size={14} /> : <MessageCircle size={14} />}
-                        {notifyingId === item.id ? 'Gerando…' : item.status === 'ready' ? 'Avisar: Pode Buscar!' : 'Avisar Tutor'}
-                      </button>}
+                      {!(item.status === 'ready' && hasTaxiDogReturn(item)) && (
+                        <button
+                          type="button"
+                          disabled={notifyingId === item.id}
+                          onClick={() => notifyTutorWhatsApp(item)}
+                          className={`inline-flex h-9 items-center gap-1.5 rounded-xl px-2.5 text-xs font-semibold transition cursor-pointer ${
+                            item.status === 'ready'
+                              ? 'bg-emerald-600 text-white hover:bg-emerald-700 shadow-xs'
+                              : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50'
+                          }`}
+                        >
+                          <BellRing size={14} className={item.status === 'ready' ? 'text-white' : 'text-zinc-500'} aria-hidden="true" />
+                          {notifyingId === item.id ? 'Gerando…' : item.status === 'ready' ? 'Avisar Buscar!' : 'Avisar'}
+                        </button>
+                      )}
 
-                      <select
-                        value={item.status}
-                        disabled={updatingId === item.id}
-                        onChange={e => changeStatus(item, e.target.value)}
-                        className="h-10 rounded-xl border border-zinc-200 bg-white px-2.5 text-xs font-semibold text-zinc-700 outline-none cursor-pointer"
-                      >
-                        {statuses.map(([val, label]) => (
-                          <option key={val} value={val}>
-                            {val === 'ready' && hasTaxiDogReturn(item) ? 'Pronto p/ levar' : label}
-                          </option>
-                        ))}
-                      </select>
+                      {needsPaymentNow ? (
+                        <button type="button" disabled={chargingId === item.id}
+                          onClick={() => handleChargeAppointment(item, false)}
+                          title="Abrir cobrança deste atendimento"
+                          className="inline-flex h-9 items-center gap-1.5 rounded-xl bg-rose-700 px-3 text-xs font-bold text-white hover:bg-rose-800 transition cursor-pointer disabled:opacity-50">
+                          {chargingId === item.id ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
+                          Cobrar {money(amountToCharge(item))}
+                        </button>
+                      ) : nextAction ? (
+                        <button
+                          type="button"
+                          disabled={updatingId === item.id}
+                          onClick={() => handleStageClick(item, nextAction.status, getStageLabel(nextAction.status, item.customStages))}
+                          title={nextAction.title}
+                          className="inline-flex h-9 items-center gap-1 rounded-xl bg-teal-800 px-3 text-xs font-semibold text-white hover:bg-teal-900 transition cursor-pointer shadow-2xs disabled:opacity-50"
+                        >
+                          <span>{nextAction.label}</span>
+                          <ChevronRight size={14} aria-hidden="true" />
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedAppointment(item)}
+                          className="inline-flex h-9 items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition cursor-pointer"
+                        >
+                          Ver ficha
+                        </button>
+                      )}
                     </div>
                   </article>
                 );
@@ -2410,6 +2717,7 @@ export default function PetshopAgendaPage() {
                           </span>
                           {renderStatusBadge(item.status, item)}
                           {renderPaidBadge(item, true)}
+                          {renderChargeBadge(item)}
                         </button>
                       ))}
                     </div>
@@ -2467,6 +2775,7 @@ export default function PetshopAgendaPage() {
                           <div className="flex flex-wrap items-center gap-1">
                             {renderStatusBadge(item.status, item)}
                             {renderPaidBadge(item, true)}
+                            {renderChargeBadge(item)}
                           </div>
                         </div>
                       ))
@@ -2511,7 +2820,11 @@ export default function PetshopAgendaPage() {
             {/* Barra de Etapas Dinâmicas Configuradas para este Atendimento */}
             {(() => {
               const steps = getAppointmentSteps(selectedAppointment);
+              const isDelivered = selectedAppointment.status === 'delivered';
+              const isCancelled = selectedAppointment.status === 'cancelled' || selectedAppointment.status === 'no_show';
               const stepIdx = steps.findIndex(s => s.key === selectedAppointment.status);
+              const effectiveStepIdx = isDelivered ? steps.length - 1 : stepIdx;
+              const historyList = Array.isArray(selectedAppointment.stageHistory) ? selectedAppointment.stageHistory : [];
               const gridColsClass =
                 steps.length <= 3
                   ? 'grid-cols-3'
@@ -2543,27 +2856,43 @@ export default function PetshopAgendaPage() {
                   )}
                   <div className={`grid ${gridColsClass} gap-1.5`}>
                     {steps.map((step, idx) => {
-                      const done = stepIdx !== -1 && idx <= stepIdx;
+                      const stageEntries = historyList.filter(h => h.status === step.key);
+                      const lastStageEntry = stageEntries[stageEntries.length - 1];
+                      const wasSkipped = Boolean(lastStageEntry?.skipped && !stageEntries.some(h => !h.skipped));
+                      const done = !isCancelled && effectiveStepIdx !== -1 && idx <= effectiveStepIdx;
                       const current = selectedAppointment.status === step.key;
+                      const locked = updatingId === selectedAppointment.id || isCancelled ||
+                        (isDelivered && !(canManageCommissions && trackedStageKeys.has(step.key)));
+                      const assignedEntry = [...historyList].reverse().find(entry => entry.status === step.key && entry.operatorId && !entry.skipped);
+                      const assignedName = assignedEntry?.operatorName || operators.find(op => op.id === assignedEntry?.operatorId)?.name;
 
                       return (
                         <button
                           key={step.key}
                           type="button"
-                          disabled={updatingId === selectedAppointment.id}
-                          onClick={() => changeStatus(selectedAppointment, step.key)}
-                          className={`rounded-lg py-2 px-1 text-center text-xs font-semibold transition cursor-pointer ${
+                          disabled={locked}
+                          onClick={() => handleStageClick(selectedAppointment, step.key, step.label)}
+                          className={`rounded-lg py-2 px-1 text-center text-xs font-semibold transition ${
+                            locked ? 'cursor-default' : 'cursor-pointer'
+                          } ${
                             current
                               ? step.key === 'ready'
                                 ? 'bg-emerald-600 text-white shadow-sm ring-2 ring-emerald-300'
                                 : 'bg-teal-700 text-white shadow-sm'
-                              : done
-                                ? 'bg-teal-50 text-teal-800 hover:bg-teal-100'
-                                : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
+                              : wasSkipped
+                                ? 'bg-amber-50 text-amber-800 border border-amber-200'
+                                : done
+                                  ? isDelivered
+                                    ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                    : 'bg-teal-50 text-teal-800 hover:bg-teal-100'
+                                  : 'bg-zinc-100 text-zinc-500 hover:bg-zinc-200'
                           }`}
                         >
-                          <span className="block text-[10px] opacity-75">{idx + 1}</span>
+                          <span className="block text-[10px] opacity-80">
+                            {wasSkipped ? 'Pulada' : done ? `✓ ${idx + 1}` : idx + 1}
+                          </span>
                           <span className="truncate block">{step.label}</span>
+                          {assignedName && <span className="mt-0.5 block truncate text-[10px]" title={`Responsável: ${assignedName}`}>{assignedName}</span>}
                         </button>
                       );
                     })}
@@ -2579,7 +2908,7 @@ export default function PetshopAgendaPage() {
                   Serviços Contratados & Cobertura
                 </p>
                 {selectedAppointment.status !== 'cancelled' &&
-                  !(selectedAppointment.status === 'delivered' && selectedAppointment.paidAmount !== null && selectedAppointment.paidAmount !== undefined) &&
+                  (selectedAppointment.status !== 'delivered' || canManageCommissions) &&
                   !addingExtraService && (
                   <button
                     type="button"
@@ -2590,6 +2919,13 @@ export default function PetshopAgendaPage() {
                     <Plus size={12} /> {selectedAppointment.status === 'delivered' ? 'Adicionar serviço / diferença' : 'Adicionar serviço ao atendimento'}
                   </button>
                 )}
+                {selectedAppointment.status === 'delivered' && !canManageCommissions &&
+                  ['admin', 'superadmin', 'operator'].includes(user?.role || '') && (
+                    <button type="button" onClick={() => openOperatorModal()}
+                      className="inline-flex items-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-800 hover:bg-teal-100 transition cursor-pointer">
+                      <Plus size={12} /> Entrar com PIN administrativo para adicionar serviço
+                    </button>
+                  )}
               </div>
 
               {addingExtraService && (
@@ -2648,6 +2984,18 @@ export default function PetshopAgendaPage() {
                       />
                     </div>
                   </div>
+                  {canManageCommissions && (
+                    <label className="block text-xs font-semibold text-zinc-700">Funcionário responsável pela comissão
+                      <select value={extraServiceRecipientId} onChange={e => setExtraServiceRecipientId(e.target.value)}
+                        className="mt-1 h-10 w-full rounded-lg border border-teal-300 bg-white px-2">
+                        <option value="">Selecione o funcionário{services.find(s => s.id === extraServiceId)?.commissionOnAdd ? ' *' : ' (opcional)'}</option>
+                        {operators.filter(op => op.active).map(op => <option key={op.id} value={op.id}>{op.name}{op.jobTitle ? ` · ${op.jobTitle}` : ''}</option>)}
+                      </select>
+                      {services.find(s => s.id === extraServiceId)?.commissionOnAdd && (
+                        <span className="mt-1 block text-xs text-teal-800">Comissão prevista: {money(services.find(s => s.id === extraServiceId)?.commissionAmount || 0)} · aguardará a cobrança.</span>
+                      )}
+                    </label>
+                  )}
                   <div className="flex justify-end">
                     <button
                       type="button"
@@ -2736,6 +3084,53 @@ export default function PetshopAgendaPage() {
                     </div>
                   );
                 })}
+                {!appointmentPayment && !selectedAppointment.transport?.coveredByPackage &&
+                  !['cancelled', 'no_show', 'delivered'].includes(selectedAppointment.status) && !editingTaxi && (
+                  <button type="button" onClick={() => setEditingTaxi(true)}
+                    className="mt-2 inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 text-xs font-bold text-amber-900 hover:bg-amber-100">
+                    <Car size={14} /> {selectedAppointment.transport?.enabled ? 'Editar Táxi Dog' : 'Adicionar Táxi Dog'}
+                  </button>
+                )}
+                {editingTaxi && (
+                  <div className="mt-2 space-y-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm">
+                    <p className="font-bold text-amber-950">Táxi Dog neste atendimento</p>
+                    <p className="text-xs text-amber-900">A corrida será cobrada separadamente, inclusive quando o banho estiver coberto por pacote.</p>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <label className="space-y-1"><span className="text-xs font-semibold">Trajeto</span>
+                        <select aria-label="Trajeto do Táxi Dog" value={taxiForm.mode} onChange={e => setTaxiForm(f => ({ ...f, mode: e.target.value }))}
+                          className="h-11 w-full rounded-lg border border-amber-300 bg-white px-2">
+                          <option value="round_trip">Buscar e levar</option><option value="pickup_only">Apenas buscar</option><option value="dropoff_only">Apenas levar</option>
+                        </select>
+                      </label>
+                      <label className="space-y-1"><span className="text-xs font-semibold">Taxa (R$)</span>
+                        <input aria-label="Taxa do Táxi Dog" inputMode="decimal" value={taxiForm.fee} onChange={e => setTaxiForm(f => ({ ...f, fee: e.target.value }))}
+                          className="h-11 w-full rounded-lg border border-amber-300 bg-white px-3" />
+                      </label>
+                      <label className="space-y-1"><span className="text-xs font-semibold">Rua e número</span>
+                        <input aria-label="Rua e número do Táxi Dog" value={taxiForm.street} onChange={e => setTaxiForm(f => ({ ...f, street: e.target.value }))}
+                          className="h-11 w-full rounded-lg border border-amber-300 bg-white px-3" />
+                      </label>
+                      <label className="space-y-1"><span className="text-xs font-semibold">Bairro</span>
+                        <input aria-label="Bairro do Táxi Dog" value={taxiForm.neighborhood} onChange={e => setTaxiForm(f => ({ ...f, neighborhood: e.target.value }))}
+                          className="h-11 w-full rounded-lg border border-amber-300 bg-white px-3" />
+                      </label>
+                      <label className="space-y-1"><span className="text-xs font-semibold">Referência (opcional)</span>
+                        <input value={taxiForm.reference} onChange={e => setTaxiForm(f => ({ ...f, reference: e.target.value }))}
+                          className="h-11 w-full rounded-lg border border-amber-300 bg-white px-3" />
+                      </label>
+                      <label className="space-y-1"><span className="text-xs font-semibold">Observação (opcional)</span>
+                        <input value={taxiForm.notes} onChange={e => setTaxiForm(f => ({ ...f, notes: e.target.value }))}
+                          className="h-11 w-full rounded-lg border border-amber-300 bg-white px-3" />
+                      </label>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <button type="button" onClick={() => setEditingTaxi(false)} className="min-h-10 rounded-lg border border-zinc-300 bg-white px-3">Cancelar</button>
+                      <button type="button" disabled={savingTaxi} onClick={handleSaveTaxi} className="min-h-10 rounded-lg bg-amber-700 px-3 font-bold text-white disabled:opacity-50">
+                        {savingTaxi ? 'Salvando...' : 'Salvar Táxi Dog'}
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {selectedAppointment.transport?.enabled && (
                   <div className="py-2.5 px-3 rounded-xl border border-amber-200 bg-amber-50/70 text-xs mt-1 space-y-1">
                     <div className="flex items-center justify-between gap-2">
@@ -2844,31 +3239,55 @@ export default function PetshopAgendaPage() {
                       </button>
                     </div>
                   </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div
-                      className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
-                        selectedAppointment.professional
-                          ? 'bg-teal-100 text-teal-800'
-                          : 'bg-zinc-200 text-zinc-500'
-                      }`}
-                    >
-                      {selectedAppointment.professional ? (
-                        selectedAppointment.professional.name.charAt(0).toUpperCase()
-                      ) : (
-                        <UserRound size={13} />
+                ) : (() => {
+                  const stageExecutors = extractStageOperatorsSummary(
+                    selectedAppointment.stageHistory,
+                    selectedAppointment.customStages,
+                  );
+                  const mainProfName =
+                    selectedAppointment.professional?.name ||
+                    (stageExecutors.length > 0 ? stageExecutors.map(s => s.userName).filter((v, i, a) => a.indexOf(v) === i).join(', ') : null);
+                  return (
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`h-7 w-7 rounded-full flex items-center justify-center shrink-0 text-xs font-bold ${
+                            mainProfName
+                              ? 'bg-teal-100 text-teal-800'
+                              : 'bg-zinc-200 text-zinc-500'
+                          }`}
+                        >
+                          {mainProfName ? mainProfName.charAt(0).toUpperCase() : <UserRound size={13} />}
+                        </div>
+                        <div className="min-w-0">
+                          <strong className="font-semibold text-zinc-800 block truncate">
+                            {mainProfName || 'Não atribuído'}
+                          </strong>
+                          <span className="text-[10px] text-zinc-400 block truncate">
+                            {selectedAppointment.professional
+                              ? 'Responsável pelo atendimento'
+                              : stageExecutors.length > 0
+                                ? 'Executado por etapa'
+                                : 'Opcional / A definir'}
+                          </span>
+                        </div>
+                      </div>
+                      {stageExecutors.length > 0 && (
+                        <div className="flex flex-wrap gap-1 pt-0.5">
+                          {stageExecutors.map(ex => (
+                            <span
+                              key={ex.status}
+                              className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-teal-900"
+                            >
+                              <span className="text-zinc-500">{ex.label}:</span>
+                              <strong>{ex.userName}</strong>
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    <div className="min-w-0">
-                      <strong className="font-semibold text-zinc-800 block truncate">
-                        {selectedAppointment.professional?.name || 'Não atribuído'}
-                      </strong>
-                      <span className="text-[10px] text-zinc-400 block truncate">
-                        {selectedAppointment.professional ? 'Responsável pelo atendimento' : 'Opcional / A definir'}
-                      </span>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
               </div>
 
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 flex flex-col justify-between">
@@ -3009,82 +3428,260 @@ export default function PetshopAgendaPage() {
             })()}
 
             {/* Histórico Completo de Transições & Auditoria */}
-            {Array.isArray(selectedAppointment.stageHistory) && selectedAppointment.stageHistory.length > 0 && (
-              <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5">
-                <div className="flex items-center justify-between mb-2.5">
-                  <span className="text-xs font-bold text-zinc-700 uppercase tracking-wider flex items-center gap-1.5">
-                    <History size={14} className="text-teal-700" />
-                    Histórico do Atendimento
-                  </span>
-                  <span className="text-[10px] text-zinc-500 font-semibold">
-                    {selectedAppointment.stageHistory.length} registros
-                  </span>
-                </div>
+            {(() => {
+              const historyRows = Array.isArray(selectedAppointment.stageHistory) && selectedAppointment.stageHistory.length > 0
+                ? selectedAppointment.stageHistory
+                : selectedAppointment.status === 'delivered'
+                  ? [
+                      {
+                        status: 'delivered',
+                        label: 'Concluído',
+                        at: selectedAppointment.completedAt || selectedAppointment.endsAt || selectedAppointment.startsAt,
+                        userName: selectedAppointment.professional?.name || null,
+                        notes: 'Atendimento concluído',
+                        skipped: false,
+                      },
+                    ]
+                  : [];
+              if (historyRows.length === 0) return null;
 
-                <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                  {selectedAppointment.stageHistory.map((h, hIdx) => {
-                    const stageLabel = h.label || statusLabelMap[h.status] || getStageLabel(h.status, selectedAppointment.customStages) || h.status;
-                    const timeFormatted = new Date(h.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-                    const dateFormatted = new Date(h.at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+              return (
+                <div className="rounded-xl border border-zinc-200 bg-zinc-50/60 p-3.5">
+                  <div className="flex items-center justify-between mb-2.5">
+                    <span className="text-xs font-bold text-zinc-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <History size={14} className="text-teal-700" />
+                      Histórico do Atendimento
+                    </span>
+                    <span className="text-[10px] text-zinc-500 font-semibold">
+                      {historyRows.length} {historyRows.length === 1 ? 'registro' : 'registros'}
+                    </span>
+                  </div>
 
-                    return (
-                      <div
-                        key={hIdx}
-                        className={`flex items-start justify-between gap-2 rounded-lg p-2 text-xs border ${
-                          h.skipped
-                            ? 'bg-amber-50/70 border-amber-200 text-amber-950'
-                            : 'bg-white border-zinc-200 text-zinc-800'
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <strong className="font-bold">{stageLabel}</strong>
-                            {h.kind === 'service_added' ? (
-                              <span className="rounded bg-sky-50 border border-sky-200 text-sky-800 px-1.5 py-0.5 text-[10px] font-semibold">Adicionado</span>
-                            ) : h.skipped ? (
-                              <span className="rounded bg-amber-100 border border-amber-300 text-amber-900 px-1.5 py-0.2 text-[10px] font-bold">
-                                Etapa Pulada
+                  <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+                    {historyRows.map((h, hIdx) => {
+                      const stageLabel = h.label || statusLabelMap[h.status] || getStageLabel(h.status, selectedAppointment.customStages) || h.status;
+                      const timeFormatted = new Date(h.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                      const dateFormatted = new Date(h.at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                      const badge = getHistoryEntryBadge(h);
+
+                      return (
+                        <div
+                          key={hIdx}
+                          className={`flex items-start justify-between gap-2 rounded-lg p-2 text-xs border ${
+                            h.skipped
+                              ? 'bg-amber-50/70 border-amber-200 text-amber-950'
+                              : 'bg-white border-zinc-200 text-zinc-800'
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <strong className="font-bold">{stageLabel}</strong>
+                              <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}>
+                                {badge.label}
                               </span>
-                            ) : (
-                              <span className="rounded bg-teal-50 border border-teal-200 text-teal-800 px-1.5 py-0.2 text-[10px] font-semibold">
-                                Concluída
-                              </span>
+                              {h.userName && (
+                                <span className="text-[11px] text-zinc-500">
+                                  por <strong className="text-zinc-700">{h.userName}</strong>
+                                </span>
+                              )}
+                            </div>
+                            {h.commissionRecipientName && h.commissionAmount != null && Number(h.commissionAmount) > 0 && (
+                              <p className="mt-1 text-[11px] font-semibold text-teal-800">
+                                Comissão: {money(h.commissionAmount)} para {h.commissionRecipientName} · {h.commissionState === 'PENDING' || selectedAppointment.services.some(s => s.id === h.appointmentServiceId && s.chargedSaleId) ? 'registrada' : 'aguardando cobrança'}
+                              </p>
                             )}
-                            {h.userName && (
-                              <span className="text-[11px] text-zinc-500">
-                                por <strong className="text-zinc-700">{h.userName}</strong>
-                              </span>
+                            {h.operatorName && <p className="mt-1 text-[11px] font-semibold text-teal-800">Etapa executada por {h.operatorName}</p>}
+                            {h.reason && <p className="text-[10px] text-amber-800 mt-0.5">{h.reason}</p>}
+                            {h.notes && <p className="text-[11px] text-zinc-600 mt-0.5 italic">"{h.notes}"</p>}
+                            {h.photoUrl && (
+                              <div className="mt-2">
+                                <a
+                                  href={getFullUrl(h.photoUrl)}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50/80 p-1.5 text-[11px] font-semibold text-teal-800 hover:bg-teal-100 transition"
+                                >
+                                  <img
+                                    src={getFullUrl(h.photoUrl)}
+                                    alt="Foto da etapa"
+                                    className="h-10 w-10 rounded object-cover border border-teal-200"
+                                  />
+                                  <span className="flex items-center gap-1">
+                                    <Camera size={12} /> Foto da etapa ({stageLabel})
+                                  </span>
+                                </a>
+                              </div>
                             )}
                           </div>
-                          {h.reason && <p className="text-[10px] text-amber-800 mt-0.5">{h.reason}</p>}
-                          {h.notes && <p className="text-[11px] text-zinc-600 mt-0.5 italic">"{h.notes}"</p>}
-                          {h.photoUrl && (
-                            <div className="mt-2">
-                              <a
-                                href={getFullUrl(h.photoUrl)}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-2 rounded-lg border border-teal-200 bg-teal-50/80 p-1.5 text-[11px] font-semibold text-teal-800 hover:bg-teal-100 transition"
-                              >
-                                <img
-                                  src={getFullUrl(h.photoUrl)}
-                                  alt="Foto da etapa"
-                                  className="h-10 w-10 rounded object-cover border border-teal-200"
-                                />
-                                <span className="flex items-center gap-1">
-                                  <Camera size={12} /> Foto da etapa ({stageLabel})
-                                </span>
-                              </a>
-                            </div>
-                          )}
+                          <span className="text-[10px] font-semibold text-zinc-400 tabular-nums shrink-0 mt-0.5">
+                            {timeFormatted} · {dateFormatted}
+                          </span>
                         </div>
-                        <span className="text-[10px] font-semibold text-zinc-400 tabular-nums shrink-0 mt-0.5">
-                          {timeFormatted} · {dateFormatted}
-                        </span>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
+              );
+            })()}
+
+            {/* Histórico Completo do(s) Pacote(s) Vinculado(s) */}
+            {(loadingLinkedPackages || linkedPackageContracts.length > 0) && (
+              <div className="rounded-xl border border-teal-200/90 bg-teal-50/35 p-3.5 space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-bold text-teal-950 uppercase tracking-wider flex items-center gap-1.5">
+                    <PackageCheck size={14} className="text-teal-700" />
+                    Histórico do Pacote
+                  </span>
+                  {loadingLinkedPackages && (
+                    <span className="inline-flex items-center gap-1 text-[11px] text-teal-700">
+                      <Loader2 size={12} className="animate-spin" /> Carregando...
+                    </span>
+                  )}
+                </div>
+
+                {linkedPackageContracts.map(pkg => {
+                  const statusMeta = getPackageStatusMeta(pkg);
+                  const totalQty = pkg.items.reduce((s, i) => s + i.totalQuantity, 0);
+                  const usedQty = pkg.items.reduce((s, i) => s + i.usedQuantity, 0);
+                  const reservedQty = pkg.items.reduce((s, i) => s + i.reservedQuantity, 0);
+                  const availQty = pkg.items.reduce((s, i) => s + i.availableQuantity, 0);
+
+                  return (
+                    <div key={pkg.id} className="rounded-xl border border-teal-200 bg-white p-3 space-y-2.5 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <strong className="text-sm font-bold text-zinc-900">{pkg.planNameSnapshot}</strong>
+                            <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${statusMeta.cls}`}>
+                              {statusMeta.label}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-zinc-500 mt-0.5">
+                            Vigência: {new Date(pkg.startDate).toLocaleDateString('pt-BR')} até{' '}
+                            {new Date(pkg.expiresAt).toLocaleDateString('pt-BR')} ·{' '}
+                            <strong>{usedQty}</strong>/{totalQty} realizadas · {reservedQty} agendadas · {availQty} livres
+                            {pkg.createdByOperatorName ? ` · Criado por ${pkg.createdByOperatorName}` : ''}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => navigate(`/petshop/pacotes?contractId=${encodeURIComponent(pkg.id)}`)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-bold text-teal-800 hover:bg-teal-100 cursor-pointer shrink-0"
+                        >
+                          <span>Abrir pacote</span>
+                          <ArrowRight size={12} />
+                        </button>
+                      </div>
+
+                      {Array.isArray(pkg.scheduledAppointments) && pkg.scheduledAppointments.length > 0 && (
+                        <div className="space-y-1.5 border-t border-zinc-100 pt-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                            Sessões do Pacote ({pkg.scheduledAppointments.length})
+                          </p>
+                          <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+                            {pkg.scheduledAppointments.map((sess, sIdx) => {
+                              const isCurrent = sess.id === selectedAppointment.id;
+                              const sessExecutors = extractStageOperatorsSummary(sess.stageHistory, sess.customStages);
+                              const sessIsDone =
+                                sess.status === 'delivered' ||
+                                sess.services.every(s => s.coverageStatus === 'consumed');
+                              return (
+                                <div
+                                  key={sess.id}
+                                  className={`rounded-lg border p-2 ${
+                                    isCurrent
+                                      ? 'border-teal-400 bg-teal-50/60'
+                                      : 'border-zinc-200 bg-zinc-50/50'
+                                  }`}
+                                >
+                                  <div className="flex flex-wrap items-center justify-between gap-1.5">
+                                    <span className="font-semibold text-zinc-800">
+                                      Sessão {sIdx + 1} · {dateTime(sess.startsAt)}
+                                      {pkg.isShared ? ` · ${sess.pet.name}` : ''}
+                                      {isCurrent && (
+                                        <span className="ml-1.5 rounded bg-teal-700 px-1.5 py-0.5 text-[9px] font-bold text-white">
+                                          Atual
+                                        </span>
+                                      )}
+                                    </span>
+                                    <span
+                                      className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                                        sessIsDone
+                                          ? 'bg-emerald-100 text-emerald-800'
+                                          : sess.status === 'cancelled' || sess.status === 'no_show'
+                                            ? 'bg-rose-100 text-rose-800'
+                                            : 'bg-sky-100 text-sky-800'
+                                      }`}
+                                    >
+                                      {sessIsDone ? 'Realizada' : statusLabelMap[sess.status] || sess.status}
+                                    </span>
+                                  </div>
+                                  {sessExecutors.length > 0 ? (
+                                    <div className="mt-1 flex flex-wrap gap-1">
+                                      {sessExecutors.map(ex => (
+                                        <span
+                                          key={ex.status}
+                                          className="rounded border border-zinc-200 bg-white px-1.5 py-0.5 text-[10px] text-zinc-700"
+                                        >
+                                          {ex.label}: <strong>{ex.userName}</strong>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : sess.professional?.name ? (
+                                    <p className="mt-0.5 text-[10px] text-zinc-500">
+                                      Profissional: <strong className="text-zinc-700">{sess.professional.name}</strong>
+                                    </p>
+                                  ) : null}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {Array.isArray(pkg.ledgerEvents) && pkg.ledgerEvents.length > 0 && (
+                        <div className="space-y-1.5 border-t border-zinc-100 pt-2">
+                          <p className="text-[10px] font-bold uppercase tracking-wider text-zinc-500">
+                            Histórico de Movimentações ({pkg.ledgerEvents.length})
+                          </p>
+                          <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                            {pkg.ledgerEvents.map(ev => {
+                              const evMeta = PACKAGE_EVENT_TYPE_LABELS[ev.eventType] || {
+                                label: ev.eventType,
+                                color: 'bg-slate-100 text-slate-700 border-slate-200',
+                              };
+                              return (
+                                <div
+                                  key={ev.id}
+                                  className="flex items-start justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50/70 px-2 py-1.5 text-[11px]"
+                                >
+                                  <div className="min-w-0">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${evMeta.color}`}>
+                                        {evMeta.label}
+                                      </span>
+                                      {ev.operatorName && (
+                                        <span className="text-zinc-500">
+                                          por <strong className="text-zinc-700">{ev.operatorName}</strong>
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-zinc-700 mt-0.5 truncate">
+                                      {ev.reason || 'Movimentação registrada'}
+                                    </p>
+                                  </div>
+                                  <span className="text-[10px] text-zinc-400 tabular-nums shrink-0">
+                                    {dateTime(ev.createdAt)}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -3148,15 +3745,8 @@ export default function PetshopAgendaPage() {
 
               <div className={selectedAppointment.status === 'ready' ? 'contents' : 'flex items-center gap-2'}>
                 {selectedAppointment.status === 'delivered' ? (() => {
-                  const deliveredPendingAddon =
-                    selectedAppointment.services
-                      .filter(s => !s.comboParentId && s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
-                      .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0) +
-                    (selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage
-                      ? Number(selectedAppointment.transport.fee || 0)
-                      : 0);
-                  const alreadyPaidInPdv = selectedAppointment.paidAmount !== null && selectedAppointment.paidAmount !== undefined;
-                  if (deliveredPendingAddon > 0 && !alreadyPaidInPdv) {
+                  const deliveredPendingAddon = amountToCharge(selectedAppointment);
+                  if (deliveredPendingAddon > 0) {
                     return (
                       <button
                         type="button"
@@ -3211,9 +3801,11 @@ export default function PetshopAgendaPage() {
                       <CreditCard size={15} />
                     )}
                     <span>
-                      {selectedAppointment.status === 'ready' && selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0)
+                      {selectedAppointment.status === 'ready' && amountToCharge(selectedAppointment) <= 0 && selectedAppointment.paidAmount != null
+                        ? 'Concluir entrega'
+                        : selectedAppointment.status === 'ready' && selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0)
                         ? 'Concluir (Pacote)'
-                        : ['requested', 'scheduled'].includes(selectedAppointment.status) ? 'Cobrar agora' : 'Cobrar'}
+                        : ['requested', 'scheduled'].includes(selectedAppointment.status) ? 'Cobrar agora' : `Cobrar ${money(amountToCharge(selectedAppointment))}`}
                     </span>
                   </button>
                 )}
@@ -3266,6 +3858,32 @@ export default function PetshopAgendaPage() {
         petshopReceipt={{ customer: paymentItem.appointment.customer.name, total: paymentItem.total, submit: async payments => { const { data } = await api.post(`/petshop/appointments/${paymentItem.appointment.id}/receive`, { payments, prepay: paymentItem.prepay }); return data; } }}
         onSuccess={() => { setSelectedAppointment(null); loadAppointments(false); toast.success('Pagamento registrado.'); }} />}
 
+      {stageAssignment && (
+        <Modal title={`Apontar ${stageAssignment.label} · ${stageAssignment.appointment.pet?.name}`}
+          onClose={() => { if (!savingStageAssignment) setStageAssignment(null); }}>
+          <form onSubmit={event => { event.preventDefault(); void saveStageAssignment(); }} className="space-y-4">
+            <p className="text-sm text-zinc-600">
+              {stageAssignment.advance
+                ? `Ao confirmar, o atendimento avança para ${stageAssignment.label} e a comissão da etapa é atribuída ao funcionário escolhido.`
+                : 'O status e a cobrança do atendimento permanecem como estão. O responsável e a comissão desta etapa serão registrados ou atualizados.'}
+            </p>
+            <label className="block text-sm font-semibold text-zinc-800">Funcionário que executou a etapa *
+              <select value={stageAssigneeId} onChange={event => setStageAssigneeId(event.target.value)}
+                required className="mt-1.5 h-11 w-full rounded-xl border border-zinc-300 bg-white px-3 font-normal">
+                <option value="">Selecione o funcionário</option>
+                {operators.filter(op => op.active).map(op => <option key={op.id} value={op.id}>{op.name}{op.jobTitle ? ` · ${op.jobTitle}` : ''}</option>)}
+              </select>
+            </label>
+            <div className="flex justify-end gap-2">
+              <button type="button" className={secondaryButton} disabled={savingStageAssignment} onClick={() => setStageAssignment(null)}>Cancelar</button>
+              <button type="submit" className={primaryButton} disabled={!stageAssigneeId || savingStageAssignment}>
+                {savingStageAssignment ? 'Salvando...' : 'Confirmar apontamento'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
       {/* 9. MODAL DE FOTO E RECADO DA ETAPA */}
       {stageModalItem && (
         <Modal
@@ -3297,6 +3915,17 @@ export default function PetshopAgendaPage() {
                 ))}
               </select>
             </label>
+
+            {canManageCommissions && stageForm.status !== stageModalItem.status && trackedStageKeys.has(stageForm.status) && (
+              <label>
+                <span className={labelClass}>Funcionário que executou a etapa *</span>
+                <select className={inputClass} value={stagePhotoAssigneeId} required
+                  onChange={event => setStagePhotoAssigneeId(event.target.value)}>
+                  <option value="">Selecione o funcionário</option>
+                  {operators.filter(op => op.active).map(op => <option key={op.id} value={op.id}>{op.name}</option>)}
+                </select>
+              </label>
+            )}
 
             <PhotoUploadField
               label="Foto do pet nesta etapa (aparece no painel do tutor)"

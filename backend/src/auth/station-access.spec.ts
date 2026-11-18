@@ -2,6 +2,7 @@ import { JwtService } from '@nestjs/jwt';
 import { createHash } from 'crypto';
 import { allowedStations, isolatedModules, operatorAllowed, stationRouteAllowed } from './access-policy';
 import { StationAccessService } from './station-access.service';
+import { pinVersion } from './operator-session';
 
 describe('Isolamento operacional opt-in', () => {
   it('preserva caixa legado sem módulos e restringe quando ativados', () => {
@@ -130,5 +131,21 @@ describe('Links de estação e credenciais', () => {
     await expect(service.authorizeRequest(req)).rejects.toThrow('Operador diferente');
     tenant.modulos = {}; req.headers = {};
     await expect(service.authorizeRequest(req)).resolves.toBeUndefined();
+  });
+  it('atribuição de comissão exige administrador e permissão no PIN ativo', async () => {
+    const { service, jwt, op } = setup({});
+    const req = { user, headers: {} as Record<string, string> };
+    await expect(service.assertPetshopCommissionAdmin(req)).rejects.toThrow('PIN do administrador');
+    expect(() => service.assertPetshopCommissionGrantAdmin(req)).not.toThrow();
+    expect(() => service.assertPetshopCommissionGrantAdmin({ ...req, user: { ...user, role: 'operator' } })).toThrow();
+    req.headers['x-operator-token'] = jwt.sign({ type: 'op', tenantId: 'tenant-a', context: 'petshop', opId: op.id,
+      pinVersion: pinVersion(op.pin, process.env.JWT_SECRET!) });
+    await expect(service.assertPetshopCommissionAdmin(req)).rejects.toThrow('sem permissão');
+    (op as any).canManageAppointmentCommissions = true;
+    await expect(service.assertPetshopCommissionAdmin(req)).resolves.toBeUndefined();
+    await expect(service.assertPetshopCommissionAdmin({ ...req, user: { ...user, role: 'operator' } })).resolves.toBeUndefined();
+    req.headers['x-operator-token'] = jwt.sign({ type: 'op', tenantId: 'tenant-b', context: 'petshop', opId: op.id,
+      pinVersion: pinVersion(op.pin, process.env.JWT_SECRET!) });
+    await expect(service.assertPetshopCommissionAdmin(req)).rejects.toThrow('inválida');
   });
 });

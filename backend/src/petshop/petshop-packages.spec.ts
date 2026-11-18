@@ -440,6 +440,232 @@ describe('PetshopPackagesService & PetshopWhatsappService', () => {
       }));
       expect(out.groupContracts).toHaveLength(2);
     });
+
+    it('grava stageHistory completo, customStages e professionalId ao criar pacote com sessões passadas concluídas', async () => {
+      const { PetshopPricingService } = require('./petshop-pricing.service');
+      const pricingService = new PetshopPricingService();
+      const mockCommissions = { recordExecution: jest.fn().mockResolvedValue(undefined) };
+      const svcWithPricing = new PetshopPackagesService(
+        { getTenantClient: jest.fn().mockResolvedValue(mockPrisma) } as any,
+        { get: jest.fn().mockReturnValue({ tenantId: 'tenant-1', databaseUrl: 'mysql://test' }) } as any,
+        mockCommissions as any,
+        pricingService,
+      );
+
+      const pastStart = '2026-11-01T18:00:00.000Z';
+      mockPrisma.customer = {
+        findUnique: jest.fn().mockResolvedValue({ id: 'cust-1', name: 'Alesson Castro', address: null, reference: null }),
+      };
+      mockPrisma.petPackagePlan = {
+        findUnique: jest.fn().mockResolvedValue({
+          id: 'plan-1',
+          name: 'Pacote quinzenal (2 banhos)',
+          active: true,
+          basePrice: 90,
+          validityDays: 30,
+          items: [
+            {
+              serviceId: 'svc-1',
+              quantity: 1,
+              service: {
+                id: 'svc-1',
+                name: 'Banho + tosa higiênica',
+                price: 50,
+                durationMinutes: 70,
+                serviceType: 'INDIVIDUAL',
+                customStages: ['checked_in', 'bathing', 'finishing', 'ready'],
+              },
+            },
+          ],
+          pricingRules: [],
+        }),
+      };
+      mockPrisma.pet = {
+        findMany: jest.fn().mockResolvedValue([
+          { id: 'pet-1', customerId: 'cust-1', name: 'Nina', species: 'dog', size: 'small', coatType: 'long' },
+        ]),
+      };
+
+      const createdAppointments: any[] = [];
+      const pastTx: any = {
+        $queryRaw: jest
+          .fn()
+          .mockResolvedValueOnce([
+            {
+              id: 'pkg-1',
+              customerId: 'cust-1',
+              petId: 'pet-1',
+              isShared: false,
+              status: 'active',
+              paymentStatus: 'paid',
+              expiresAt: new Date('2026-12-30T23:59:59Z'),
+              planNameSnapshot: 'Pacote quinzenal (2 banhos)',
+              notes: null,
+            },
+          ])
+          .mockResolvedValueOnce([
+            {
+              id: 'citem-1',
+              totalQuantity: 1,
+              reservedQuantity: 0,
+              usedQuantity: 0,
+              availableQuantity: 1,
+              serviceNameSnapshot: 'Banho + tosa higiênica',
+            },
+          ])
+          .mockResolvedValueOnce([
+            {
+              id: 'citem-1',
+              customerPackageId: 'pkg-1',
+              totalQuantity: 1,
+              reservedQuantity: 1,
+              usedQuantity: 0,
+              availableQuantity: 0,
+              serviceNameSnapshot: 'Banho + tosa higiênica',
+            },
+          ]),
+        operator: {
+          findMany: jest.fn().mockResolvedValue([
+            { id: 'op-sara', name: 'Sara' },
+            { id: 'op-miria', name: 'Miriã' },
+          ]),
+        },
+        customerPetPackage: {
+          create: jest.fn().mockResolvedValue({ id: 'pkg-1', status: 'active' }),
+          update: jest.fn().mockResolvedValue({ id: 'pkg-1', status: 'completed' }),
+          findUnique: jest.fn().mockResolvedValue({ id: 'pkg-1', status: 'completed', notes: null }),
+        },
+        customerPetPackageItem: {
+          create: jest.fn().mockResolvedValue({ id: 'citem-1' }),
+          update: jest.fn(),
+          findMany: jest.fn().mockResolvedValue([{ id: 'citem-1', totalQuantity: 1, usedQuantity: 1, reservedQuantity: 0 }]),
+        },
+        customerPetPackageLedger: {
+          create: jest.fn(),
+          findUnique: jest.fn().mockResolvedValue(null),
+        },
+        petAppointment: {
+          create: jest.fn().mockImplementation(args => {
+            const appt = { id: 'apt-past-1', ...args.data };
+            createdAppointments.push(appt);
+            return Promise.resolve(appt);
+          }),
+          findUnique: jest.fn().mockImplementation(({ where }: any) => {
+            const found = createdAppointments.find(a => a.id === where.id) || createdAppointments[0];
+            return Promise.resolve({
+              ...found,
+              pet: { size: 'small' },
+              services: [
+                {
+                  id: 'appsvc-1',
+                  serviceId: 'svc-1',
+                  priceSnapshot: 50,
+                  customerPackageId: 'pkg-1',
+                  customerPackageItemId: 'citem-1',
+                  coverageStatus: 'reserved',
+                  service: { id: 'svc-1', name: 'Banho + tosa higiênica', customStages: ['checked_in', 'bathing', 'finishing', 'ready'] },
+                  customerPackageItem: { id: 'citem-1', unitValueSnapshot: 90 },
+                },
+              ],
+            });
+          }),
+        },
+        petAppointmentService: {
+          findFirst: jest.fn().mockResolvedValue({ id: 'appsvc-1', serviceId: 'svc-1', priceSnapshot: 50 }),
+          update: jest.fn(),
+        },
+      };
+
+      mockPrisma.$transaction = jest.fn(async cb => cb(pastTx));
+
+      await svcWithPricing.createContract(
+        {
+          customerId: 'cust-1',
+          packagePlanId: 'plan-1',
+          petIds: ['pet-1'],
+          scheduledSessions: [
+            {
+              petId: 'pet-1',
+              startsAt: pastStart,
+              serviceIds: ['svc-1'],
+              completed: true,
+              stageOperators: { bathing: 'op-sara', grooming: 'op-miria', finishing: 'op-sara' },
+            },
+          ],
+        },
+        { userId: 'admin-1', name: 'Lucas' },
+      );
+
+      expect(createdAppointments).toHaveLength(1);
+      const appt = createdAppointments[0];
+      expect(appt.status).toBe('delivered');
+      expect(appt.professionalId).toBe('op-sara');
+      expect(appt.customStages).toEqual(['checked_in', 'bathing', 'finishing', 'ready']);
+      expect(appt.stageHistory.map((h: any) => h.status)).toEqual([
+        'checked_in',
+        'bathing',
+        'finishing',
+        'ready',
+        'delivered',
+      ]);
+      expect(appt.stageHistory.find((h: any) => h.status === 'bathing').userName).toBe('Sara');
+      expect(appt.stageHistory.find((h: any) => h.status === 'finishing').userName).toBe('Sara');
+      expect(appt.stageHistory.find((h: any) => h.status === 'delivered').userName).toBe('Lucas');
+      expect(mockCommissions.recordExecution).toHaveBeenCalled();
+    });
+
+    it('reconstroi stageHistory e profissional em getContractById para sessões concluídas legadas com comissões', async () => {
+      const legacyConcludedAppt = {
+        id: 'apt-legacy-1',
+        startsAt: new Date('2026-11-02T18:00:00Z'),
+        endsAt: new Date('2026-11-02T19:10:00Z'),
+        status: 'delivered',
+        checkedInAt: new Date('2026-11-02T18:00:00Z'),
+        readyAt: new Date('2026-11-02T19:10:00Z'),
+        completedAt: new Date('2026-11-02T19:10:00Z'),
+        updatedAt: new Date('2026-11-02T19:10:00Z'),
+        stageHistory: null,
+        professional: null,
+        professionalId: null,
+        pet: { id: 'pet-1', name: 'Nina' },
+        services: [
+          {
+            id: 'svc-1',
+            nameSnapshot: 'Banho + tosa higiênica',
+            coverageStatus: 'consumed',
+            service: { id: 's1', name: 'Banho + tosa higiênica', customStages: ['checked_in', 'bathing', 'finishing', 'ready'] },
+          },
+        ],
+        commissions: [
+          { stageKey: 'bathing', executedAt: new Date('2026-11-02T18:00:00Z'), operator: { id: 'op-sara', name: 'Sara' } },
+          { stageKey: 'finishing', executedAt: new Date('2026-11-02T18:00:00Z'), operator: { id: 'op-sara', name: 'Sara' } },
+        ],
+      };
+
+      mockPrisma.customerPetPackage = {
+        updateMany: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ id: 'pkg-legacy', status: 'completed', notes: null }),
+      };
+      mockPrisma.petAppointment = {
+        findMany: jest.fn().mockResolvedValue([legacyConcludedAppt]),
+      };
+
+      const contract: any = await service.getContractById('pkg-legacy');
+
+      expect(contract.scheduledAppointments).toHaveLength(1);
+      const enriched = contract.scheduledAppointments[0];
+      expect(enriched.commissions).toBeUndefined();
+      expect(enriched.professional).toEqual({ id: 'op-sara', name: 'Sara' });
+      expect(Array.isArray(enriched.stageHistory)).toBe(true);
+      expect(enriched.stageHistory.map((h: any) => h.status)).toEqual([
+        'checked_in',
+        'bathing',
+        'finishing',
+        'ready',
+        'delivered',
+      ]);
+      expect(enriched.stageHistory.find((h: any) => h.status === 'bathing').userName).toBe('Sara');
+    });
   });
 
   describe('PetshopWhatsappService — Renderização Dinâmica de Templates', () => {

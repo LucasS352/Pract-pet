@@ -33,4 +33,17 @@ describe('additional service commission at checkout', () => {
       amount: new Prisma.Decimal('3.00'), ruleKind: 'PERCENT',
     })], skipDuplicates: true });
   });
+
+  it('confirma uma comissão aguardando cobrança uma única vez', async () => {
+    const tx: any = {
+      petAppointmentService: { findMany: jest.fn().mockResolvedValue([{ id: 'extra', serviceId: 'svc', priceSnapshot: '15.00' }]) },
+      petCommissionRule: { findUnique: jest.fn().mockResolvedValue({ id: 'rule', serviceId: 'svc', kind: 'FIXED', value: new Prisma.Decimal(5), version: 1 }) },
+      petCommission: { findUnique: jest.fn().mockResolvedValue({ id: 'commission', state: 'AWAITING_PAYMENT' }), update: jest.fn(), createMany: jest.fn() },
+    };
+    await recordAddedServiceCommissions(tx, { id: 'appointment', stageHistory: [
+      { kind: 'service_added', appointmentServiceId: 'extra', operatorId: 'worker', commissionRuleId: 'rule' },
+    ] }, 'tenant', new Date('2026-11-17T18:00:00Z'), ['extra'], true);
+    expect(tx.petCommission.update).toHaveBeenCalledWith({ where: { id: 'commission' }, data: expect.objectContaining({ state: 'PENDING' }) });
+    expect(tx.petCommission.createMany).not.toHaveBeenCalled();
+  });
 });

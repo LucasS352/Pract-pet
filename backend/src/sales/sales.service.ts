@@ -9,7 +9,7 @@ import { retryTransaction } from '../prisma/transaction-retry';
 import { lockProducts } from '../prisma/lock-products';
 import { releaseComandaAssets } from '../comandas/service-timer.rules';
 import { assertComandaSnapshot } from './comanda-snapshot';
-import { claimPetshopCheckout, completePetshopCheckout } from './petshop-checkout';
+import { appointmentLinkFromComanda, chargedServiceIds, claimPetshopCheckout, completePetshopCheckout } from './petshop-checkout';
 import archiver = require('archiver');
 import { MailService } from '../mail/mail.service';
 import { IntegrationsService } from '../integrations/integrations.service';
@@ -922,7 +922,7 @@ export class SalesService {
       // These intents cannot disappear between the sale commit and a process restart.
       if (data.comandaId) await releaseComandaAssets(tx, data.comandaId);
 
-      await completePetshopCheckout(tx, petshopAppointmentId, operatorId || userId || null, tenantId, data.petshopPrepayment === true);
+      await completePetshopCheckout(tx, petshopAppointmentId, operatorId || userId || null, tenantId, data.petshopPrepayment === true, sale.id, comandaToClose);
 
       const jobs = [
         ...(fullSale.emitirNfce ? [{ kind: 'NFCE', payload: '{}' }] : []),
@@ -1570,6 +1570,29 @@ export class SalesService {
           payments: true
         }
       });
+
+      const petComanda = await tx.comanda.findFirst({ where: { saleId }, include: { items: { where: { status: 'active' }, select: { notes: true } } } });
+      const petLink = appointmentLinkFromComanda(petComanda?.notes);
+      if (petLink?.isAddon) {
+        const serviceIds = chargedServiceIds(petComanda);
+        if (serviceIds.length) {
+          const commissionRows = await tx.petCommission.findMany({ where: { appointmentServiceId: { in: serviceIds }, state: { not: 'REVERSED' } } });
+          for (const commission of commissionRows) {
+            await tx.petCommission.update({ where: { id: commission.id }, data: {
+              state: 'REVERSED', reversedAt: new Date(), reversedById: this.tenantContext.get().userId || 'system', reversalReason: reason,
+            } });
+            if (commission.state === 'PAID') await tx.petCommissionAdjustment.create({ data: {
+              commissionId: commission.id, amount: commission.amount.negated(), reason, actorId: this.tenantContext.get().userId || 'system',
+            } });
+          }
+          await tx.petAppointmentService.updateMany({ where: { appointmentId: petLink.appointmentId, id: { in: serviceIds }, chargedSaleId: saleId }, data: { chargedSaleId: null } });
+          const appointment = await tx.petAppointment.findUnique({ where: { id: petLink.appointmentId }, select: { stageHistory: true, status: true } });
+          if (appointment) await tx.petAppointment.update({ where: { id: petLink.appointmentId }, data: { stageHistory: [
+            ...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []),
+            { kind: 'additional_charge_reversed', status: appointment.status, label: 'Cobrança adicional estornada', at: new Date().toISOString(), saleId, serviceIds, reason },
+          ] } });
+        }
+      }
 
       return updatedSale;
     });

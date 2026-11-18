@@ -1,6 +1,6 @@
 import { contractMetadata, packageReceiptWindow, receivedInPeriod } from './package-receipts';
 import { SalesService } from '../sales/sales.service';
-import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
@@ -11,10 +11,17 @@ import { PetshopPackagesService } from './petshop-packages.service';
 import { PetshopWhatsappService } from './petshop-whatsapp.service';
 import { PetshopPricingService, DEFAULT_STAGE_DEFINITIONS, PetshopStageItem } from './petshop-pricing.service';
 import { PetshopCommissionsService } from './petshop-commissions.service';
+import { StationAccessService } from '../auth/station-access.service';
 import { normalizeTransport, parseAppointmentTransport, serializeAppointmentTransport } from './petshop-transport';
 import { parseTaxiDefaultFee, readTaxiDefaultFee, TAXI_DEFAULT_FEE_SETTINGS_ID } from './taxi-default-fee';
 import { addonSettingsId, parseAddonSettings, validateAddonSettings } from './service-addon-settings';
 import { recordAddedServiceCommissions } from '../sales/petshop-checkout';
+import {
+  buildPastSessionStageHistory,
+  enrichAppointmentHistory,
+  resolvePrimaryStageOperatorId,
+  STAGE_LABELS_PT,
+} from './appointment-history.helper';
 
 const PET_SIZE_PT_LABELS: Record<string, string> = {
   mini: 'Mini',
@@ -93,11 +100,28 @@ export class PetshopService {
     private readonly pricing: PetshopPricingService,
     private readonly commissions: PetshopCommissionsService,
     private readonly sales: SalesService,
+    @Optional() private readonly stationAccess?: StationAccessService,
   ) {}
 
   private async prisma() {
     const { tenantId, databaseUrl } = this.tenantContext.get();
     return this.tenantManager.getTenantClient(tenantId, databaseUrl);
+  }
+
+  private async resolveUserDisplayName(prisma: any, userId?: string | null, req?: any): Promise<string | null> {
+    if (userId && prisma?.operator?.findUnique) {
+      try {
+        const op = await prisma.operator.findUnique({ where: { id: userId }, select: { name: true } });
+        if (op?.name) return op.name;
+      } catch {}
+    }
+    if (userId && this.heart?.user?.findUnique) {
+      try {
+        const user = await this.heart.user.findUnique({ where: { id: userId }, select: { name: true } });
+        if (user?.name) return user.name;
+      } catch {}
+    }
+    return req?.user?.name || req?.user?.email || null;
   }
 
   private async syncAddonCommissionRule(tx: Prisma.TransactionClient, serviceId: string, settings: ReturnType<typeof parseAddonSettings>, actorId?: string | null) {
@@ -212,7 +236,7 @@ export class PetshopService {
           for (const cmd of closedComandas) {
             if (!cmd?.sale || !cmd.notes) continue;
             for (const id of chunk) {
-              if (cmd.notes.includes(id) && !paymentByAppId.has(id)) {
+              if (cmd.notes.includes(id) && (!paymentByAppId.has(id) || cmd.sale.createdAt > paymentByAppId.get(id)!.createdAt)) {
                 paymentByAppId.set(id, {
                   id: cmd.sale.id,
                   total: Number(cmd.sale.total || 0),
@@ -1128,10 +1152,20 @@ export class PetshopService {
           include: {
             services: {
               include: {
+                service: true,
                 customerPackage: { select: { id: true, planNameSnapshot: true } },
               },
             },
             professional: { select: { id: true, name: true } },
+            commissions: {
+              where: { state: { not: 'REVERSED' } },
+              select: { stageKey: true, executedAt: true, operator: { select: { id: true, name: true } } },
+              orderBy: { executedAt: 'asc' },
+            },
+            packageLedgerEvents: {
+              select: { eventType: true, createdAt: true, operatorId: true, operatorName: true, reason: true },
+              orderBy: { createdAt: 'asc' },
+            },
           },
           orderBy: { startsAt: 'desc' },
           take: 30,
@@ -1139,7 +1173,12 @@ export class PetshopService {
       },
     });
     if (!pet) throw new NotFoundException('Pet não encontrado.');
-    return pet;
+    return {
+      ...pet,
+      appointments: Array.isArray(pet.appointments)
+        ? pet.appointments.map((apt: any) => enrichAppointmentHistory(apt, this.pricing))
+        : pet.appointments,
+    };
   }
 
   async createPet(data: any) {
@@ -1370,7 +1409,7 @@ export class PetshopService {
     });
   }
 
-  async ensureComandaForAppointment(prisma: any, appointmentId: string, forceAddonFlag = false) {
+  async ensureComandaForAppointment(prisma: any, appointmentId: string, forceAddonFlag = false, hasPaidSale = false) {
     const appointment = await prisma.petAppointment.findUnique({
       where: { id: appointmentId },
       include: {
@@ -1382,18 +1421,27 @@ export class PetshopService {
     });
 
     if (!appointment) return null;
+    const lastPaidSale = hasPaidSale ? await prisma.comanda.findFirst({
+      where: { notes: { contains: appointmentId }, status: 'closed', sale: { is: { status: 'completed' } } },
+      orderBy: { sale: { createdAt: 'desc' } },
+      select: { sale: { select: { createdAt: true } } },
+    }) : null;
+    const history = Array.isArray(appointment.stageHistory) ? appointment.stageHistory : [];
 
     // Filtra apenas os serviços com saldo avulso, sem componentes de combo.
-    const payableServices = appointment.services.filter(
+    const payableServices = (appointment.services || []).filter(
       (svc: any) =>
         svc.coverageStatus !== 'reserved' &&
         svc.coverageStatus !== 'consumed' &&
         svc.comboParentId === null &&
+        (!forceAddonFlag || (!svc.chargedSaleId && (!hasPaidSale || history.some((entry: any) =>
+          entry?.kind === 'service_added' && entry.appointmentServiceId === svc.id &&
+          new Date(entry.at).getTime() > (lastPaidSale?.sale?.createdAt?.getTime() || 0))))) &&
         Number(svc.priceSnapshot) > Number(svc.coveredAmount || 0),
     );
 
     const transport = parseAppointmentTransport(appointment.checkInNotes);
-    const transportFee = transport && !transport.coveredByPackage ? Number(transport.fee) : 0;
+    const transportFee = (!forceAddonFlag || !hasPaidSale) && transport && !transport.coveredByPackage ? Number(transport.fee) : 0;
     const taxiProductId = 'petshop-taxi-dog-fee';
     const serviceNote = 'Serviço Pet Shop';
     const taxiNote = 'Táxi Dog Pet Shop';
@@ -1401,7 +1449,7 @@ export class PetshopService {
       productId: svc.serviceId,
       name: svc.nameSnapshot,
       price: new Prisma.Decimal(svc.priceSnapshot).sub(new Prisma.Decimal(svc.coveredAmount || 0)).toDecimalPlaces(2),
-      notes: serviceNote,
+      notes: `${serviceNote}:${svc.id}`,
     }));
     if (transportFee > 0) {
       payableLines.push({ productId: taxiProductId, name: 'Táxi Dog', price: new Prisma.Decimal(transportFee).toDecimalPlaces(2), notes: taxiNote });
@@ -1434,11 +1482,13 @@ export class PetshopService {
 
     if (existing) {
       const activeItems = existing.items.filter((item: any) => item.status === 'active');
-      const autoItems = activeItems.filter((item: any) => item.notes === serviceNote || item.notes === taxiNote);
-      const manualItems = activeItems.filter((item: any) => item.notes !== serviceNote && item.notes !== taxiNote);
-      const itemKey = (productId: string, price: any, quantity: any) => `${productId}:${new Prisma.Decimal(price).toFixed(2)}:${new Prisma.Decimal(quantity).toFixed(3)}`;
-      const currentKeys = autoItems.map((item: any) => itemKey(item.productId, item.totalPrice, item.quantity)).sort();
-      const expectedKeys = payableLines.map(line => itemKey(line.productId, line.price, 1)).sort();
+      const isAuto = (item: any) => item.notes === serviceNote || String(item.notes || '').startsWith(`${serviceNote}:`) || item.notes === taxiNote;
+      const autoItems = activeItems.filter(isAuto);
+      const manualItems = activeItems.filter((item: any) => !isAuto(item));
+      const itemKey = (productId: string, price: any, quantity: any, notes: string) =>
+        `${productId}:${new Prisma.Decimal(price).toFixed(2)}:${new Prisma.Decimal(quantity).toFixed(3)}:${notes}`;
+      const currentKeys = autoItems.map((item: any) => itemKey(item.productId, item.totalPrice, item.quantity, item.notes)).sort();
+      const expectedKeys = payableLines.map(line => itemKey(line.productId, line.price, 1, line.notes)).sort();
       const changed = currentKeys.length !== expectedKeys.length || currentKeys.some((key: string, index: number) => key !== expectedKeys[index]);
 
       if (changed) {
@@ -1901,6 +1951,15 @@ export class PetshopService {
         pet: true,
         customer: true,
         professional: { select: { id: true, name: true } },
+        commissions: {
+          where: { state: { not: 'REVERSED' } },
+          select: { stageKey: true, executedAt: true, operator: { select: { id: true, name: true } } },
+          orderBy: { executedAt: 'asc' },
+        },
+        packageLedgerEvents: {
+          select: { eventType: true, createdAt: true, operatorId: true, operatorName: true, reason: true },
+          orderBy: { createdAt: 'asc' },
+        },
         services: {
           include: {
             service: true,
@@ -1927,11 +1986,16 @@ export class PetshopService {
 
     const enriched = await this.attachPaymentStatus(
       prisma,
-      appointments.map((apt: any) => ({
-        ...apt,
-        transport: parseAppointmentTransport(apt.checkInNotes),
-        resolvedStages: this.pricing.resolveAppointmentStages(apt),
-      })),
+      appointments.map((apt: any) =>
+        enrichAppointmentHistory(
+          {
+            ...apt,
+            transport: parseAppointmentTransport(apt.checkInNotes),
+            resolvedStages: this.pricing.resolveAppointmentStages(apt),
+          },
+          this.pricing,
+        ),
+      ),
     );
     return enriched;
   }
@@ -2075,33 +2139,57 @@ export class PetshopService {
     }
     const resolvedStages = this.pricing.consolidateStages(stagesLists);
 
-    let operatorName: string | null = null;
-    if (userId) {
-      try {
-        const op = await prisma.operator.findUnique({ where: { id: userId }, select: { name: true } });
-        if (op) operatorName = op.name;
-      } catch {}
-    }
+    const operatorName = await this.resolveUserDisplayName(prisma, userId);
 
     const isCompletedCreate = Boolean(data.completed);
     const initialStatus = isCompletedCreate ? 'delivered' : (data.status === 'requested' ? 'requested' : 'scheduled');
-    const initialHistory = [
+    let effectiveProfessionalId = professionalId;
+    let initialHistory: Array<Record<string, any>> = [
       {
         status: initialStatus,
+        label: STAGE_LABELS_PT[initialStatus] || initialStatus,
         at: (isCompletedCreate ? startsAt : new Date()).toISOString(),
         userId: userId || null,
         userName: operatorName || null,
+        skipped: false,
       },
     ];
+    if (isCompletedCreate) {
+      const stageOpIds = new Set<string>();
+      if (professionalId) stageOpIds.add(professionalId);
+      if (data.stageOperators && typeof data.stageOperators === 'object') {
+        for (const opId of Object.values(data.stageOperators)) {
+          if (opId && opId !== 'none') stageOpIds.add(String(opId));
+        }
+      }
+      const opMap = new Map<string, { id: string; name: string }>();
+      if (stageOpIds.size > 0 && prisma?.operator?.findMany) {
+        const opRows: Array<{ id: string; name: string }> = await prisma.operator.findMany({
+          where: { id: { in: [...stageOpIds] } },
+          select: { id: true, name: true },
+        });
+        for (const op of opRows) opMap.set(op.id, op);
+      }
+      effectiveProfessionalId = resolvePrimaryStageOperatorId(professionalId, data.stageOperators);
+      initialHistory = buildPastSessionStageHistory({
+        resolvedStages,
+        startsAt,
+        endsAt,
+        stageOperators: data.stageOperators,
+        operatorMap: opMap,
+        fallbackOperatorId: professionalId,
+        actor: { userId, operatorId: data.operatorId, name: data.operatorName || operatorName },
+      });
+    }
 
     const created = await prisma.$transaction(async tx => {
-      if (professionalId && !isCompletedCreate) {
+      if (effectiveProfessionalId && !isCompletedCreate) {
         const professional = await tx.$queryRaw<Array<{ id: string }>>(
-          Prisma.sql`SELECT id FROM operators WHERE id = ${professionalId} AND active = 1 FOR UPDATE`,
+          Prisma.sql`SELECT id FROM operators WHERE id = ${effectiveProfessionalId} AND active = 1 FOR UPDATE`,
         );
         if (!professional.length) throw new BadRequestException('Profissional inválido.');
         const conflict = await tx.petAppointment.findFirst({ where: {
-          professionalId, status: { notIn: ['cancelled', 'no_show'] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt },
+          professionalId: effectiveProfessionalId, status: { notIn: ['cancelled', 'no_show'] }, startsAt: { lt: endsAt }, endsAt: { gt: startsAt },
         } });
         if (conflict) throw new ConflictException('Este profissional já possui um atendimento nesse horário.');
       }
@@ -2109,7 +2197,7 @@ export class PetshopService {
         data: {
           customerId: pet.customerId,
           petId,
-          professionalId,
+          professionalId: effectiveProfessionalId,
           startsAt,
           endsAt,
           status: initialStatus,
@@ -2245,6 +2333,10 @@ export class PetshopService {
     });
     if (!current) throw new NotFoundException('Agendamento não encontrado.');
 
+    if (data.transport?.enabled && ['cancelled', 'no_show'].includes(current.status)) {
+      throw new BadRequestException('Não é possível incluir Táxi Dog em atendimento cancelado.');
+    }
+
     if (data.packageContractId) {
       const linkedReservation = current.services.some(service =>
         service.customerPackageId === String(data.packageContractId) && service.coverageStatus === 'reserved');
@@ -2257,9 +2349,15 @@ export class PetshopService {
     }
 
     let startsAt = current.startsAt;
-    if ((data.addServices?.length || data.removeAppointmentServiceId || data.transport !== undefined) &&
-        await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })) {
-      throw new BadRequestException('Atendimento pago antecipadamente. Estorne o pagamento antes de alterar serviços ou transporte.');
+    const paidComanda = (data.addServices?.length || data.removeAppointmentServiceId || data.transport !== undefined)
+      ? await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } },
+        orderBy: { sale: { createdAt: 'desc' } }, select: { sale: { select: { id: true, createdAt: true } } } }) : null;
+    if (paidComanda && (data.removeAppointmentServiceId || data.transport !== undefined)) {
+      throw new BadRequestException('Atendimento pago. Estorne o pagamento antes de alterar serviços ou transporte.');
+    }
+    if (data.addServices?.length && (paidComanda || current.status === 'delivered' || current.completedAt ||
+        data.addServices.some((item: any) => item.commissionRecipientId))) {
+      await this.stationAccess?.assertPetshopCommissionAdmin(req);
     }
     let endsAt = current.endsAt;
     let rescheduled = false;
@@ -2321,6 +2419,7 @@ export class PetshopService {
     // A autoria de adicionais é vinculada à sessão de colaborador, nunca ao nome enviado pelo cliente.
     const addedServiceHistory: any[] = [];
     const additions: Array<{ id: string; appointmentId: string; serviceId: string; nameSnapshot: string; priceSnapshot: number; durationMinutes: number; coverageStatus: string }> = [];
+    const pendingCommissions: Array<{ appointmentServiceId: string; operatorId: string; rule: any; base: number }> = [];
     let addonActor: { id: string; name: string } | null = null;
     if (Array.isArray(data.addServices) && data.addServices.length && req?.headers?.['x-operator-token']) {
       addonActor = await this.commissions.sessionOperator(req);
@@ -2335,7 +2434,10 @@ export class PetshopService {
           const addonRow = await prisma.tenantSettings.findUnique({ where: { id: addonSettingsId(svc.id) }, select: { paymentMethodsConfig: true } });
           const addon = parseAddonSettings(addonRow?.paymentMethodsConfig);
           if (addon.commissionOnAdd && addon.commissionAmount <= 0) throw new BadRequestException('Atualize o serviço com o novo valor fixo de comissão antes de incluí-lo.');
-          if (addon.commissionOnAdd && !addonActor) throw new BadRequestException('Identifique o colaborador com PIN para incluir este serviço comissionado.');
+          const recipientId = item.commissionRecipientId ? String(item.commissionRecipientId) : addonActor?.id;
+          if (addon.commissionOnAdd && !recipientId) throw new BadRequestException('Selecione o funcionário que receberá a comissão.');
+          const recipient = recipientId ? await prisma.operator.findFirst({ where: { id: recipientId, active: true }, select: { id: true, name: true } }) : null;
+          if (recipientId && !recipient) throw new BadRequestException('Funcionário da comissão inválido ou inativo.');
           const addonRule = addon.commissionOnAdd ? await prisma.petCommissionRule.findFirst({ where: { scopeKey: `service_added:${svc.id}:*`, active: true }, orderBy: { version: 'desc' } }) : null;
           if (addon.commissionOnAdd && !addonRule) throw new BadRequestException('Regra de comissão do serviço não encontrada. Salve o serviço novamente.');
           const petChar = {
@@ -2349,13 +2451,16 @@ export class PetshopService {
           const added = { id: randomUUID(), appointmentId: id, serviceId: svc.id, nameSnapshot: svc.name,
             priceSnapshot: price, durationMinutes: resolved.durationMinutes, coverageStatus: 'none' };
           additions.push(added);
-          if (addon.trackAddedBy) {
+          if (addon.commissionOnAdd && addonRule && recipient) pendingCommissions.push({ appointmentServiceId: added.id, operatorId: recipient.id, rule: addonRule, base: price });
+          if (addon.trackAddedBy || recipient || current.status === 'delivered' || paidComanda) {
             addedServiceHistory.push({
               kind: 'service_added', status: current.status, label: `Serviço adicionado: ${svc.name}`,
               appointmentServiceId: added.id, serviceId: svc.id, at: new Date().toISOString(),
               userId: addonActor?.id || req?.user?.id || userId || null,
               userName: addonActor?.name || req?.user?.name || req?.user?.email || 'Administrador',
-              operatorId: addonActor?.id || null,
+              operatorId: recipient?.id || null,
+              commissionRecipientName: recipient?.name || null,
+              commissionState: addon.commissionOnAdd ? (price > 0 ? 'AWAITING_PAYMENT' : 'PENDING') : null,
               commissionAmount: addon.commissionOnAdd ? addon.commissionAmount : 0,
               commissionRuleId: addonRule?.id || null,
             });
@@ -2376,13 +2481,7 @@ export class PetshopService {
     let updatedHistory = Array.isArray(current.stageHistory) ? [...(current.stageHistory as any[])] : [];
     updatedHistory.push(...addedServiceHistory);
     if (rescheduled) {
-      let operatorName: string | null = null;
-      if (userId) {
-        try {
-          const op = await prisma.operator.findUnique({ where: { id: userId }, select: { name: true } });
-          if (op) operatorName = op.name;
-        } catch {}
-      }
+      const operatorName = await this.resolveUserDisplayName(prisma, userId, req);
 
       const prevStr = current.startsAt.toLocaleDateString('pt-BR') + ' às ' + current.startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       const nextStr = startsAt.toLocaleDateString('pt-BR') + ' às ' + startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
@@ -2405,7 +2504,14 @@ export class PetshopService {
     if (data.transport !== undefined) {
       const existingTransport = parseAppointmentTransport(current.checkInNotes);
       const mergedTransport = data.transport ? { ...(existingTransport || {}), ...data.transport } : null;
-      checkInNotes = serializeAppointmentTransport(mergedTransport);
+      const transport = normalizeTransport(mergedTransport);
+      if (transport?.coveredByPackage) {
+        const reservations = current.services
+          .filter(service => service.customerPackageId && ['reserved', 'consumed'].includes(service.coverageStatus))
+          .map(service => ({ customerPackageId: service.customerPackageId! }));
+        await this.packages.assertTransportCoverageForReservationsInTx(prisma, reservations, transport.mode);
+      }
+      checkInNotes = serializeAppointmentTransport(transport);
     }
 
     const updated = await prisma.$transaction(async tx => {
@@ -2428,8 +2534,30 @@ export class PetshopService {
         } });
         if (conflict) throw new ConflictException('O profissional já possui outro atendimento nesse horário.');
       }
-      if (data.removeAppointmentServiceId) await tx.petAppointmentService.deleteMany({ where: { id: String(data.removeAppointmentServiceId), appointmentId: id } });
+      if (data.removeAppointmentServiceId) {
+        const removedId = String(data.removeAppointmentServiceId);
+        const settledCommission = await tx.petCommission.findFirst({ where: { appointmentServiceId: removedId, state: { in: ['APPROVED', 'PAID'] } }, select: { id: true } });
+        if (settledCommission) throw new BadRequestException('Comissão aprovada ou paga. Corrija a comissão antes de retirar o serviço.');
+        await tx.petCommission.deleteMany({ where: { appointmentServiceId: removedId, state: { in: ['AWAITING_PAYMENT', 'PENDING'] } } });
+        await tx.petAppointmentService.deleteMany({ where: { id: removedId, appointmentId: id } });
+      }
+      if (paidComanda?.sale) {
+        const history = Array.isArray(current.stageHistory) ? current.stageHistory as any[] : [];
+        const previouslyPaidIds = current.services.filter(service => {
+          if (service.chargedSaleId) return false;
+          const addition = history.find(entry => entry?.kind === 'service_added' && entry.appointmentServiceId === service.id);
+          return !addition || new Date(addition.at).getTime() <= paidComanda.sale!.createdAt.getTime();
+        }).map(service => service.id);
+        if (previouslyPaidIds.length) await tx.petAppointmentService.updateMany({ where: { id: { in: previouslyPaidIds }, appointmentId: id, chargedSaleId: null }, data: { chargedSaleId: paidComanda.sale.id } });
+      }
       for (const addition of additions) await tx.petAppointmentService.create({ data: addition });
+      for (const entry of pendingCommissions) await tx.petCommission.create({ data: {
+        tenantId: this.tenantContext.get().tenantId, appointmentId: id, appointmentServiceId: entry.appointmentServiceId,
+        operatorId: entry.operatorId, stageKey: 'service_added', executedAt: new Date(),
+        baseAmount: new Prisma.Decimal(entry.base), ruleId: entry.rule.id, ruleVersion: entry.rule.version,
+        ruleKind: entry.rule.kind, ruleValue: entry.rule.value, amount: entry.rule.value,
+        state: entry.base > 0 ? 'AWAITING_PAYMENT' : 'PENDING',
+      } });
       return tx.petAppointment.update({
       where: { id },
       data: {
@@ -2470,6 +2598,7 @@ export class PetshopService {
 
     return {
       ...updated,
+      transport: parseAppointmentTransport(updated.checkInNotes),
       resolvedStages: this.pricing.resolveAppointmentStages(updated),
     };
   }
@@ -2506,14 +2635,16 @@ export class PetshopService {
       if (!appointment) throw new NotFoundException('Atendimento não encontrado.');
       const paid = await tx.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } });
       if (appointment.status === 'delivered' || appointment.completedAt) {
-        if (!paid && !prepay) {
-          const addonComanda = await this.ensureComandaForAppointment(tx, id, true);
+        if (!prepay) {
+          const addonComanda = await this.ensureComandaForAppointment(tx, id, true, Boolean(paid));
           if (addonComanda) return addonComanda;
         }
         throw new ConflictException('Atendimento já cobrado e concluído.');
       }
       if (paid) {
         if (prepay) throw new ConflictException('Agendamento já pago. Cobrança em duplicidade bloqueada.');
+        const addonComanda = await this.ensureComandaForAppointment(tx, id, true, true);
+        if (addonComanda) return addonComanda;
         return { prepaid: true, total: 0 };
       }
       if (prepay) {
@@ -2529,6 +2660,7 @@ export class PetshopService {
     if (!appointment) throw new NotFoundException('Atendimento não encontrado.');
     const comanda = await prisma.comanda.findFirst({
       where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } },
+      orderBy: { sale: { createdAt: 'desc' } },
       select: { sale: { select: { id: true, total: true, createdAt: true, nfceStatus: true } } },
     });
     return comanda?.sale ? { saleId: comanda.sale.id, total: comanda.sale.total, paidAt: comanda.sale.createdAt, nfceStatus: comanda.sale.nfceStatus } : null;
@@ -2541,6 +2673,64 @@ export class PetshopService {
     if (!payment) throw new NotFoundException('Pagamento ativo não encontrado para este atendimento.');
     if (payment.nfceStatus === 'autorizada') throw new BadRequestException('A NFC-e autorizada precisa ser cancelada na Gestão Fiscal antes do estorno da venda.');
     return this.sales.cancel(payment.saleId, reason);
+  }
+
+  async assignAppointmentStage(id: string, stageKey: string, data: any, req?: any) {
+    await this.stationAccess?.assertPetshopCommissionAdmin(req);
+    const prisma = await this.prisma();
+    const current = await prisma.petAppointment.findUnique({
+      where: { id },
+      include: { pet: { select: { size: true } }, services: { include: { service: true, customerPackageItem: true } } },
+    });
+    if (!current) throw new NotFoundException('Agendamento não encontrado.');
+    if (['cancelled', 'no_show'].includes(current.status)) throw new ConflictException('Atendimento cancelado não permite apontamento de etapas.');
+    const stages = this.pricing.resolveAppointmentStages(current);
+    const keys = stages.map((stage: any) => typeof stage === 'string' ? stage : stage.key);
+    const stageIndex = keys.indexOf(stageKey);
+    const currentIndex = current.status === 'delivered' ? keys.length : keys.indexOf(current.status);
+    if (stageIndex < 0) throw new BadRequestException('Esta etapa não pertence ao atendimento.');
+    if (stageIndex > currentIndex) throw new BadRequestException('Avance o atendimento até esta etapa antes de apontar o funcionário.');
+    const recipientId = String(data?.operatorId || '');
+    const recipient = await prisma.operator.findFirst({ where: { id: recipientId, active: true }, select: { id: true, name: true } });
+    if (!recipient) throw new BadRequestException('Selecione um funcionário ativo.');
+    const configuredStages = await this.getTenantStages();
+    const tracked = configuredStages.some(stage => stage.key === stageKey && stage.trackProfessional);
+    const history = Array.isArray(current.stageHistory) ? current.stageHistory as any[] : [];
+    const executionEntry = history.find(entry => entry?.status === stageKey && !entry.skipped && entry.kind !== 'stage_assigned');
+    const executedAt = executionEntry?.at ? new Date(executionEntry.at) : new Date();
+    const actor = req?.headers?.['x-operator-token'] ? await this.commissions.sessionOperator(req) : null;
+    const actorId = actor?.id || req?.user?.id || this.tenantContext.get().userId || null;
+    const actorName = actor?.name || req?.user?.name || req?.user?.email || 'Administrador';
+    const stage = stages[stageIndex];
+    const stageLabel = typeof stage === 'string' ? STAGE_LABELS_PT[stage] || stage : stage.label || STAGE_LABELS_PT[stageKey] || stageKey;
+
+    const updated = await prisma.$transaction(async tx => {
+      await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${id} FOR UPDATE`;
+      const locked = await tx.petAppointment.findUnique({ where: { id }, select: { updatedAt: true } });
+      if (!locked || locked.updatedAt.getTime() !== current.updatedAt.getTime()) throw new ConflictException('Atendimento alterado por outra sessão. Atualize a agenda.');
+      const existing = await tx.petCommission.findMany({ where: { appointmentId: id, stageKey }, select: { state: true, operatorId: true } });
+      if (existing.some(row => ['APPROVED', 'PAID', 'REVERSED'].includes(row.state))) {
+        throw new ConflictException('Comissão desta etapa já foi aprovada, paga ou estornada. Corrija pela gestão de comissões antes de alterar o responsável.');
+      }
+      if (tracked) await this.commissions.recordExecution(tx, current, stageKey, recipient.id, executedAt);
+      return tx.petAppointment.update({
+        where: { id },
+        data: { stageHistory: [...history, {
+          kind: 'stage_assigned', status: stageKey, label: `${stageLabel}: ${recipient.name}`,
+          at: new Date().toISOString(), userId: actorId, userName: actorName,
+          operatorId: recipient.id, operatorName: recipient.name,
+          previousOperatorId: existing[0]?.operatorId || null, skipped: false,
+        }] },
+        include: {
+          pet: true, customer: true, professional: { select: { id: true, name: true } },
+          services: { include: {
+            customerPackage: { select: { id: true, planNameSnapshot: true, expiresAt: true, status: true } },
+            customerPackageItem: { select: { id: true, totalQuantity: true, usedQuantity: true, reservedQuantity: true, availableQuantity: true } },
+          } },
+        },
+      });
+    });
+    return { ...updated, resolvedStages: stages };
   }
 
   async updateAppointmentStatus(id: string, data: any, req?: any) {
@@ -2558,13 +2748,7 @@ export class PetshopService {
     });
     if (!current) throw new NotFoundException('Agendamento não encontrado.');
 
-    let operatorName: string | null = null;
-    if (userId) {
-      try {
-        const op = await prisma.operator.findUnique({ where: { id: userId }, select: { name: true } });
-        if (op) operatorName = op.name;
-      } catch {}
-    }
+    const operatorName = await this.resolveUserDisplayName(prisma, userId, req);
 
     const resolvedStages = this.pricing.resolveAppointmentStages(current);
     const resolvedKeys = resolvedStages.map((s: any) => (typeof s === 'string' ? s : s.key));
@@ -2574,17 +2758,25 @@ export class PetshopService {
     }
     const hasStageOperatorsMap = Boolean(data?.stageOperators && typeof data.stageOperators === 'object' && Object.keys(data.stageOperators).length > 0);
     const isDirectComplete = Boolean(data?.directComplete || hasStageOperatorsMap);
+    if (hasStageOperatorsMap || data?.directComplete) await this.stationAccess?.assertPetshopCommissionAdmin(req);
 
     if ((['delivered', 'cancelled', 'no_show'].includes(current.status) || current.completedAt) && !hasStageOperatorsMap) {
       throw new ConflictException('Atendimento finalizado. Não é permitido reabrir ou cobrar novamente.');
     }
     if (status === 'delivered') {
       if (current.status !== 'ready' && !isDirectComplete) throw new BadRequestException('Conclua os cuidados antes da retirada.');
-      const prepaid = await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } });
-      const payable = current.services.some(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus) && Number(s.priceSnapshot) > Number(s.coveredAmount || 0));
+      const lastPaid = await prisma.comanda.findFirst({
+        where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } },
+        orderBy: { sale: { createdAt: 'desc' } }, select: { sale: { select: { createdAt: true } } },
+      });
+      const history = Array.isArray(current.stageHistory) ? current.stageHistory as any[] : [];
+      const payable = current.services.some(s => !s.comboParentId && !['reserved', 'consumed'].includes(s.coverageStatus) &&
+        !s.chargedSaleId && Number(s.priceSnapshot) > Number(s.coveredAmount || 0) &&
+        (!lastPaid || history.some(entry => entry?.kind === 'service_added' && entry.appointmentServiceId === s.id &&
+          new Date(entry.at).getTime() > lastPaid.sale!.createdAt.getTime())));
       const transport = parseAppointmentTransport(current.checkInNotes);
-      const taxiPayable = transport && !transport.coveredByPackage && transport.fee > 0;
-      if (!prepaid && (payable || taxiPayable) && !isDirectComplete) throw new BadRequestException('Há serviços ou Táxi Dog a cobrar. Finalize o pagamento na Agenda.');
+      const taxiPayable = !lastPaid && transport && !transport.coveredByPackage && transport.fee > 0;
+      if ((payable || taxiPayable) && !isDirectComplete) throw new BadRequestException('Há serviços ou Táxi Dog a cobrar. Finalize o pagamento na Agenda.');
     }
     if (['cancelled', 'no_show'].includes(status) &&
         await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })) {
@@ -2595,7 +2787,7 @@ export class PetshopService {
       const match = resolvedStages.find((s: any) => (typeof s === 'string' ? s : s.key) === stKey);
       if (match && typeof match === 'object' && match.label) return match.label;
       const def = DEFAULT_STAGE_DEFINITIONS.find(d => d.key === stKey);
-      return def?.label || (stKey.startsWith('custom_') ? stKey.replace(/^custom_/, '') : stKey);
+      return def?.label || STAGE_LABELS_PT[stKey] || (stKey.startsWith('custom_') ? stKey.replace(/^custom_/, '') : stKey);
     };
 
     const now = new Date();
@@ -2610,6 +2802,24 @@ export class PetshopService {
     const statusChanged = status !== current.status;
     const configuredStages = await this.getTenantStages();
     const trackedStage = configuredStages.find(s => s.key === status && s.trackProfessional);
+    let assignedOperator: { id: string; name: string } | null = null;
+    if (data.commissionOperatorId !== undefined) {
+      await this.stationAccess?.assertPetshopCommissionAdmin(req);
+      if (!statusChanged || !resolvedKeys.includes(status)) throw new BadRequestException('Escolha uma nova etapa para apontar o funcionário.');
+      assignedOperator = await prisma.operator.findFirst({
+        where: { id: String(data.commissionOperatorId), active: true }, select: { id: true, name: true },
+      });
+      if (!assignedOperator) throw new BadRequestException('Funcionário inválido ou inativo.');
+    }
+    if (hasStageOperatorsMap) {
+      for (const [stageKey, operatorId] of Object.entries(data.stageOperators)) {
+        if (!resolvedKeys.includes(stageKey) || !configuredStages.some(stage => stage.key === stageKey && stage.trackProfessional)) {
+          throw new BadRequestException('Etapa inválida para apontamento de comissão.');
+        }
+        const valid = await prisma.operator.findFirst({ where: { id: String(operatorId), active: true }, select: { id: true } });
+        if (!valid) throw new BadRequestException('Funcionário inválido ou inativo.');
+      }
+    }
     const actor = req?.headers?.['x-operator-token'] || (statusChanged && trackedStage)
       ? await this.commissions.sessionOperator(req) : null;
     const photoAdded = Boolean(nextPhotoUrl && nextPhotoUrl !== current.stagePhotoUrl);
@@ -2644,6 +2854,8 @@ export class PetshopService {
         notes: nextStageNotes !== undefined ? nextStageNotes : null,
         userId: actor?.id || userId || null,
         userName: actor?.name || operatorName || req?.user?.email || null,
+        operatorId: assignedOperator?.id || (trackedStage ? actor?.id : null) || null,
+        operatorName: assignedOperator?.name || (trackedStage ? actor?.name : null) || null,
         skipped: false,
       });
 
@@ -2663,8 +2875,8 @@ export class PetshopService {
       if (status === 'ready' || status === 'delivered') {
         const res = await this.packages.consumeReservedSessionsForAppointmentInTx(tx, id, {
           userId,
-          operatorId: data.operatorId,
-          name: data.operatorName,
+          operatorId: actor?.id || data.operatorId,
+          name: actor?.name || data.operatorName || operatorName || undefined,
         });
         consumedInfo = res.consumedItems;
       }
@@ -2678,8 +2890,8 @@ export class PetshopService {
           cancelReasonNotes,
           {
             userId,
-            operatorId: data.operatorId,
-            name: data.operatorName,
+            operatorId: actor?.id || data.operatorId,
+            name: actor?.name || data.operatorName || operatorName || undefined,
           },
         );
         await this.commissions.reverseAppointmentInTx(tx, id, req?.user?.id || userId || 'system', cancelReasonNotes);
@@ -2706,8 +2918,12 @@ export class PetshopService {
         current.startsAt && new Date(current.startsAt) < now ? new Date(current.startsAt) : now;
 
       if (actor && statusChanged && trackedStage) {
+        if (assignedOperator) {
+          const settled = await tx.petCommission.findFirst({ where: { appointmentId: id, stageKey: status, state: { in: ['APPROVED', 'PAID', 'REVERSED'] } }, select: { id: true } });
+          if (settled) throw new ConflictException('Comissão desta etapa já foi aprovada, paga ou estornada. Corrija pela gestão de comissões.');
+        }
         const execution = await tx.petAppointment.findUnique({ where: { id }, include: { pet: { select: { size: true } }, services: { include: { service: true, customerPackageItem: true } } } });
-        if (execution) await this.commissions.recordExecution(tx, execution, status, actor.id, effectiveExecDate);
+        if (execution) await this.commissions.recordExecution(tx, execution, status, assignedOperator?.id || actor.id, effectiveExecDate);
       }
 
       if (hasStageOperatorsMap) {

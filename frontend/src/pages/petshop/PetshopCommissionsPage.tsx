@@ -88,6 +88,7 @@ type Report = {
 };
 
 const stateLabel: Record<string, string> = {
+  AWAITING_PAYMENT: 'Aguardando cobrança',
   PENDING: 'Pendente',
   APPROVED: 'Aprovado',
   PAID: 'Pago',
