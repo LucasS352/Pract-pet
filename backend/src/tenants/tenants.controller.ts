@@ -204,7 +204,7 @@ export class TenantsController {
   @Post('me/discount-pin')
   async setDiscountPin(@Request() req: any, @Body() body: { pin: string }) {
     if (req.user.role !== 'admin' && req.user.role !== 'superadmin') {
-      throw new UnauthorizedException('Apenas admins podem configurar o PIN de desconto.');
+      throw new ForbiddenException('Apenas admins podem configurar o PIN de desconto.');
     }
     if (!body.pin || body.pin.length < 4) {
       throw new BadRequestException('O PIN deve ter no mínimo 4 caracteres.');
@@ -219,7 +219,7 @@ export class TenantsController {
   @Post('me/verify-discount-pin')
   async verifyDiscountPin(@Request() req: any, @Body() body: { pin: string }) {
     const valid = await this.tenantsService.verifyDiscountPin(req.user.tenantId, body.pin);
-    if (!valid) throw new UnauthorizedException('PIN de desconto inválido.');
+    if (!valid) throw new ForbiddenException('PIN de desconto inválido.');
     return { valid: true };
   }
 

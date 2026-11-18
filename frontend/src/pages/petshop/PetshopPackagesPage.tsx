@@ -251,6 +251,24 @@ export default function PetshopPackagesPage() {
   // Modal de Detalhes / Histórico / Estorno de Contrato
   const [selectedContract, setSelectedContract] = useState<CustomerPetPackage | null>(null);
   const [selectedGroupContracts, setSelectedGroupContracts] = useState<CustomerPetPackage[]>([]);
+  const [receiptTarget, setReceiptTarget] = useState<{
+    contractId: string;
+    customerName: string;
+    description: string;
+    total: number;
+    isGroup: boolean;
+  } | null>(null);
+  const [receiptPaymentRows, setReceiptPaymentRows] = useState<PackagePaymentRow[]>([]);
+  const [savingReceipt, setSavingReceipt] = useState(false);
+  const [receiptDiscount, setReceiptDiscount] = useState(0);
+  const [receiptDiscountPin, setReceiptDiscountPin] = useState('');
+  const [receiptDiscountInput, setReceiptDiscountInput] = useState('');
+  const [receiptDiscountPinInput, setReceiptDiscountPinInput] = useState('');
+  const [editingReceiptDiscount, setEditingReceiptDiscount] = useState(false);
+  const [verifyingReceiptDiscount, setVerifyingReceiptDiscount] = useState(false);
+  const receiptAmountDue = receiptTarget
+    ? (Math.round(receiptTarget.total * 100) - Math.round(receiptDiscount * 100)) / 100
+    : 0;
   const [loadingContractDetails, setLoadingContractDetails] = useState(false);
   const [contractDetailsError, setContractDetailsError] = useState(false);
   const [editingAppointmentId, setEditingAppointmentId] = useState<string | null>(null);
@@ -1104,12 +1122,81 @@ export default function PetshopPackagesPage() {
     }
   };
 
-  const handleConfirmPayment = async (contractId: string) => {
+  const openReceiptPayment = (contract: CustomerPetPackage, groupMembers: CustomerPetPackage[] = [contract]) => {
+    const pending = groupMembers.filter(member => member.paymentStatus === 'pending' && member.status !== 'cancelled');
+    if (!pending.length) {
+      toast.info('O recebimento deste pacote já foi confirmado.');
+      return;
+    }
+    const total = pending.reduce((sum, member) => sum + Math.round(Number(member.finalPrice || 0) * 100), 0) / 100;
+    setReceiptTarget({
+      contractId: contract.id,
+      customerName: contract.customer?.name || 'Tutor',
+      description: `${contract.planNameSnapshot}${groupMembers.length > 1 ? ` · ${pending.length} pet(s) pendente(s)` : contract.pet?.name ? ` · ${contract.pet.name}` : ''}`,
+      total,
+      isGroup: groupMembers.length > 1,
+    });
+    setReceiptPaymentRows([{ method: 'pix', amount: total.toFixed(2).replace('.', ',') }]);
+    setReceiptDiscount(0);
+    setReceiptDiscountPin('');
+    setReceiptDiscountInput('');
+    setReceiptDiscountPinInput('');
+    setEditingReceiptDiscount(false);
+  };
+
+  const closeReceiptPayment = () => {
+    if (savingReceipt || verifyingReceiptDiscount) return;
+    setReceiptTarget(null);
+    setReceiptDiscountPin('');
+    setReceiptDiscountPinInput('');
+  };
+
+  const applyReceiptDiscount = async () => {
+    if (!receiptTarget || verifyingReceiptDiscount) return;
+    const amount = paymentAmount(receiptDiscountInput);
+    if (!Number.isFinite(amount) || amount <= 0 || Math.round(amount * 100) >= Math.round(receiptTarget.total * 100)) {
+      toast.error('Informe um desconto maior que zero e menor que o total pendente.');
+      return;
+    }
+    if (!/^\d{4,8}$/.test(receiptDiscountPinInput)) {
+      toast.error('Informe o PIN de desconto de 4 a 8 dígitos.');
+      return;
+    }
+    setVerifyingReceiptDiscount(true);
+    try {
+      await api.post('/tenants/me/verify-discount-pin', { pin: receiptDiscountPinInput });
+      const net = (Math.round(receiptTarget.total * 100) - Math.round(amount * 100)) / 100;
+      setReceiptDiscount(amount);
+      setReceiptDiscountPin(receiptDiscountPinInput);
+      setReceiptDiscountPinInput('');
+      setEditingReceiptDiscount(false);
+      setReceiptPaymentRows(rows => rows.length === 1 ? [{ ...rows[0], amount: net.toFixed(2).replace('.', ',') }] : rows);
+      toast.success(`Desconto de ${money(amount)} aplicado.`);
+    } catch {
+      toast.error('PIN de desconto inválido.');
+    } finally {
+      setVerifyingReceiptDiscount(false);
+    }
+  };
+
+  const handleConfirmPayment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!receiptTarget || savingReceipt || editingReceiptDiscount || !packagePaymentsValid(receiptPaymentRows, receiptAmountDue)) return;
+    const contractId = receiptTarget.contractId;
+    setSavingReceipt(true);
     try {
       const { data } = await api.post(`/petshop/packages/contracts/${contractId}/confirm-payment`, {
-        paymentMethod: 'pix',
+        payments: receiptAmountDue === 0 ? [] : receiptPaymentRows.map(row => ({
+          method: row.method,
+          amount: paymentAmount(row.amount),
+        })),
+        ...(receiptDiscount > 0 ? { discountAmount: receiptDiscount, discountPin: receiptDiscountPin } : {}),
       });
-      toast.success('Pagamento do pacote confirmado!');
+      toast.success('Recebimento do pacote registrado!');
+      setReceiptTarget(null);
+      setReceiptDiscountPin('');
+      setReceiptDiscountPinInput('');
+      setSelectedGroupContracts(prev => prev.map(member => member.paymentStatus === 'pending' ? { ...member, paymentStatus: 'paid' } : member));
       setSelectedContract(prev => (prev?.id === contractId ? { ...data, scheduledAppointments: prev.scheduledAppointments } : prev));
       api.get<CustomerPetPackage>(`/petshop/packages/contracts/${contractId}`)
         .then(({ data: details }) => setSelectedContract(prev => prev?.id === contractId ? details : prev))
@@ -1117,6 +1204,8 @@ export default function PetshopPackagesPage() {
       loadAll(false);
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao confirmar pagamento.');
+    } finally {
+      setSavingReceipt(false);
     }
   };
 
@@ -1898,7 +1987,7 @@ export default function PetshopPackagesPage() {
                                       type="button"
                                       onClick={() => {
                                         setOpenMenuId(null);
-                                        handleConfirmPayment(contract.id);
+                                        openReceiptPayment(contract, members);
                                       }}
                                       className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-xs font-semibold text-emerald-700 hover:bg-emerald-50 cursor-pointer"
                                     >
@@ -3852,6 +3941,7 @@ export default function PetshopPackagesPage() {
          ===================================================================== */}
       {selectedContract && (
         <Modal
+          suspended={Boolean(receiptTarget)}
           title={
             selectedGroupContracts.length > 1
               ? `Pacote Família (${selectedGroupContracts.length} pets): ${selectedContract.planNameSnapshot}`
@@ -3995,10 +4085,10 @@ export default function PetshopPackagesPage() {
                           Pacote {money(contractPackageBase)} − Desc. {money(contractDiscount)}
                         </p>
                       ) : null}
-                      {selectedContract.paymentStatus === 'pending' && (
+                      {(selectedContract.paymentStatus === 'pending' || selectedGroupContracts.some(member => member.paymentStatus === 'pending')) && (
                         <button
                           type="button"
-                          onClick={() => handleConfirmPayment(selectedContract.id)}
+                          onClick={() => openReceiptPayment(selectedContract, selectedGroupContracts.length > 1 ? selectedGroupContracts : [selectedContract])}
                           className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
                         >
                           <CheckCircle2 size={12} />{' '}
@@ -4064,6 +4154,9 @@ export default function PetshopPackagesPage() {
             {selectedContract.receipt && (
               <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-3" aria-label="Recebimento do contrato">
                 <h4 className="text-sm font-semibold text-emerald-950">Recebido em {new Date(selectedContract.receipt.receivedAt).toLocaleString('pt-BR')}</h4>
+                {Number(selectedContract.receipt.discountAmount || 0) > 0 && (
+                  <p className="mt-1 flex justify-between gap-2 text-sm text-amber-900"><span>Desconto autorizado{selectedContract.receipt.discountAuthorizedBy?.name ? ` por ${selectedContract.receipt.discountAuthorizedBy.name}` : ''}</span><strong>-{money(selectedContract.receipt.discountAmount || 0)}</strong></p>
+                )}
                 {selectedContract.receipt.payments.map((payment, index) => <p key={index} className="mt-1 flex justify-between gap-2 text-sm text-emerald-900"><span>{packagePaymentLabels[payment.method] || payment.method}</span><strong>{money(payment.amount)}</strong></p>)}
               </section>
             )}
@@ -4465,6 +4558,82 @@ export default function PetshopPackagesPage() {
               </div>
             )}
           </div>
+        </Modal>
+      )}
+      {receiptTarget && (
+        <Modal
+          title={receiptTarget.isGroup ? 'Confirmar recebimento do grupo' : 'Confirmar recebimento do pacote'}
+          subtitle={`${receiptTarget.customerName} · ${receiptTarget.description}`}
+          onClose={closeReceiptPayment}
+          maxWidth="sm:max-w-xl"
+        >
+          <form onSubmit={handleConfirmPayment} className="space-y-4 sm:space-y-5">
+            <div className="rounded-2xl bg-gradient-to-br from-teal-800 to-teal-700 p-4 text-white shadow-sm sm:p-5">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-white/15"><Wallet aria-hidden="true" size={21} /></span>
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-teal-100">Total a receber</p>
+                    <p className="mt-0.5 text-xs text-teal-100/90">Após desconto, se houver</p>
+                  </div>
+                </div>
+                <strong className="shrink-0 text-right text-2xl font-extrabold tabular-nums tracking-tight sm:text-3xl">{money(receiptAmountDue)}</strong>
+              </div>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-t border-white/20 pt-3 text-sm">
+                <span className="text-teal-100">Valor contratado</span>
+                <strong className="tabular-nums">{money(receiptTarget.total)}</strong>
+              </div>
+              {receiptDiscount > 0 && (
+                <div className="mt-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 text-sm">
+                  <span className="text-teal-100">Desconto autorizado</span>
+                  <strong className="tabular-nums">-{money(receiptDiscount)}</strong>
+                </div>
+              )}
+            </div>
+            {!editingReceiptDiscount ? (
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => { setReceiptDiscountInput(receiptDiscount ? receiptDiscount.toFixed(2).replace('.', ',') : ''); setEditingReceiptDiscount(true); }}
+                  className="flex min-h-14 min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-left transition hover:border-amber-300 hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-amber-700">
+                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-amber-100 text-amber-800"><Tag aria-hidden="true" size={18} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold text-amber-950">{receiptDiscount > 0 ? 'Alterar desconto' : 'Aplicar desconto'}</span>
+                    <span className="block text-xs text-amber-800">Autorização por PIN</span>
+                  </span>
+                  <ChevronRight aria-hidden="true" size={18} className="shrink-0 text-amber-700" />
+                </button>
+                {receiptDiscount > 0 && <button type="button" onClick={() => { setReceiptDiscount(0); setReceiptDiscountPin(''); setReceiptPaymentRows(rows => rows.length === 1 ? [{ ...rows[0], amount: receiptTarget.total.toFixed(2).replace('.', ',') }] : rows); }}
+                  className="min-h-11 shrink-0 cursor-pointer rounded-lg px-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-slate-600">Remover</button>}
+              </div>
+            ) : (
+              <div className="space-y-3 rounded-2xl border border-amber-200 bg-amber-50/70 p-4">
+                <div className="flex items-center gap-2 text-amber-950"><ShieldCheck aria-hidden="true" size={18} /><p className="text-sm font-bold">Autorizar desconto</p></div>
+                <div className="grid grid-cols-1 gap-3 min-[380px]:grid-cols-2">
+                  <label className="text-xs font-medium text-zinc-700">Valor (R$)
+                    <input inputMode="decimal" value={receiptDiscountInput} onChange={event => setReceiptDiscountInput(event.target.value)}
+                      placeholder="0,00" className={inputClass} />
+                  </label>
+                  <label className="text-xs font-medium text-zinc-700">PIN de desconto
+                    <input type="password" inputMode="numeric" autoComplete="off" value={receiptDiscountPinInput}
+                      onChange={event => setReceiptDiscountPinInput(event.target.value.replace(/\D/g, '').slice(0, 8))}
+                      placeholder="••••" className={inputClass} />
+                  </label>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2 pt-1">
+                  <button type="button" disabled={verifyingReceiptDiscount} onClick={() => { setEditingReceiptDiscount(false); setReceiptDiscountPinInput(''); }} className={secondaryButton}>Cancelar</button>
+                  <button type="button" disabled={verifyingReceiptDiscount} onClick={applyReceiptDiscount} className={primaryButton}>
+                    {verifyingReceiptDiscount ? 'Verificando...' : 'Aplicar desconto'}
+                  </button>
+                </div>
+              </div>
+            )}
+            <PackagePaymentFields rows={receiptPaymentRows} total={receiptAmountDue} onChange={setReceiptPaymentRows} variant="receipt" />
+            <div className="flex items-center justify-end gap-2 border-t border-slate-100 pt-4">
+              <button type="button" disabled={savingReceipt} onClick={closeReceiptPayment} className={secondaryButton}>Cancelar</button>
+              <button type="submit" disabled={savingReceipt || editingReceiptDiscount || !packagePaymentsValid(receiptPaymentRows, receiptAmountDue)} className={`${primaryButton} flex-1 sm:flex-none`}>
+                {savingReceipt ? 'Registrando...' : 'Registrar recebimento'}
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
     </div>

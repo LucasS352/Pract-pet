@@ -259,6 +259,10 @@ export default function PetshopTeamPage() {
   const [pinModalOpen, setPinModalOpen] = useState(false);
   const [pinOperator, setPinOperator] = useState<Operator | null>(null);
   const [quickPin, setQuickPin] = useState('');
+  const [discountPinModalOpen, setDiscountPinModalOpen] = useState(false);
+  const [discountPin, setDiscountPin] = useState('');
+  const [confirmDiscountPin, setConfirmDiscountPin] = useState('');
+  const [savingDiscountPin, setSavingDiscountPin] = useState(false);
 
   // Cache de PINs cadastrados/editados localmente para conveniência visual
   const [pinCache, setPinCache] = useState<Record<string, string>>(() => {
@@ -525,6 +529,38 @@ export default function PetshopTeamPage() {
     }
   };
 
+  const closeDiscountPinModal = () => {
+    if (savingDiscountPin) return;
+    setDiscountPinModalOpen(false);
+    setDiscountPin('');
+    setConfirmDiscountPin('');
+  };
+
+  const submitDiscountPin = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!canGrantCommissionPermission || savingDiscountPin) return;
+    if (!/^\d{4,8}$/.test(discountPin)) {
+      toast.error('O PIN de desconto deve ter de 4 a 8 dígitos.');
+      return;
+    }
+    if (discountPin !== confirmDiscountPin) {
+      toast.error('Os PINs não coincidem.');
+      return;
+    }
+    setSavingDiscountPin(true);
+    try {
+      await api.post('/tenants/me/discount-pin', { pin: discountPin });
+      toast.success('PIN de desconto salvo. O valor de cada desconto ficará registrado na venda.');
+      setDiscountPinModalOpen(false);
+      setDiscountPin('');
+      setConfirmDiscountPin('');
+    } catch (error: any) {
+      toast.error(error?.response?.data?.message || 'Não foi possível salvar o PIN de desconto.');
+    } finally {
+      setSavingDiscountPin(false);
+    }
+  };
+
   const exportCsv = () => {
     if (filteredItems.length === 0) {
       toast.info('Nenhum colaborador para exportar.');
@@ -614,6 +650,13 @@ export default function PetshopTeamPage() {
             Novo colaborador
           </button>
         </div>
+
+        {canGrantCommissionPermission && (
+          <button type="button" onClick={() => setDiscountPinModalOpen(true)}
+            className="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 text-xs font-bold text-amber-900">
+            <KeyRound size={15} /> Configurar PIN de desconto do caixa
+          </button>
+        )}
 
         {/* Filtros em pílulas + lupa */}
         <div className="flex items-center gap-2">
@@ -782,6 +825,13 @@ export default function PetshopTeamPage() {
         description="Os mesmos colaboradores atendem os pets e acessam o caixa com o próprio PIN."
         action={
           <div className="flex flex-wrap items-center gap-2">
+            {canGrantCommissionPermission && (
+              <button type="button" onClick={() => setDiscountPinModalOpen(true)}
+                className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 text-xs font-bold text-amber-900 transition hover:bg-amber-100"
+                title="Cadastrar ou alterar o PIN que autoriza descontos no caixa">
+                <KeyRound aria-hidden="true" size={16} /> PIN de desconto
+              </button>
+            )}
             <button
               type="button"
               onClick={() => setAccessModalOpen(true)}
@@ -1349,6 +1399,35 @@ export default function PetshopTeamPage() {
         </Modal>
       )}
       {/* Modal de Acesso dos Colaboradores (Login E-mail e Senha) */}
+      {canGrantCommissionPermission && discountPinModalOpen && (
+        <Modal title="PIN de desconto do caixa" onClose={closeDiscountPinModal} maxWidth="sm:max-w-md">
+          <form onSubmit={submitDiscountPin} className="space-y-4">
+            <p className="text-sm text-slate-600">
+              Cadastre um PIN para autorizar descontos no pagamento. O valor concedido fica registrado na venda e no cupom.
+            </p>
+            <label className="block">
+              <span className={labelClass}>Novo PIN (4 a 8 dígitos)</span>
+              <input type="password" inputMode="numeric" autoComplete="new-password" required minLength={4} maxLength={8}
+                value={discountPin} onChange={event => setDiscountPin(event.target.value.replace(/\D/g, '').slice(0, 8))}
+                className={inputClass} placeholder="Digite o novo PIN" />
+            </label>
+            <label className="block">
+              <span className={labelClass}>Confirme o PIN</span>
+              <input type="password" inputMode="numeric" autoComplete="new-password" required minLength={4} maxLength={8}
+                value={confirmDiscountPin} onChange={event => setConfirmDiscountPin(event.target.value.replace(/\D/g, '').slice(0, 8))}
+                className={inputClass} placeholder="Repita o novo PIN" />
+            </label>
+            {confirmDiscountPin && discountPin !== confirmDiscountPin && (
+              <p className="text-xs font-medium text-rose-600">Os PINs não coincidem.</p>
+            )}
+            <div className="flex justify-end gap-2 border-t border-[var(--pc-border)] pt-4">
+              <button type="button" disabled={savingDiscountPin} onClick={closeDiscountPinModal} className={secondaryButton}>Cancelar</button>
+              <button type="submit" disabled={savingDiscountPin || discountPin.length < 4 || discountPin !== confirmDiscountPin}
+                className={primaryButton}>{savingDiscountPin ? 'Salvando...' : 'Salvar PIN'}</button>
+            </div>
+          </form>
+        </Modal>
+      )}
       <CollaboratorAccessModal
         isOpen={accessModalOpen}
         onClose={() => setAccessModalOpen(false)}

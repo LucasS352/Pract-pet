@@ -613,7 +613,7 @@ export type CustomerPetPackage = {
   status: 'active' | 'completed' | 'expired' | 'cancelled' | string;
   paymentStatus: 'paid' | 'pending' | 'cancelled' | string;
   paymentMethod?: string | null;
-  receipt?: { receivedAt: string; payments: Array<{ method: string; amount: number }> } | null;
+  receipt?: { receivedAt: string; payments: Array<{ method: string; amount: number }>; discountAmount?: number; discountAuthorizedBy?: { userId: string; name?: string } } | null;
   comandaId?: string | null;
   saleId?: string | null;
   notes?: string | null;
@@ -765,6 +765,12 @@ export function extractStageOperatorsSummary(
 }
 
 export function getHistoryEntryBadge(entry: StageHistoryEntry): { label: string; cls: string } {
+  if (entry.kind === 'reopened') {
+    return { label: 'Reaberto', cls: 'bg-amber-50 border-amber-200 text-amber-900' };
+  }
+  if (entry.kind === 'taxi_added') {
+    return { label: 'Táxi Dog', cls: 'bg-amber-50 border-amber-200 text-amber-900' };
+  }
   if (entry.kind === 'stage_assigned') {
     return { label: 'Responsável', cls: 'bg-teal-50 border-teal-200 text-teal-800' };
   }

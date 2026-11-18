@@ -36,7 +36,7 @@ const METHOD_NAMES: Record<string, string> = { dinheiro: 'Dinheiro', pix: 'Pix',
 const TPAG_MAP: Record<string, string> = { dinheiro: '01', credito: '03', debito: '04', pix: '17', consumo_funcionario: '99', outros: '99' };
 
 interface PaymentModalProps {
-  petshopReceipt?: { customer: string; total: number; submit: (payments: { method: string; value: number }[]) => Promise<any> };
+  petshopReceipt?: { customer: string; total: number; submit: (payments: { method: string; value: number }[], discount?: { amount: number; pin: string }) => Promise<any> };
   experience?: 'food';
   isOpen: boolean;
   onClose: () => void;
@@ -125,6 +125,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
   // --- Desconto via PIN ---
   const [discountModalOpen, setDiscountModalOpen] = useState(false);
   const [discountPinInput, setDiscountPinInput] = useState('');
+  const [verifiedDiscountPin, setVerifiedDiscountPin] = useState('');
   const [discountValue, setDiscountValue] = useState(0); // valor de desconto em R$
   const [verifyingPin, setVerifyingPin] = useState(false);
   const [pinVerified, setPinVerified] = useState(false);
@@ -736,6 +737,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
     try {
       await api.post('/tenants/me/verify-discount-pin', { pin: discountPinInput });
       setPinVerified(true);
+      setVerifiedDiscountPin(discountPinInput);
       setDiscountPinInput('');
     } catch {
       toast.error('PIN incorreto. Tente novamente.');
@@ -746,13 +748,16 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
   };
 
   const handleApplyDiscount = () => {
-    if (petshopReceipt) { toast.info('O valor é definido pelos serviços contratados.'); return; }
-    const val = parseFloat(pendingDiscountStr);
-    if (isNaN(val) || val < 0) { toast.error('Valor inválido.'); return; }
+    const raw = pendingDiscountStr.trim();
+    if (!/^\d+(?:[.,]\d{1,2})?$/.test(raw)) { toast.error('Informe um desconto positivo com até duas casas decimais.'); return; }
+    const val = Number(raw.replace(',', '.'));
+    if (val <= 0) { toast.error('Informe um desconto positivo.'); return; }
     if (val >= total) { toast.error('Desconto não pode ser igual ou maior que o total.'); return; }
+    const netTotal = Math.round((total - val) * 100) / 100;
+    const keepPayments = totalPaid <= netTotal + 0.001;
     setDiscountValue(val);
-    setPayments([]);
-    setInputValue((total - val).toFixed(2));
+    if (!keepPayments) setPayments([]);
+    setInputValue((netTotal - (keepPayments ? totalPaid : 0)).toFixed(2));
     setDiscountModalOpen(false);
     setPinVerified(false);
     setPendingDiscountStr('');
@@ -763,8 +768,9 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
     if (petshopReceipt) {
       if (isSubmittingRef.current) return;
       if (remaining > 0 || !payments.length) { toast.error('Complete os pagamentos para finalizar.'); return; }
+      if (discountValue > 0 && !verifiedDiscountPin) { toast.error('Confirme o PIN de desconto.'); return; }
       isSubmittingRef.current = true; setLoading(true);
-      try { const receipt = await petshopReceipt.submit(payments.map(p => ({ method: p.method, value: p.value }))); if (autoPrint) printReceipt(receipt); onSuccess?.(); onClose(); }
+      try { const receipt = await petshopReceipt.submit(payments.map(p => ({ method: p.method, value: p.value })), discountValue > 0 ? { amount: discountValue, pin: verifiedDiscountPin } : undefined); if (autoPrint) printReceipt(receipt); onSuccess?.(); onClose(); }
       catch (error: any) { toast.error(error.response?.data?.message || 'Falha ao registrar pagamento.'); }
       finally { isSubmittingRef.current = false; setLoading(false); }
       return;

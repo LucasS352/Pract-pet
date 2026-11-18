@@ -145,4 +145,86 @@ describe('Apontamento administrativo de etapas', () => {
     await expect(service.updateAppointmentStatus('appointment-1', { status: 'delivered' }, req)).rejects.toThrow('Há serviços ou Táxi Dog a cobrar');
     expect(prisma.$transaction).not.toHaveBeenCalled();
   });
+
+  it('reabre um concluído somente com autorização, registra motivo e preserva a sessão do pacote', async () => {
+    const { service, tx, current } = fixture('delivered', null);
+    (current as any).completedAt = new Date('2026-11-17T12:00:00Z');
+    service.packages = { consumeReservedSessionsForAppointmentInTx: jest.fn() };
+    const result = await service.updateAppointmentStatus('appointment-1', {
+      status: 'ready', reopen: true, reopenReason: 'Incluir Táxi Dog solicitado após a entrega',
+    }, req);
+    expect(service.stationAccess.assertPetshopCommissionAdmin).toHaveBeenCalledWith(req);
+    expect(tx.petAppointment.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'ready', completedAt: null }),
+    }));
+    expect(result.stageHistory).toEqual(expect.arrayContaining([expect.objectContaining({
+      kind: 'reopened', status: 'ready', notes: 'Incluir Táxi Dog solicitado após a entrega', userName: 'Administradora',
+    })]));
+    expect(service.packages.consumeReservedSessionsForAppointmentInTx).not.toHaveBeenCalled();
+  });
+
+  it('não reabre concluído sem PIN administrativo nem motivo auditável', async () => {
+    const { service, prisma } = fixture('delivered', null);
+    await expect(service.updateAppointmentStatus('appointment-1', { status: 'ready' }, req)).rejects.toThrow('finalizado');
+    await expect(service.updateAppointmentStatus('appointment-1', { status: 'ready', reopen: true, reopenReason: 'curto' }, req)).rejects.toThrow('motivo');
+    service.stationAccess.assertPetshopCommissionAdmin.mockRejectedValueOnce(new Error('PIN administrativo obrigatório'));
+    await expect(service.updateAppointmentStatus('appointment-1', { status: 'ready', reopen: true, reopenReason: 'Corrigir atendimento concluído' }, req)).rejects.toThrow('PIN administrativo');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('impede nova conclusão quando Táxi Dog foi acrescentado após uma venda já paga', async () => {
+    const { service, prisma, current } = fixture('ready', null);
+    (current as any).checkInNotes = JSON.stringify({ transport: { enabled: true, mode: 'round_trip', fee: 20, coveredByPackage: false, address: 'Rua A, 10' } });
+    current.stageHistory.push({ kind: 'taxi_added', status: 'ready', at: '2026-11-17T13:00:00Z' } as any);
+    prisma.comanda.findFirst.mockResolvedValue({ sale: { createdAt: new Date('2026-11-17T12:00:00Z') } });
+    await expect(service.updateAppointmentStatus('appointment-1', { status: 'delivered' }, req)).rejects.toThrow('Há serviços ou Táxi Dog a cobrar');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('gera comanda apenas para o Táxi Dog incluído após a última venda', async () => {
+    const { service, prisma, current } = fixture('ready', null);
+    const appointment = {
+      ...current, pet: { name: 'Nick' }, customer: { name: 'Tutor' }, services: [],
+      checkInNotes: JSON.stringify({ transport: { enabled: true, mode: 'round_trip', fee: 20, coveredByPackage: false, address: 'Rua A, 10' } }),
+      stageHistory: [{ kind: 'taxi_added', at: '2026-11-17T13:00:00Z' }],
+    };
+    prisma.petAppointment.findUnique.mockResolvedValue(appointment);
+    prisma.comanda.findFirst.mockResolvedValueOnce({ sale: { createdAt: new Date('2026-11-17T12:00:00Z') } }).mockResolvedValue(null);
+    prisma.comanda.create = jest.fn().mockImplementation(({ data }) => data);
+    service.ensureServiceProductBacking = jest.fn();
+    await service.ensureComandaForAppointment(prisma, 'appointment-1', true, true);
+    expect(prisma.comanda.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        total: expect.objectContaining({}),
+        items: { create: [expect.objectContaining({ productId: 'petshop-taxi-dog-fee', notes: 'Táxi Dog Pet Shop' })] },
+      }),
+    }));
+    expect(prisma.comanda.create.mock.calls[0][0].data.total.toString()).toBe('20');
+
+    prisma.comanda.create.mockClear();
+    prisma.comanda.findFirst.mockReset().mockResolvedValueOnce({ sale: { createdAt: new Date('2026-11-17T14:00:00Z') } });
+    expect(await service.ensureComandaForAppointment(prisma, 'appointment-1', true, true)).toBeNull();
+    expect(prisma.comanda.create).not.toHaveBeenCalled();
+  });
+
+  it('inclui Táxi Dog após pagamento somente com PIN administrativo e registra autoria', async () => {
+    const { service, prisma, tx, current } = fixture('ready', null);
+    (current as any).services = [];
+    (current as any).startsAt = new Date('2026-11-17T11:00:00Z');
+    (current as any).endsAt = new Date('2026-11-17T12:00:00Z');
+    (current as any).professionalId = null;
+    (current as any).checkInNotes = null;
+    prisma.comanda.findFirst.mockResolvedValue({ sale: { id: 'sale-original', createdAt: new Date('2026-11-17T12:00:00Z') } });
+    const transport = { enabled: true, mode: 'round_trip', fee: 20, address: 'Rua A, 10', coveredByPackage: false };
+    const result = await service.updateAppointment('appointment-1', { transport }, req);
+    expect(service.stationAccess.assertPetshopCommissionAdmin).toHaveBeenCalledWith(req);
+    expect(result.transport.fee).toBe(20);
+    expect(tx.petAppointment.update.mock.calls[0][0].data.stageHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'taxi_added', userName: 'Administradora' }),
+    ]));
+
+    service.stationAccess.assertPetshopCommissionAdmin.mockRejectedValueOnce(new Error('PIN administrativo obrigatório'));
+    await expect(service.updateAppointment('appointment-1', { transport }, req)).rejects.toThrow('PIN administrativo');
+    expect(tx.petAppointment.update).toHaveBeenCalledTimes(1);
+  });
 });

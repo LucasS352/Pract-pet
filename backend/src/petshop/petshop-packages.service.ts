@@ -4,14 +4,16 @@ import {
   Injectable,
   NotFoundException,
   Optional,
+  ForbiddenException,
 } from '@nestjs/common';
 import { randomUUID } from 'crypto';
+import * as bcrypt from 'bcrypt';
 import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
 import { hasTaxiDropoff, hasTaxiPickup, type TaxiMode } from './petshop-transport';
-import { allocatePackagePayments, contractMetadata, moneyCents, normalizePackagePayments, receiptNotes } from './package-receipts';
+import { allocatePackageDiscount, allocatePackagePayments, contractMetadata, moneyCents, normalizePackagePayments, packageReceivedAmount, receiptNotes } from './package-receipts';
 import { readTaxiDefaultFee } from './taxi-default-fee';
 import { PetshopCommissionsService } from './petshop-commissions.service';
 import { PetshopPricingService } from './petshop-pricing.service';
@@ -531,7 +533,7 @@ export class PetshopPackagesService {
     contract: T,
   ): T & {
     transport?: any;
-    receipt?: { receivedAt: string; payments: Array<{ method: string; amount: number }> };
+    receipt?: { receivedAt: string; payments: Array<{ method: string; amount: number }>; discountAmount?: number; discountAuthorizedBy?: { userId: string; name?: string } };
     packageGroup?: {
       id: string;
       mode: 'shared' | 'per_pet';
@@ -1583,9 +1585,17 @@ export class PetshopPackagesService {
     });
   }
 
-  async confirmContractPayment(contractId: string, body: { paymentMethod?: string; payments?: unknown; saleId?: string; confirmGroup?: boolean }) {
+  async confirmContractPayment(contractId: string, body: { paymentMethod?: string; payments?: unknown; saleId?: string; confirmGroup?: boolean; discountAmount?: number; discountPin?: string }, actor?: { userId?: string; name?: string }) {
     const prisma = await this.prisma();
     if (body?.saleId) throw new BadRequestException('Recebimentos pelo PDV devem ser confirmados no Caixa.');
+    const discountCents = moneyCents(body?.discountAmount ?? 0, 'Desconto');
+    if (discountCents) {
+      if (!body?.discountPin) throw new ForbiddenException('Informe o PIN para autorizar o desconto.');
+      const settings = await prisma.tenantSettings.findUnique({ where: { id: 'singleton' }, select: { discountPin: true } });
+      if (!settings?.discountPin || !await bcrypt.compare(body.discountPin, settings.discountPin)) {
+        throw new ForbiddenException('PIN de desconto inválido.');
+      }
+    }
     const initial = await prisma.customerPetPackage.findUnique({ where: { id: contractId } });
     if (!initial) throw new NotFoundException('Contrato não encontrado.');
     if (initial.status === 'cancelled') throw new BadRequestException('Contrato cancelado.');
@@ -1608,16 +1618,25 @@ export class PetshopPackagesService {
       if (contracts.some(c => c.status === 'cancelled')) throw new BadRequestException('Contrato cancelado.');
       const pending = contracts.filter(c => c.paymentStatus === 'pending');
       if (!pending.length) return; // Already received: preserve its date and methods.
-      const total = pending.reduce((sum, c) => sum + moneyCents(Number(c.finalPrice)), 0) / 100;
-      const payments = normalizePackagePayments(body?.payments, total, body?.paymentMethod || 'pix');
-      const allocations = allocatePackagePayments(payments, pending.map(c => Number(c.finalPrice)));
+      const grossCents = pending.reduce((sum, c) => sum + moneyCents(Number(c.finalPrice)), 0);
+      if (discountCents && discountCents >= grossCents) throw new BadRequestException('O desconto deve ser menor que o valor pendente do pacote.');
+      const discounts = allocatePackageDiscount(discountCents / 100, pending.map(c => Number(c.finalPrice)));
+      const netTotals = pending.map((contract, index) => (moneyCents(Number(contract.finalPrice)) - moneyCents(discounts[index])) / 100);
+      const payments = normalizePackagePayments(body?.payments, (grossCents - discountCents) / 100, body?.paymentMethod || 'pix');
+      const allocations = allocatePackagePayments(payments, netTotals);
       const receivedAt = new Date();
       for (const [index, contract] of pending.entries()) {
         const item = contract.items[0];
         if (!item) throw new BadRequestException('Contrato sem itens de saldo.');
         await tx.customerPetPackage.update({ where: { id: contract.id }, data: {
           paymentStatus: 'paid', paymentMethod: allocations[index].length > 1 ? 'mixed' : allocations[index][0]?.method || 'pix',
-          notes: receiptNotes(contract.notes, { receivedAt: receivedAt.toISOString(), payments: allocations[index] }),
+          notes: receiptNotes(contract.notes, {
+            receivedAt: receivedAt.toISOString(), payments: allocations[index],
+            ...(discounts[index] > 0 ? {
+              discountAmount: discounts[index],
+              discountAuthorizedBy: actor?.userId ? { userId: actor.userId, ...(actor.name ? { name: actor.name } : {}) } : undefined,
+            } : {}),
+          }),
         } });
         await tx.customerPetPackageLedger.create({ data: {
           idempotencyKey: `payment:${contract.id}`, customerPackageId: contract.id, customerPackageItemId: item.id,
@@ -2213,7 +2232,7 @@ export class PetshopPackagesService {
     const renewalOpportunities: any[] = [];
 
     for (const c of contracts) {
-      const price = Number(c.finalPrice || 0);
+      const price = c.paymentStatus === 'paid' ? packageReceivedAmount(c) : Number(c.finalPrice || 0);
       if (c.paymentStatus === 'paid') {
         totalSoldPaid += price;
       } else if (c.paymentStatus === 'pending') {

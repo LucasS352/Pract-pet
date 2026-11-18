@@ -1,6 +1,7 @@
-import { contractMetadata, packageReceiptWindow, receivedInPeriod } from './package-receipts';
+import { contractMetadata, moneyCents, packageReceivedAmount, packageReceiptWindow, receivedInPeriod } from './package-receipts';
 import { SalesService } from '../sales/sales.service';
 import { BadRequestException, ConflictException, ForbiddenException, Injectable, NotFoundException, Optional } from '@nestjs/common';
+import * as bcrypt from 'bcrypt';
 import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
@@ -461,7 +462,7 @@ export class PetshopService {
     const prevPackages = prevPackagesRaw.filter(p => hasReceipt(p) && receivedInPeriod(p, prevStart, prevEnd));
     let prevRevenue = 0;
     for (const s of prevSales) prevRevenue += Number(s.total || 0);
-    for (const p of prevPackages) prevRevenue += Number(p.finalPrice || 0);
+    for (const p of prevPackages) prevRevenue += packageReceivedAmount(p);
     // Appointments describe work, not cash received. Their receipts are already Sales.
 
     // Sale is the cash source of truth. Split its origin only for display.
@@ -678,7 +679,7 @@ export class PetshopService {
     let taxiPackageRevenue = 0;
     let taxiPackageCount = 0;
     for (const p of soldPackages) {
-      const pkgVal = Number(p.finalPrice || 0);
+      const pkgVal = packageReceivedAmount(p);
       if (!(p as any).saleId) {
         directPaidPackagesCount += 1;
         packageRevenue += pkgVal;
@@ -1441,7 +1442,9 @@ export class PetshopService {
     );
 
     const transport = parseAppointmentTransport(appointment.checkInNotes);
-    const transportFee = (!forceAddonFlag || !hasPaidSale) && transport && !transport.coveredByPackage ? Number(transport.fee) : 0;
+    const taxiAddedAfterLastPayment = history.some((entry: any) => entry?.kind === 'taxi_added' &&
+      new Date(entry.at).getTime() > (lastPaidSale?.sale?.createdAt?.getTime() || 0));
+    const transportFee = (!forceAddonFlag || !hasPaidSale || taxiAddedAfterLastPayment) && transport && !transport.coveredByPackage ? Number(transport.fee) : 0;
     const taxiProductId = 'petshop-taxi-dog-fee';
     const serviceNote = 'Serviço Pet Shop';
     const taxiNote = 'Táxi Dog Pet Shop';
@@ -2352,9 +2355,12 @@ export class PetshopService {
     const paidComanda = (data.addServices?.length || data.removeAppointmentServiceId || data.transport !== undefined)
       ? await prisma.comanda.findFirst({ where: { notes: { contains: id }, status: 'closed', sale: { is: { status: 'completed' } } },
         orderBy: { sale: { createdAt: 'desc' } }, select: { sale: { select: { id: true, createdAt: true } } } }) : null;
-    if (paidComanda && (data.removeAppointmentServiceId || data.transport !== undefined)) {
+    const existingTransport = parseAppointmentTransport(current.checkInNotes);
+    const addingTaxiAfterPayment = Boolean(paidComanda && data.transport?.enabled && !existingTransport?.enabled);
+    if (paidComanda && (data.removeAppointmentServiceId || (data.transport !== undefined && !addingTaxiAfterPayment))) {
       throw new BadRequestException('Atendimento pago. Estorne o pagamento antes de alterar serviços ou transporte.');
     }
+    if (addingTaxiAfterPayment) await this.stationAccess?.assertPetshopCommissionAdmin(req);
     if (data.addServices?.length && (paidComanda || current.status === 'delivered' || current.completedAt ||
         data.addServices.some((item: any) => item.commissionRecipientId))) {
       await this.stationAccess?.assertPetshopCommissionAdmin(req);
@@ -2480,6 +2486,14 @@ export class PetshopService {
     // Histórico de alterações
     let updatedHistory = Array.isArray(current.stageHistory) ? [...(current.stageHistory as any[])] : [];
     updatedHistory.push(...addedServiceHistory);
+    if (addingTaxiAfterPayment) {
+      const actor = await this.commissions.sessionOperator(req);
+      updatedHistory.push({
+        kind: 'taxi_added', status: current.status, label: 'Táxi Dog adicionado após pagamento',
+        at: new Date().toISOString(), notes: `Taxa adicional: R$ ${Number(data.transport.fee || 0).toFixed(2)}`,
+        userId: actor?.id || userId || null, userName: actor?.name || req?.user?.name || req?.user?.email || 'Administrador',
+      });
+    }
     if (rescheduled) {
       const operatorName = await this.resolveUserDisplayName(prisma, userId, req);
 
@@ -2608,15 +2622,27 @@ export class PetshopService {
     if (req.user.role === 'operator' && !actor) throw new ForbiddenException('Identifique o colaborador com PIN.');
     const payments = Array.isArray(body.payments) ? body.payments : [{ method: body.method }];
     if (!payments.length || payments.some(p => !['dinheiro', 'pix', 'credito', 'debito'].includes(p.method))) throw new BadRequestException('Forma de pagamento inválida.');
+    const discountCents = moneyCents(body?.discount ?? 0, 'Desconto');
+    if (discountCents) {
+      if (!body?.discountPin) throw new ForbiddenException('Informe o PIN para autorizar o desconto.');
+      const prisma = await this.prisma();
+      const settings = await prisma.tenantSettings.findUnique({ where: { id: 'singleton' }, select: { discountPin: true } });
+      if (!settings?.discountPin || !await bcrypt.compare(body.discountPin, settings.discountPin)) {
+        throw new ForbiddenException('PIN de desconto inválido.');
+      }
+    }
     const prepay = body?.prepay === true;
     const comanda = await this.prepareCheckout(id, prepay);
     if (!comanda || 'prepaid' in comanda) throw new BadRequestException('Atendimento sem valor avulso ou já pago.');
-    const resolvedPayments = payments.map(p => ({ method: p.method, value: body.payments ? Number(p.value) : Number(comanda.total) }));
-    if (resolvedPayments.some(p => !Number.isFinite(p.value) || p.value <= 0) || !new Prisma.Decimal(comanda.total).eq(resolvedPayments.reduce((sum, p) => sum.plus(p.value), new Prisma.Decimal(0)))) throw new BadRequestException('A soma dos pagamentos deve ser igual ao total.');
+    const grossCents = moneyCents(Number(comanda.total), 'Total');
+    if (discountCents && discountCents >= grossCents) throw new BadRequestException('O desconto deve ser menor que o total do atendimento.');
+    const netTotal = (grossCents - discountCents) / 100;
+    const resolvedPayments = payments.map(p => ({ method: p.method, value: body.payments ? Number(p.value) : netTotal }));
+    if (resolvedPayments.some(p => !Number.isFinite(p.value) || p.value <= 0) || !new Prisma.Decimal(netTotal).eq(resolvedPayments.reduce((sum, p) => sum.plus(p.value), new Prisma.Decimal(0)))) throw new BadRequestException('A soma dos pagamentos deve ser igual ao total com desconto.');
     return this.sales.checkout({
       idempotencyKey: `petshop-receipt:${id}:${comanda.id}`, source: 'petshop', comandaId: comanda.id,
       petshopAppointmentId: id, petshopPrepayment: prepay, operatorId: actor?.id, items: [], extraItems: [],
-      payments: resolvedPayments, emitirNfce: false,
+      payments: resolvedPayments, discount: discountCents / 100, emitirNfce: false,
     }, true);
   }
 
@@ -2881,8 +2907,14 @@ export class PetshopService {
     const hasStageOperatorsMap = Boolean(data?.stageOperators && typeof data.stageOperators === 'object' && Object.keys(data.stageOperators).length > 0);
     const isDirectComplete = Boolean(data?.directComplete || hasStageOperatorsMap);
     if (hasStageOperatorsMap || data?.directComplete) await this.stationAccess?.assertPetshopCommissionAdmin(req);
+    const isReopening = current.status === 'delivered' && status === 'ready' && data?.reopen === true;
+    const reopenReason = isReopening ? requiredText(data.reopenReason, 'Motivo da reabertura') : '';
+    if (isReopening) {
+      await this.stationAccess?.assertPetshopCommissionAdmin(req);
+      if (reopenReason.length < 10) throw new BadRequestException('Informe o motivo da reabertura com pelo menos 10 caracteres.');
+    }
 
-    if ((['delivered', 'cancelled', 'no_show'].includes(current.status) || current.completedAt) && !hasStageOperatorsMap) {
+    if ((['delivered', 'cancelled', 'no_show'].includes(current.status) || current.completedAt) && !hasStageOperatorsMap && !isReopening) {
       throw new ConflictException('Atendimento finalizado. Não é permitido reabrir ou cobrar novamente.');
     }
     if (status === 'delivered') {
@@ -2897,7 +2929,9 @@ export class PetshopService {
         (!lastPaid || history.some(entry => entry?.kind === 'service_added' && entry.appointmentServiceId === s.id &&
           new Date(entry.at).getTime() > lastPaid.sale!.createdAt.getTime())));
       const transport = parseAppointmentTransport(current.checkInNotes);
-      const taxiPayable = !lastPaid && transport && !transport.coveredByPackage && transport.fee > 0;
+      const taxiPayable = transport && !transport.coveredByPackage && transport.fee > 0 &&
+        (!lastPaid || history.some(entry => entry?.kind === 'taxi_added' &&
+          new Date(entry.at).getTime() > lastPaid.sale!.createdAt.getTime()));
       if ((payable || taxiPayable) && !isDirectComplete) throw new BadRequestException('Há serviços ou Táxi Dog a cobrar. Finalize o pagamento na Agenda.');
     }
     if (['cancelled', 'no_show'].includes(status) &&
@@ -2952,7 +2986,7 @@ export class PetshopService {
       const newEntries: any[] = [];
       if (statusChanged) {
         // Identifica e registra etapas puladas no fluxo para auditoria completa
-        const skipped = this.pricing.getSkippedStages(current.status, status, resolvedStages);
+        const skipped = isReopening ? [] : this.pricing.getSkippedStages(current.status, status, resolvedStages);
         for (const skippedItem of skipped) {
           const skippedKey = typeof skippedItem === 'string' ? skippedItem : skippedItem.key;
           const skippedLabel = typeof skippedItem === 'object' && skippedItem.label ? skippedItem.label : getStageLabel(skippedKey);
@@ -2970,10 +3004,11 @@ export class PetshopService {
 
       newEntries.push({
         status,
-        label: getStageLabel(status),
+        kind: isReopening ? 'reopened' : undefined,
+        label: isReopening ? 'Reaberto para correção' : getStageLabel(status),
         at: now.toISOString(),
         photoUrl: nextPhotoUrl !== undefined ? nextPhotoUrl : null,
-        notes: nextStageNotes !== undefined ? nextStageNotes : null,
+        notes: isReopening ? reopenReason : nextStageNotes !== undefined ? nextStageNotes : null,
         userId: actor?.id || userId || null,
         userName: actor?.name || operatorName || req?.user?.email || null,
         operatorId: assignedOperator?.id || (trackedStage ? actor?.id : null) || null,
@@ -2994,7 +3029,7 @@ export class PetshopService {
       const locked = await tx.petAppointment.findUnique({ where: { id }, select: { status: true, updatedAt: true } });
       if (locked?.status !== current.status || locked?.updatedAt.getTime() !== current.updatedAt.getTime()) throw new ConflictException('Atendimento alterado por outra sessão. Atualize a agenda.');
       // Efetiva consumo de sessão do pacote somente quando o serviço é concluído (ready ou delivered)
-      if (status === 'ready' || status === 'delivered') {
+      if ((status === 'ready' || status === 'delivered') && !isReopening) {
         const res = await this.packages.consumeReservedSessionsForAppointmentInTx(tx, id, {
           userId,
           operatorId: actor?.id || data.operatorId,
@@ -3088,7 +3123,7 @@ export class PetshopService {
           stageHistory: updatedHistory,
           checkedInAt: status === 'checked_in' && !current.checkedInAt ? now : undefined,
           readyAt: status === 'ready' && !current.readyAt ? now : undefined,
-          completedAt: status === 'delivered' ? now : undefined,
+          completedAt: isReopening ? null : status === 'delivered' ? now : undefined,
         },
         include: {
           pet: true,
@@ -3114,7 +3149,7 @@ export class PetshopService {
       });
     });
 
-    if (status === 'ready') {
+    if (status === 'ready' && !isReopening) {
       try {
         await this.prepareCheckout(id);
       } catch (comandaErr: any) {

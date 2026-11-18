@@ -168,8 +168,11 @@ export class PetshopController {
   }
 
   @Post('packages/contracts/:id/confirm-payment')
-  confirmPackagePayment(@Param('id') id: string, @Body() body: any) {
-    return this.packages.confirmContractPayment(id, body);
+  confirmPackagePayment(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.packages.confirmContractPayment(id, body, {
+      userId: req.user?.sub || req.user?.id,
+      name: req.user?.name || req.user?.email,
+    });
   }
 
   @Post('packages/contracts/:id/refund-session')

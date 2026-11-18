@@ -2,7 +2,12 @@ import { BadRequestException } from '@nestjs/common';
 
 export const PACKAGE_PAYMENT_METHODS = ['pix', 'dinheiro', 'credito', 'debito'] as const;
 export type PackagePayment = { method: string; amount: number };
-export type PackageReceipt = { receivedAt: string; payments: PackagePayment[] };
+export type PackageReceipt = {
+  receivedAt: string;
+  payments: PackagePayment[];
+  discountAmount?: number;
+  discountAuthorizedBy?: { userId: string; name?: string };
+};
 const MAX_MONEY = 99_999_999.99;
 
 export function moneyCents(value: unknown, label = 'Valor'): number {
@@ -52,6 +57,34 @@ export function allocatePackagePayments(payments: PackagePayment[], totals: numb
   });
   if (remaining.some(p => p.cents)) throw new BadRequestException('Pagamentos excedem o total do grupo.');
   return allocated;
+}
+
+/** Allocate a receipt discount across family contracts, preserving every cent. */
+export function allocatePackageDiscount(discount: number, totals: number[]): number[] {
+  const discountCents = moneyCents(discount, 'Desconto');
+  const prices = totals.map(total => moneyCents(total, 'Total'));
+  const gross = prices.reduce((sum, cents) => sum + cents, 0);
+  if (discountCents > gross) throw new BadRequestException('Desconto maior que o total do pacote.');
+  if (!gross) return prices.map(() => 0);
+  const shares = prices.map((cents, index) => {
+    const product = BigInt(cents) * BigInt(discountCents);
+    return { index, cents: Number(product / BigInt(gross)), remainder: product % BigInt(gross) };
+  });
+  let remaining = discountCents - shares.reduce((sum, share) => sum + share.cents, 0);
+  for (const share of [...shares].sort((a, b) => a.remainder === b.remainder ? a.index - b.index : a.remainder > b.remainder ? -1 : 1)) {
+    if (!remaining) break;
+    if (share.cents < prices[share.index]) { share.cents += 1; remaining -= 1; }
+  }
+  if (remaining) throw new BadRequestException('Não foi possível distribuir o desconto entre os pacotes.');
+  return shares.map(share => share.cents / 100);
+}
+
+export function packageReceivedAmount(contract: { finalPrice?: unknown; notes?: string | null }): number {
+  const receipt = contractMetadata(contract.notes).receipt;
+  if (Array.isArray(receipt?.payments)) {
+    return receipt.payments.reduce((sum: number, payment: PackagePayment) => sum + moneyCents(payment.amount), 0) / 100;
+  }
+  return Number(contract.finalPrice || 0);
 }
 
 export function contractMetadata(notes: unknown): Record<string, any> {
