@@ -11,6 +11,7 @@ interface Operator {
   name: string;
   role: string;
   isManager?: boolean;
+  canManageAppointmentCommissions?: boolean;
 }
 
 interface CashRegister {

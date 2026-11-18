@@ -2685,22 +2685,106 @@ export class PetshopService {
     if (!current) throw new NotFoundException('Agendamento não encontrado.');
     if (['cancelled', 'no_show'].includes(current.status)) throw new ConflictException('Atendimento cancelado não permite apontamento de etapas.');
     const stages = this.pricing.resolveAppointmentStages(current);
+    const recipientId = String(data?.operatorId || '');
+    const recipient = await prisma.operator.findFirst({ where: { id: recipientId, active: true }, select: { id: true, name: true } });
+    if (!recipient) throw new BadRequestException('Selecione um funcionário ativo.');
+    const history = Array.isArray(current.stageHistory) ? (current.stageHistory as any[]) : [];
+    const actor = req?.headers?.['x-operator-token'] ? await this.commissions.sessionOperator(req) : null;
+    const actorId = actor?.id || req?.user?.id || this.tenantContext.get().userId || null;
+    const actorName = actor?.name || req?.user?.name || req?.user?.email || 'Administrador';
+
+    if (stageKey === 'service_added') {
+      const requestedServiceId = data?.appointmentServiceId ? String(data.appointmentServiceId) : null;
+      const targetEntry = [...history].reverse().find(
+        entry => entry?.kind === 'service_added' && (!requestedServiceId || entry.appointmentServiceId === requestedServiceId),
+      );
+      if (!targetEntry) {
+        throw new BadRequestException('Registro de serviço adicional não encontrado no histórico do atendimento.');
+      }
+      const targetAppointmentServiceId = targetEntry.appointmentServiceId ? String(targetEntry.appointmentServiceId) : undefined;
+      const updated = await prisma.$transaction(async tx => {
+        await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${id} FOR UPDATE`;
+        const locked = await tx.petAppointment.findUnique({ where: { id }, select: { updatedAt: true } });
+        if (!locked || locked.updatedAt.getTime() !== current.updatedAt.getTime()) {
+          throw new ConflictException('Atendimento alterado por outra sessão. Atualize a agenda.');
+        }
+        const existing = await tx.petCommission.findMany({
+          where: {
+            appointmentId: id,
+            stageKey: 'service_added',
+            ...(targetAppointmentServiceId ? { appointmentServiceId: targetAppointmentServiceId } : {}),
+          },
+          select: { id: true, state: true, operatorId: true },
+        });
+        if (existing.some(row => ['APPROVED', 'PAID', 'REVERSED'].includes(row.state))) {
+          throw new ConflictException('Comissão deste serviço já foi aprovada, paga ou estornada. Corrija pela gestão de comissões antes de alterar o responsável.');
+        }
+        if (existing.length > 0) {
+          await tx.petCommission.updateMany?.({
+            where: {
+              appointmentId: id,
+              stageKey: 'service_added',
+              ...(targetAppointmentServiceId ? { appointmentServiceId: targetAppointmentServiceId } : {}),
+              state: { in: ['PENDING', 'AWAITING_PAYMENT'] },
+            },
+            data: { operatorId: recipient.id },
+          });
+        }
+        const prevOperatorId = targetEntry.operatorId || existing[0]?.operatorId || null;
+        const prevOperatorName = targetEntry.commissionRecipientName || targetEntry.operatorName || null;
+        const nextHistory = history.map(entry => {
+          if (entry === targetEntry || (entry?.kind === 'service_added' && targetAppointmentServiceId && entry.appointmentServiceId === targetAppointmentServiceId)) {
+            return {
+              ...entry,
+              previousOperatorId: prevOperatorId,
+              previousOperatorName: prevOperatorName,
+              operatorId: recipient.id,
+              commissionRecipientName: recipient.name,
+            };
+          }
+          return entry;
+        });
+        nextHistory.push({
+          kind: 'stage_assigned',
+          status: 'service_added',
+          appointmentServiceId: targetAppointmentServiceId,
+          label: `${targetEntry.label || 'Serviço adicional'}: ${recipient.name}`,
+          notes: prevOperatorName && prevOperatorName !== recipient.name
+            ? `Comissão transferida de ${prevOperatorName} para ${recipient.name}`
+            : `Comissão atribuída para ${recipient.name}`,
+          at: new Date().toISOString(),
+          userId: actorId,
+          userName: actorName,
+          operatorId: recipient.id,
+          operatorName: recipient.name,
+          previousOperatorId: prevOperatorId,
+          previousOperatorName: prevOperatorName,
+          skipped: false,
+        });
+        return tx.petAppointment.update({
+          where: { id },
+          data: { stageHistory: nextHistory },
+          include: {
+            pet: true, customer: true, professional: { select: { id: true, name: true } },
+            services: { include: {
+              customerPackage: { select: { id: true, planNameSnapshot: true, expiresAt: true, status: true } },
+              customerPackageItem: { select: { id: true, totalQuantity: true, usedQuantity: true, reservedQuantity: true, availableQuantity: true } },
+            } },
+          },
+        });
+      });
+      return { ...updated, resolvedStages: stages };
+    }
+
     const keys = stages.map((stage: any) => typeof stage === 'string' ? stage : stage.key);
     const stageIndex = keys.indexOf(stageKey);
     const currentIndex = current.status === 'delivered' ? keys.length : keys.indexOf(current.status);
     if (stageIndex < 0) throw new BadRequestException('Esta etapa não pertence ao atendimento.');
     if (stageIndex > currentIndex) throw new BadRequestException('Avance o atendimento até esta etapa antes de apontar o funcionário.');
-    const recipientId = String(data?.operatorId || '');
-    const recipient = await prisma.operator.findFirst({ where: { id: recipientId, active: true }, select: { id: true, name: true } });
-    if (!recipient) throw new BadRequestException('Selecione um funcionário ativo.');
     const configuredStages = await this.getTenantStages();
     const tracked = configuredStages.some(stage => stage.key === stageKey && stage.trackProfessional);
-    const history = Array.isArray(current.stageHistory) ? current.stageHistory as any[] : [];
-    const executionEntry = history.find(entry => entry?.status === stageKey && !entry.skipped && entry.kind !== 'stage_assigned');
+    const executionEntry = [...history].reverse().find(entry => entry?.status === stageKey && !entry.skipped && entry.kind !== 'stage_assigned');
     const executedAt = executionEntry?.at ? new Date(executionEntry.at) : new Date();
-    const actor = req?.headers?.['x-operator-token'] ? await this.commissions.sessionOperator(req) : null;
-    const actorId = actor?.id || req?.user?.id || this.tenantContext.get().userId || null;
-    const actorName = actor?.name || req?.user?.name || req?.user?.email || 'Administrador';
     const stage = stages[stageIndex];
     const stageLabel = typeof stage === 'string' ? STAGE_LABELS_PT[stage] || stage : stage.label || STAGE_LABELS_PT[stageKey] || stageKey;
 
@@ -2712,15 +2796,53 @@ export class PetshopService {
       if (existing.some(row => ['APPROVED', 'PAID', 'REVERSED'].includes(row.state))) {
         throw new ConflictException('Comissão desta etapa já foi aprovada, paga ou estornada. Corrija pela gestão de comissões antes de alterar o responsável.');
       }
-      if (tracked) await this.commissions.recordExecution(tx, current, stageKey, recipient.id, executedAt);
+      if (tracked || existing.length > 0) {
+        await this.commissions.recordExecution(tx, current, stageKey, recipient.id, executedAt);
+      }
+      if (existing.length > 0) {
+        await tx.petCommission.updateMany?.({
+          where: {
+            appointmentId: id,
+            stageKey,
+            state: { in: ['PENDING', 'AWAITING_PAYMENT'] },
+            operatorId: { not: recipient.id },
+          },
+          data: { operatorId: recipient.id },
+        });
+      }
+      const prevOperatorId = existing[0]?.operatorId || executionEntry?.operatorId || null;
+      const prevOperatorName = executionEntry?.operatorName || executionEntry?.userName || null;
+      const updatedStageHistory = history.map(entry => {
+        if (entry?.status === stageKey && !entry.skipped && entry.kind !== 'stage_assigned') {
+          return {
+            ...entry,
+            previousOperatorId: entry.operatorId || prevOperatorId,
+            previousOperatorName: entry.operatorName || entry.userName || null,
+            operatorId: recipient.id,
+            operatorName: recipient.name,
+          };
+        }
+        return entry;
+      });
+      updatedStageHistory.push({
+        kind: 'stage_assigned',
+        status: stageKey,
+        label: `${stageLabel}: ${recipient.name}`,
+        notes: prevOperatorName && prevOperatorName !== recipient.name
+          ? `Comissão/execução transferida de ${prevOperatorName} para ${recipient.name}`
+          : undefined,
+        at: new Date().toISOString(),
+        userId: actorId,
+        userName: actorName,
+        operatorId: recipient.id,
+        operatorName: recipient.name,
+        previousOperatorId: prevOperatorId,
+        previousOperatorName: prevOperatorName,
+        skipped: false,
+      });
       return tx.petAppointment.update({
         where: { id },
-        data: { stageHistory: [...history, {
-          kind: 'stage_assigned', status: stageKey, label: `${stageLabel}: ${recipient.name}`,
-          at: new Date().toISOString(), userId: actorId, userName: actorName,
-          operatorId: recipient.id, operatorName: recipient.name,
-          previousOperatorId: existing[0]?.operatorId || null, skipped: false,
-        }] },
+        data: { stageHistory: updatedStageHistory },
         include: {
           pet: true, customer: true, professional: { select: { id: true, name: true } },
           services: { include: {

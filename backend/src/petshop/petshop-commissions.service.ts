@@ -282,12 +282,14 @@ export class PetshopCommissionsService {
       }) : null;
       const rule = this.resolveRule(rules, item.serviceId, operatorId, petSize);
       if (!rule) {
-        if (existing?.state === 'PENDING') throw new BadRequestException('O novo funcionário não possui regra de comissão para esta etapa e serviço. Configure a regra antes de transferir.');
+        if (existing?.state === 'PENDING' || existing?.state === 'AWAITING_PAYMENT') {
+          throw new BadRequestException('O novo funcionário não possui regra de comissão para esta etapa e serviço. Configure a regra antes de transferir.');
+        }
         continue;
       }
       const amount = rule.kind === 'PERCENT' ? money(base.mul(rule.value).div(100)) : rule.kind === 'FIXED' ? money(D(rule.value)) : ZERO;
       if (existing) {
-        if (existing.state === 'PENDING') {
+        if (existing.state === 'PENDING' || existing.state === 'AWAITING_PAYMENT') {
           await tx.petCommission.update({
             where: { id: existing.id },
             data: {

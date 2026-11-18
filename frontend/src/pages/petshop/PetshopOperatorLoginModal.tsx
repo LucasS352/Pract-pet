@@ -9,13 +9,14 @@ export interface OperatorItem {
   name: string;
   active: boolean;
   isManager: boolean;
+  canManageAppointmentCommissions?: boolean;
   jobTitle?: string | null;
 }
 
 interface PetshopOperatorLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess?: () => void;
+  onSuccess?: (operatorData?: any) => void;
   isMandatory?: boolean;
 }
 
@@ -45,8 +46,8 @@ export function PetshopOperatorLoginModal({
       .then(res => {
         const activeOps = (res.data || []).filter(o => o.active);
         setOperators(activeOps);
-        // Se já tiver operador ativo, pré-seleciona
-        if (operator?.id) {
+        // Só pré-seleciona se o operador atual tiver PIN administrativo; caso contrário mostra a lista para facilitar a troca
+        if (operator?.id && operator?.canManageAppointmentCommissions) {
           const found = activeOps.find(o => o.id === operator.id);
           if (found) setSelectedOp(found);
         }
@@ -73,8 +74,11 @@ export function PetshopOperatorLoginModal({
       const { operatorToken, ...operatorData } = res.data;
       setOperator(operatorData, operatorToken);
       toast.success(`Colaborador(a) identificado(a): ${selectedOp.name}`);
-      onClose();
-      onSuccess?.();
+      if (onSuccess) {
+        onSuccess(operatorData);
+      } else {
+        onClose();
+      }
     } catch (err: any) {
       const msg = err.response?.data?.message || 'PIN incorreto. Tente novamente.';
       setErrorMsg(msg);
@@ -162,6 +166,11 @@ export function PetshopOperatorLoginModal({
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
+                        {op.canManageAppointmentCommissions && (
+                          <span className="rounded-full bg-teal-50 border border-teal-200 px-2 py-0.5 text-2xs font-bold text-teal-800">
+                            PIN Admin
+                          </span>
+                        )}
                         {op.isManager ? (
                           <span className="rounded-full bg-blue-50 px-2.5 py-0.5 text-2xs font-semibold text-blue-700">
                             Gerente

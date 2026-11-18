@@ -30,6 +30,7 @@ import {
   Filter,
   History,
   Loader2,
+  Lock,
   MessageCircle,
   PackageCheck,
   PawPrint,
@@ -48,7 +49,7 @@ import { api } from '@/lib/api';
 import { getFullUrl } from '@/lib/getFullUrl';
 
 
-import type { Appointment, CustomerPetPackage, Pet, PetService, PetshopStageItem, Tutor } from './types';
+import type { Appointment, CustomerPetPackage, Pet, PetService, PetshopStageItem, StageHistoryEntry, Tutor } from './types';
 import {
   coatLabels,
   dateTime,
@@ -342,7 +343,16 @@ export default function PetshopAgendaPage() {
   }, [openNew]);
 
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
-  const [stageAssignment, setStageAssignment] = useState<{ appointment: Appointment; key: string; label: string; advance: boolean } | null>(null);
+  const [stageAssignment, setStageAssignment] = useState<{
+    appointment: Appointment;
+    key: string;
+    label: string;
+    advance: boolean;
+    appointmentServiceId?: string;
+    previousOperatorId?: string | null;
+    previousOperatorName?: string | null;
+    fromHistory?: boolean;
+  } | null>(null);
   const [stageAssigneeId, setStageAssigneeId] = useState('');
   const [savingStageAssignment, setSavingStageAssignment] = useState(false);
   const [editingTaxi, setEditingTaxi] = useState(false);
@@ -1263,24 +1273,76 @@ export default function PetshopAgendaPage() {
     const stageIndex = steps.findIndex(step => step.key === key);
     const prior = [...(item.stageHistory || [])].reverse().find(entry => entry.status === key && entry.operatorId && !entry.skipped);
     setStageAssigneeId(prior?.operatorId || '');
-    setStageAssignment({ appointment: item, key, label, advance: item.status !== 'delivered' && stageIndex > currentIndex });
+    setStageAssignment({
+      appointment: item,
+      key,
+      label,
+      advance: item.status !== 'delivered' && stageIndex > currentIndex,
+      previousOperatorId: prior?.operatorId || null,
+      previousOperatorName: prior?.operatorName || prior?.userName || null,
+    });
+  };
+
+  const openHistoryCommissionCorrection = (item: Appointment, entry: StageHistoryEntry, displayLabel: string) => {
+    if (['cancelled', 'no_show'].includes(item.status)) return;
+    const isServiceAdded = entry.kind === 'service_added';
+    const targetKey = isServiceAdded ? 'service_added' : entry.status;
+    const prevOpId = entry.operatorId || null;
+    const prevOpName = isServiceAdded
+      ? entry.commissionRecipientName || entry.operatorName || entry.userName || null
+      : entry.operatorName || entry.userName || null;
+
+    const launchModal = () => {
+      setStageAssigneeId(prevOpId || '');
+      setStageAssignment({
+        appointment: item,
+        key: targetKey,
+        label: displayLabel,
+        advance: false,
+        appointmentServiceId: entry.appointmentServiceId,
+        previousOperatorId: prevOpId,
+        previousOperatorName: prevOpName,
+        fromHistory: true,
+      });
+    };
+
+    if (!canManageCommissions) {
+      toast.info('Informe o PIN administrativo do Pet Shop para corrigir a comissão.');
+      openOperatorModal(loggedOp => {
+        if (loggedOp?.canManageAppointmentCommissions) {
+          launchModal();
+        } else {
+          toast.error('Apenas colaboradores com PIN administrativo do Pet Shop podem corrigir comissões.');
+        }
+      });
+      return;
+    }
+
+    launchModal();
   };
 
   const saveStageAssignment = async () => {
     if (!stageAssignment || !stageAssigneeId) return;
-    const { appointment, key, label, advance } = stageAssignment;
+    const { appointment, key, label, advance, appointmentServiceId, previousOperatorName, fromHistory } = stageAssignment;
     setSavingStageAssignment(true);
     try {
       const url = advance
         ? `/petshop/appointments/${appointment.id}/status`
         : `/petshop/appointments/${appointment.id}/stages/${encodeURIComponent(key)}/assignee`;
-      const payload = advance ? { status: key, commissionOperatorId: stageAssigneeId } : { operatorId: stageAssigneeId };
+      const payload = advance
+        ? { status: key, commissionOperatorId: stageAssigneeId }
+        : { operatorId: stageAssigneeId, ...(appointmentServiceId ? { appointmentServiceId } : {}) };
       const { data: updated } = await api.patch<Appointment>(url, payload);
       const visibleUpdate = keepPaymentStatus(updated, appointment);
       setItems(current => current.map(item => item.id === appointment.id ? visibleUpdate : item));
       setSelectedAppointment(current => current?.id === appointment.id ? visibleUpdate : current);
       setStageAssignment(null);
-      toast.success(`${label}: ${operators.find(op => op.id === stageAssigneeId)?.name || 'funcionário'} apontado(a).`);
+      const newOpName = operators.find(op => op.id === stageAssigneeId)?.name || 'funcionário';
+      if (fromHistory && previousOperatorName && previousOperatorName !== newOpName) {
+        toast.success(`Comissão de "${label}" removida de ${previousOperatorName} e transferida para ${newOpName}.`);
+      } else {
+        toast.success(`${label}: ${newOpName} apontado(a).`);
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Não foi possível apontar o funcionário nesta etapa.');
       if ([401, 403].includes(error.response?.status)) openOperatorModal();
@@ -3463,6 +3525,12 @@ export default function PetshopAgendaPage() {
                       const timeFormatted = new Date(h.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                       const dateFormatted = new Date(h.at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
                       const badge = getHistoryEntryBadge(h);
+                      const isCorrectableStage =
+                        !['cancelled', 'no_show'].includes(selectedAppointment.status) &&
+                        !h.skipped &&
+                        !h.rescheduledFrom &&
+                        ((!h.kind && !['scheduled', 'requested', 'cancelled', 'no_show', 'ready', 'delivered'].includes(h.status)) ||
+                          h.kind === 'service_added');
 
                       return (
                         <div
@@ -3473,7 +3541,7 @@ export default function PetshopAgendaPage() {
                               : 'bg-white border-zinc-200 text-zinc-800'
                           }`}
                         >
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <strong className="font-bold">{stageLabel}</strong>
                               <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}>
@@ -3488,9 +3556,23 @@ export default function PetshopAgendaPage() {
                             {h.commissionRecipientName && h.commissionAmount != null && Number(h.commissionAmount) > 0 && (
                               <p className="mt-1 text-[11px] font-semibold text-teal-800">
                                 Comissão: {money(h.commissionAmount)} para {h.commissionRecipientName} · {h.commissionState === 'PENDING' || selectedAppointment.services.some(s => s.id === h.appointmentServiceId && s.chargedSaleId) ? 'registrada' : 'aguardando cobrança'}
+                                {h.previousOperatorName && h.previousOperatorName !== h.commissionRecipientName ? (
+                                  <span className="ml-1 text-[10px] font-normal text-amber-800">
+                                    (transferida de {h.previousOperatorName})
+                                  </span>
+                                ) : null}
                               </p>
                             )}
-                            {h.operatorName && <p className="mt-1 text-[11px] font-semibold text-teal-800">Etapa executada por {h.operatorName}</p>}
+                            {h.operatorName && (
+                              <p className="mt-1 text-[11px] font-semibold text-teal-800">
+                                Etapa executada por {h.operatorName}
+                                {h.previousOperatorName && h.previousOperatorName !== h.operatorName ? (
+                                  <span className="ml-1 text-[10px] font-normal text-amber-800">
+                                    (transferido de {h.previousOperatorName})
+                                  </span>
+                                ) : null}
+                              </p>
+                            )}
                             {h.reason && <p className="text-[10px] text-amber-800 mt-0.5">{h.reason}</p>}
                             {h.notes && <p className="text-[11px] text-zinc-600 mt-0.5 italic">"{h.notes}"</p>}
                             {h.photoUrl && (
@@ -3513,9 +3595,26 @@ export default function PetshopAgendaPage() {
                               </div>
                             )}
                           </div>
-                          <span className="text-[10px] font-semibold text-zinc-400 tabular-nums shrink-0 mt-0.5">
-                            {timeFormatted} · {dateFormatted}
-                          </span>
+                          <div className="flex flex-col items-end gap-1.5 shrink-0">
+                            <span className="text-[10px] font-semibold text-zinc-400 tabular-nums mt-0.5">
+                              {timeFormatted} · {dateFormatted}
+                            </span>
+                            {isCorrectableStage && (
+                              <button
+                                type="button"
+                                onClick={() => openHistoryCommissionCorrection(selectedAppointment, h, stageLabel)}
+                                className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50/80 px-2 py-1 text-[10px] font-bold text-teal-800 hover:bg-teal-100 transition cursor-pointer"
+                                title={
+                                  canManageCommissions
+                                    ? 'Corrigir colaborador responsável e transferir comissão'
+                                    : 'Requer PIN administrativo do Pet Shop para corrigir comissão'
+                                }
+                              >
+                                {canManageCommissions ? <Coins size={11} /> : <Lock size={11} />}
+                                <span>Corrigir comissão</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
                       );
                     })}
@@ -3859,15 +3958,32 @@ export default function PetshopAgendaPage() {
         onSuccess={() => { setSelectedAppointment(null); loadAppointments(false); toast.success('Pagamento registrado.'); }} />}
 
       {stageAssignment && (
-        <Modal title={`Apontar ${stageAssignment.label} · ${stageAssignment.appointment.pet?.name}`}
-          onClose={() => { if (!savingStageAssignment) setStageAssignment(null); }}>
+        <Modal
+          title={
+            stageAssignment.fromHistory
+              ? `Corrigir comissão · ${stageAssignment.label} (${stageAssignment.appointment.pet?.name})`
+              : `Apontar ${stageAssignment.label} · ${stageAssignment.appointment.pet?.name}`
+          }
+          onClose={() => { if (!savingStageAssignment) setStageAssignment(null); }}
+        >
           <form onSubmit={event => { event.preventDefault(); void saveStageAssignment(); }} className="space-y-4">
+            {stageAssignment.previousOperatorName && (
+              <div className="rounded-xl border border-amber-200 bg-amber-50/80 p-3 text-xs text-amber-950 space-y-1">
+                <p className="font-semibold">
+                  Responsável atual: <strong>{stageAssignment.previousOperatorName}</strong>
+                </p>
+                <p>
+                  Ao confirmar, o valor da comissão será <strong>removido de {stageAssignment.previousOperatorName}</strong> e <strong>transferido para o novo colaborador</strong> selecionado abaixo.
+                </p>
+              </div>
+            )}
             <p className="text-sm text-zinc-600">
               {stageAssignment.advance
                 ? `Ao confirmar, o atendimento avança para ${stageAssignment.label} e a comissão da etapa é atribuída ao funcionário escolhido.`
-                : 'O status e a cobrança do atendimento permanecem como estão. O responsável e a comissão desta etapa serão registrados ou atualizados.'}
+                : 'O status e a cobrança do atendimento permanecem como estão. O responsável e a comissão desta etapa/serviço serão atualizados no histórico e no relatório de comissões.'}
             </p>
-            <label className="block text-sm font-semibold text-zinc-800">Funcionário que executou a etapa *
+            <label className="block text-sm font-semibold text-zinc-800">
+              {stageAssignment.fromHistory ? 'Transferir comissão / execução para *' : 'Funcionário que executou a etapa *'}
               <select value={stageAssigneeId} onChange={event => setStageAssigneeId(event.target.value)}
                 required className="mt-1.5 h-11 w-full rounded-xl border border-zinc-300 bg-white px-3 font-normal">
                 <option value="">Selecione o funcionário</option>
@@ -3877,7 +3993,11 @@ export default function PetshopAgendaPage() {
             <div className="flex justify-end gap-2">
               <button type="button" className={secondaryButton} disabled={savingStageAssignment} onClick={() => setStageAssignment(null)}>Cancelar</button>
               <button type="submit" className={primaryButton} disabled={!stageAssigneeId || savingStageAssignment}>
-                {savingStageAssignment ? 'Salvando...' : 'Confirmar apontamento'}
+                {savingStageAssignment
+                  ? 'Salvando...'
+                  : stageAssignment.fromHistory
+                    ? 'Confirmar transferência'
+                    : 'Confirmar apontamento'}
               </button>
             </div>
           </form>

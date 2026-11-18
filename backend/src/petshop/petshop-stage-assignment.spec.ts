@@ -12,7 +12,11 @@ function fixture(status = 'finishing', commissionState = 'PENDING') {
       findUnique: jest.fn().mockImplementation(({ include }) => include ? current : { updatedAt: current.updatedAt, status: current.status }),
       update: jest.fn().mockImplementation(({ data }) => ({ ...current, ...data })),
     },
-    petCommission: { findMany: jest.fn().mockResolvedValue(commissionState ? [{ state: commissionState, operatorId: 'admin-op' }] : []), findFirst: jest.fn().mockResolvedValue(null) },
+    petCommission: {
+      findMany: jest.fn().mockResolvedValue(commissionState ? [{ id: 'comm-1', state: commissionState, operatorId: 'admin-op' }] : []),
+      findFirst: jest.fn().mockResolvedValue(null),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+    },
   };
   const prisma = {
     petAppointment: { findUnique: jest.fn().mockResolvedValue(current) },
@@ -39,10 +43,67 @@ describe('Apontamento administrativo de etapas', () => {
     const result = await service.assignAppointmentStage('appointment-1', 'bathing', { operatorId: 'banhista' }, req);
     expect(service.commissions.recordExecution).toHaveBeenCalledWith(tx, expect.anything(), 'bathing', 'banhista', new Date('2026-11-17T11:00:00Z'));
     expect(tx.petAppointment.update.mock.calls[0][0].data.status).toBeUndefined();
-    expect(result.stageHistory).toEqual(expect.arrayContaining([expect.objectContaining({
-      kind: 'stage_assigned', status: 'bathing', operatorId: 'banhista', operatorName: 'Banhista',
-      userName: 'Administradora', previousOperatorId: 'admin-op',
-    })]));
+    expect(result.stageHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: 'bathing',
+        operatorId: 'banhista',
+        operatorName: 'Banhista',
+        previousOperatorId: 'admin-op',
+        previousOperatorName: 'Administradora',
+      }),
+      expect.objectContaining({
+        kind: 'stage_assigned', status: 'bathing', operatorId: 'banhista', operatorName: 'Banhista',
+        userName: 'Administradora', previousOperatorId: 'admin-op',
+      }),
+    ]));
+  });
+
+  it('corrige e transfere comissão de serviço adicional (service_added) no histórico apenas com PIN administrativo', async () => {
+    const { service, tx, current } = fixture('finishing', 'AWAITING_PAYMENT');
+    current.stageHistory.push({
+      kind: 'service_added',
+      status: 'finishing',
+      label: 'Serviço adicionado: Antipulga',
+      appointmentServiceId: 'service-1',
+      at: '2026-11-17T11:30:00Z',
+      userName: 'Bruno',
+      operatorId: 'admin-op',
+      commissionRecipientName: 'Bruno',
+      commissionAmount: 5,
+      commissionState: 'AWAITING_PAYMENT',
+    } as any);
+    const result = await service.assignAppointmentStage(
+      'appointment-1',
+      'service_added',
+      { operatorId: 'banhista', appointmentServiceId: 'service-1' },
+      req,
+    );
+    expect(tx.petCommission.updateMany).toHaveBeenCalledWith({
+      where: {
+        appointmentId: 'appointment-1',
+        stageKey: 'service_added',
+        appointmentServiceId: 'service-1',
+        state: { in: ['PENDING', 'AWAITING_PAYMENT'] },
+      },
+      data: { operatorId: 'banhista' },
+    });
+    expect(result.stageHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'service_added',
+        appointmentServiceId: 'service-1',
+        operatorId: 'banhista',
+        commissionRecipientName: 'Banhista',
+        previousOperatorId: 'admin-op',
+        previousOperatorName: 'Bruno',
+      }),
+      expect.objectContaining({
+        kind: 'stage_assigned',
+        status: 'service_added',
+        appointmentServiceId: 'service-1',
+        operatorId: 'banhista',
+        operatorName: 'Banhista',
+      }),
+    ]));
   });
 
   it('não altera comissão aprovada ou paga', async () => {

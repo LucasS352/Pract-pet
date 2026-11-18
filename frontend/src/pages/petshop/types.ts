@@ -429,6 +429,8 @@ export type StageHistoryEntry = {
   userName?: string | null;
   operatorId?: string | null;
   operatorName?: string | null;
+  previousOperatorId?: string | null;
+  previousOperatorName?: string | null;
   skipped?: boolean;
   reason?: string | null;
   rescheduledFrom?: string | null;

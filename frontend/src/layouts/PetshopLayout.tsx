@@ -76,7 +76,7 @@ export interface PetshopLayoutContext {
   isRestrictedStaff: boolean;
   isOperatorAccount: boolean;
   operator: any;
-  openOperatorModal: (onSuccessCallback?: () => void) => void;
+  openOperatorModal: (onSuccessCallback?: (operatorData?: any) => void) => void;
 }
 
 export function usePetshopContext() {
@@ -96,7 +96,7 @@ export function usePetshopContext() {
     isRestrictedStaff: context?.isRestrictedStaff ?? false,
     isOperatorAccount: context?.isOperatorAccount ?? (user?.role === 'operator'),
     operator: context?.operator,
-    openOperatorModal: context?.openOperatorModal ?? ((cb?: () => void) => {
+    openOperatorModal: context?.openOperatorModal ?? ((cb?: (operatorData?: any) => void) => {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('petshop-require-pin', { detail: { onSuccess: cb } }));
       }
@@ -113,11 +113,11 @@ export function PetshopLayout() {
   const [tenant, setTenant] = useState<any>(null);
   const [tenantError, setTenantError] = useState(false);
   const [showOpModal, setShowOpModal] = useState(false);
-  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  const [pendingAction, setPendingAction] = useState<((operatorData?: any) => void) | null>(null);
   const [showCreateAccessModal, setShowCreateAccessModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const openOperatorModal = useCallback((onSuccessCallback?: () => void) => {
+  const openOperatorModal = useCallback((onSuccessCallback?: (operatorData?: any) => void) => {
     if (onSuccessCallback) {
       setPendingAction(() => onSuccessCallback);
     } else {
@@ -710,13 +710,13 @@ export function PetshopLayout() {
           setShowOpModal(false);
           setPendingAction(null);
         }}
-        onSuccess={() => {
+        onSuccess={operatorData => {
           setShowOpModal(false);
           if (pendingAction) {
             const action = pendingAction;
             setPendingAction(null);
             setTimeout(() => {
-              try { action(); } catch {}
+              try { action(operatorData); } catch {}
             }, 100);
           }
         }}
