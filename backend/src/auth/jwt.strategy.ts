@@ -48,12 +48,13 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       throw new UnauthorizedException('Token inválido para autenticação da loja');
     }
 
+    const user = await this.access.validateShopUser(payload.sub, payload.tenantId);
     return {
-      sub: payload.sub,
-      email: payload.email,
-      tenantId: payload.tenantId,
-      role: payload.role,
-      groupId: payload.groupId ?? null,
+      sub: user.id,
+      email: user.email,
+      tenantId: user.tenantId,
+      role: user.role,
+      groupId: user.groupId ?? null,
     };
   }
 }

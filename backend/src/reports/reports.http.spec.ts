@@ -19,7 +19,7 @@ describe('Reports HTTP authorization and tenant context', () => {
   const jwt = new JwtService({ secret });
   const context = new TenantContextService();
   const sales = jest.fn(async () => ({ tenantId: context.get().tenantId }));
-  const token = (role: string, tenantId = 'a') => jwt.sign({ sub: 'user', role, tenantId });
+  const token = (role: string, tenantId = 'a') => jwt.sign({ sub: `user-${role}-${tenantId}`, role, tenantId });
   beforeAll(async () => {
     jwtConstants.secret = secret;
     const module = await Test.createTestingModule({
@@ -28,7 +28,12 @@ describe('Reports HTTP authorization and tenant context', () => {
         { provide: JwtService, useValue: jwt },
         { provide: ReportsService, useValue: { sales } },
         { provide: TenantContextService, useValue: context },
-        { provide: HeartPrismaService, useValue: { tenant: {
+        { provide: HeartPrismaService, useValue: { user: {
+          findUnique: async ({ where }: any) => {
+            const [, role, ...tenantParts] = String(where.id).split('-');
+            return { id: where.id, tenantId: tenantParts.join('-'), email: 'qa@example.test', role, groupId: null, active: true, tenant: { status: 'active' } };
+          },
+        }, tenant: {
           findUnique: async ({ where }: any) => ({ id: where.id, databaseUrl: 'unused', modulos: {} }),
         } } },
         { provide: TenantConnectionManager, useValue: { getTenantClient: async () => ({ tenantSettings: { findUnique: async () => null } }) } },

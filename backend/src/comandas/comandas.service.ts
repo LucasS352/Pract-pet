@@ -335,6 +335,7 @@ export class ComandasService {
       }
     }
 
+    this.listReads.clear();
     return comanda;
   }
 
@@ -425,7 +426,7 @@ export class ComandasService {
           if (petSvc) {
             let servCat = await tx.category.findFirst({ where: { name: 'Serviços' } });
             if (!servCat) {
-              servCat = await tx.category.create({ data: { name: 'Serviços', color: '#0d9488' } });
+              servCat = await tx.category.create({ data: { name: 'Serviços' } });
             }
             product = await tx.product.create({
               data: {
@@ -471,6 +472,12 @@ export class ComandasService {
             throw new BadRequestException(
               `Os adicionais de "${product.name}" mudaram. Remova o item do carrinho e adicione-o novamente.`,
             );
+          }
+          if (item.unitPrice !== undefined) {
+            const parsedPrice = Number(item.unitPrice);
+            if (!Number.isFinite(parsedPrice) || parsedPrice < 0) {
+              throw new BadRequestException(`Preço unitário inválido para "${product.name}".`);
+            }
           }
           const unitPrice = item.unitPrice !== undefined
             ? new Prisma.Decimal(item.unitPrice)
@@ -527,7 +534,7 @@ export class ComandasService {
               totalPrice,
               notes: item.notes || null,
               createdById: item.createdById || null,
-              stockDeducted: true,
+              stockDeducted: !isServiceProduct,
               ...kdsData,
               ...reservation,
             },
@@ -714,6 +721,7 @@ export class ComandasService {
           .catch(err => this.logger.error(`Erro ao sincronizar estoque: ${err.message}`));
       }, 500);
     }
+    this.listReads.clear();
     this.kds.invalidateQueue?.();
 
     return this.findOne(comandaId);
@@ -748,7 +756,7 @@ export class ComandasService {
       where: { id: itemId, comandaId: comandaId },
       include: {
         modifiers: true,
-        product: { select: { id: true, name: true, isComposite: true } },
+        product: { select: { id: true, name: true, isComposite: true, unit: true, stock: true } },
       },
     });
 
@@ -760,7 +768,7 @@ export class ComandasService {
       await this.lockOpenComanda(tx, comandaId, ['open']);
       const authorization = await this.consumeAuthorization(tx, authorizationToken, 'remove_item', comandaId, itemId);
       const item = await tx.comandaItem.findFirst({ where: { id: itemId, comandaId },
-        include: { modifiers: true, product: { select: { id: true, name: true, isComposite: true } } } });
+        include: { modifiers: true, product: { select: { id: true, name: true, isComposite: true, unit: true, stock: true } } } });
       if (!item || item.status !== 'active') throw new NotFoundException('Item já removido desta comanda.');
       const originalQuantity = new Prisma.Decimal(item.quantity);
       if (expectedQuantity !== undefined && !originalQuantity.eq(expectedQuantity))
@@ -770,8 +778,9 @@ export class ComandasService {
       const remainingQuantity = originalQuantity.sub(removedQuantity);
       const fullRemoval = remainingQuantity.eq(0);
       await lockProducts(tx, [item.productId, ...item.modifiers.map((m: any) => m.componentProductId)]);
-      // Estorno de estoque apenas se stockDeducted = true
-      if (item.stockDeducted) {
+      const isServiceItem = item.product?.unit === 'SV' || Number(item.product?.stock ?? 0) >= 90000;
+      // Estorno de estoque apenas se stockDeducted = true e não for serviço
+      if (item.stockDeducted && !isServiceItem) {
         if (item.modifiers && item.modifiers.length > 0) {
           // Produto composto: estornar via snapshot (consumedQuantity já calculado)
           for (const mod of item.modifiers) {
@@ -873,6 +882,7 @@ export class ComandasService {
           .catch(err => this.logger.error(`Erro ao sincronizar estoque: ${err.message}`));
       }, 500);
     }
+    this.listReads.clear();
     this.kds.invalidateQueue?.();
 
     return this.findOne(comandaId);
@@ -906,6 +916,7 @@ export class ComandasService {
     });
     if (!changed.count) throw new ConflictException('Comanda alterada em outra tela. Atualize antes de solicitar pagamento.');
 
+    this.listReads.clear();
     return this.findOne(comandaId);
   }
 
@@ -927,10 +938,14 @@ export class ComandasService {
     });
     if (!changed.count) throw new ConflictException('Comanda alterada em outra tela. Atualize antes de reabrir.');
 
+    this.listReads.clear();
     return this.findOne(comandaId);
   }
 
   async closeComanda(comandaId: string, saleId?: string) {
+    if (!saleId || typeof saleId !== 'string' || !saleId.trim()) {
+      throw new BadRequestException('É obrigatório informar uma venda válida para encerrar a comanda.');
+    }
     const prisma = await this.getPrisma();
     const comanda = await (prisma as any).comanda.findUnique({
       where: { id: comandaId },
@@ -946,10 +961,18 @@ export class ComandasService {
     // Permite fechar tanto comanda open quanto waiting_payment (retrocompatibilidade)
     const updated = await retryTransaction(() => (prisma as any).$transaction(async (tx: any) => {
       await this.lockOpenComanda(tx, comandaId);
+      const existingSale = await tx.sale.findUnique({
+        where: { id: saleId.trim() },
+        select: { id: true },
+      });
+      if (!existingSale) {
+        throw new BadRequestException('Venda informada para encerramento da comanda não foi encontrada.');
+      }
       await releaseComandaAssets(tx, comandaId);
-      return tx.comanda.update({ where: { id: comandaId }, data: { status: 'closed', saleId: saleId || null } });
+      return tx.comanda.update({ where: { id: comandaId }, data: { status: 'closed', saleId: saleId.trim() } });
     }, { isolationLevel: 'ReadCommitted' }));
 
+    this.listReads.clear();
     return updated;
   }
 
@@ -965,7 +988,7 @@ export class ComandasService {
         items: {
           include: {
             modifiers: true,
-            product: { select: { id: true, name: true } },
+            product: { select: { id: true, name: true, unit: true, stock: true } },
           },
         },
       },
@@ -986,13 +1009,14 @@ export class ComandasService {
       await this.lockOpenComanda(tx, comandaId);
       const authorization = await this.consumeAuthorization(tx, authorizationToken, 'cancel_comanda', comandaId);
       const comanda = await tx.comanda.findUnique({ where: { id: comandaId },
-        include: { items: { include: { modifiers: true, product: { select: { id: true, name: true } } } } } });
+        include: { items: { include: { modifiers: true, product: { select: { id: true, name: true, unit: true, stock: true } } } } } });
       const activeItems = comanda.items.filter((item: any) => item.status === 'active');
       await lockProducts(tx, activeItems.flatMap((item: any) => [item.productId, ...item.modifiers.map((m: any) => m.componentProductId)]));
       await releaseComandaAssets(tx, comandaId);
-      // Estornar estoque de todos os itens com stockDeducted = true
+      // Estornar estoque de todos os itens com stockDeducted = true (exceto serviços)
       for (const item of activeItems) {
-        if (!item.stockDeducted) continue;
+        const isServiceItem = item.product?.unit === 'SV' || Number(item.product?.stock ?? 0) >= 90000;
+        if (!item.stockDeducted || isServiceItem) continue;
 
         if (item.modifiers && item.modifiers.length > 0) {
           // Produto composto: estornar via snapshot
@@ -1076,6 +1100,7 @@ export class ComandasService {
           .catch(err => this.logger.error(`Erro ao sincronizar estoque: ${err.message}`));
       }, 500);
     }
+    this.listReads.clear();
     this.kds.invalidateQueue?.();
 
     return this.findOne(comandaId);

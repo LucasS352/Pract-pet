@@ -51,6 +51,16 @@ export class OperatorsService {
     const prisma = await this.getPrisma(tenantId);
     const operator = await prisma.operator.findUnique({
       where: { id },
+      select: {
+        id: true,
+        name: true,
+        jobTitle: true,
+        active: true,
+        isManager: true,
+        canManageAppointmentCommissions: true,
+        createdAt: true,
+        updatedAt: true,
+      },
     });
     if (!operator) throw new NotFoundException('Operador não encontrado');
     return operator;

@@ -140,6 +140,7 @@ export interface OfflineSale {
  */
 export interface CachedProduct {
   id:        string;   // chave primária (mesmo ID do backend)
+  tenantId?: string;
   name:      string;
   shortCode: string | null;
   barcode:   string | null;
@@ -308,15 +309,24 @@ export async function countPendingSales(tenantId?: string): Promise<number> {
 
 /** Atualiza o cache completo de produtos */
 export async function updateProductsCache(
-  products: CachedProduct[]
+  products: CachedProduct[],
+  tenantId?: string,
 ): Promise<void> {
+  const scoped = tenantId ? products.map(p => ({ ...p, tenantId })) : products;
   await db.transaction('rw', db.products_cache, async () => {
     await db.products_cache.clear();
-    await db.products_cache.bulkPut(products);
+    await db.products_cache.bulkPut(scoped);
   });
 }
 
-/** Retorna produtos do cache (para uso offline) */
-export async function getCachedProducts(): Promise<CachedProduct[]> {
-  return db.products_cache.toArray();
+/** Retorna produtos do cache (para uso offline), isolados por loja quando informado */
+export async function getCachedProducts(tenantId?: string): Promise<CachedProduct[]> {
+  const all = await db.products_cache.toArray();
+  if (!tenantId) return all;
+  return all.filter(p => p.tenantId === tenantId);
+}
+
+/** Limpa o cache de produtos ao sair ou trocar de loja */
+export async function clearProductsCache(): Promise<void> {
+  await db.products_cache.clear();
 }

@@ -77,7 +77,10 @@ test('old /api clients are internally rewritten without a redirect or TLS change
   const exact = nginx.match(/location = \/api\s*\{([^}]+)\}/)?.[1];
   assert.ok(exact); assert.match(exact, /rewrite \^ \/api\/ last;/);
   assert.doesNotMatch(exact, /return 30|redirect|permanent|https?:\/\//);
-  assert.match(nginx, /proxy_pass http:\/\/backend:3530;/);
+  assert.match(nginx, /set \$backend_upstream http:\/\/backend:3530;/);
+  assert.match(nginx, /proxy_pass \$backend_upstream;/);
+  assert.match(nginx, /location \^~ \/uploads\/whatsapp-sessions\s*\{\s*return 404;\s*\}/);
+  assert.match(nginx, /location \^~ \/uploads\/fiscal\s*\{\s*return 404;\s*\}/);
 });
 
 test('real Nginx: /api and /api/ preserve queries/methods, return JSON with no HTTP redirect', { skip: !process.env.PDV_TEST_NGINX_IMAGE, timeout: 30000 }, () => {

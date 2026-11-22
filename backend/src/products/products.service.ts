@@ -114,6 +114,25 @@ export class ProductsService {
   private catalogCache = new Map<string, { data: any; timestamp: number }>();
   private readonly CACHE_TTL = 15 * 1000; // 15 segundos (garante atualização rápida do estoque)
 
+  private readonly MAX_CACHE_ENTRIES = 200;
+
+  private setCatalogCache(key: string, data: any) {
+    const now = Date.now();
+    if (this.catalogCache.size >= this.MAX_CACHE_ENTRIES) {
+      for (const [k, v] of this.catalogCache.entries()) {
+        if (now - v.timestamp >= this.CACHE_TTL) {
+          this.catalogCache.delete(k);
+        }
+      }
+      while (this.catalogCache.size >= this.MAX_CACHE_ENTRIES) {
+        const oldestKey = this.catalogCache.keys().next().value;
+        if (!oldestKey) break;
+        this.catalogCache.delete(oldestKey);
+      }
+    }
+    this.catalogCache.set(key, { data, timestamp: now });
+  }
+
   invalidateCache(tenantId?: string) {
     if (tenantId) {
       for (const key of this.catalogCache.keys()) {
@@ -335,7 +354,7 @@ export class ProductsService {
     // Salvar no cache apenas listagens sem busca e padrão ativo
     if (!search && !includeInactive && (!status || status === 'active')) {
       const cacheKey = `${tenantId}_p_${page}_l_${limit}`;
-      this.catalogCache.set(cacheKey, { data: result, timestamp: Date.now() });
+      this.setCatalogCache(cacheKey, result);
     }
     return result;
   }
@@ -814,8 +833,6 @@ export class ProductsService {
         },
       });
 
-      await this.syncProductStockAndCost(tx, productId);
-
       return { product: updated, quantityAdded: quantity };
     });
 
@@ -878,9 +895,13 @@ export class ProductsService {
         }
       });
 
-      await this.syncProductStockAndCost(tx, productId);
-
-      const updatedProduct = await tx.product.findUnique({ where: { id: productId } });
+      const updatedProduct = await tx.product.update({
+        where: { id: productId },
+        data: {
+          stock: { increment: new Prisma.Decimal(quantity) },
+          ...(Number(finalCost) > 0 ? { priceCost: finalCost } : {}),
+        },
+      });
       return { product: updatedProduct, lot, quantityRegistered: quantity };
     });
 
@@ -935,7 +956,7 @@ export class ProductsService {
             (item.barcode   ? byBarcode.get(item.barcode)     : undefined) ??
             null;
 
-          const stockToAdd = parseInt(String(item.stockToAdd ?? 0)) || 0;
+          const stockToAdd = Math.max(0, Number(item.stockToAdd ?? 0) || 0);
 
           if (existing) {
             // Produto já existe — atualiza preços e soma estoque
@@ -971,8 +992,6 @@ export class ProductsService {
               await tx.inventoryLog.create({
                 data: { productId: existing.id, type: 'IN', quantity: stockToAdd, costPrice: Number(finalCost), reason: 'Entrada Lote/Fornecedor' },
               });
-
-              await this.syncProductStockAndCost(tx, existing.id);
             }
             importedCount++;
           } else {
@@ -1243,9 +1262,6 @@ export class ProductsService {
   async getProductLots(productId: string) {
     const prisma = await this.getPrisma();
 
-    // Auto-sincroniza estoque e custo do produto com os lotes ativos
-    await this.syncProductStockAndCost(prisma, productId);
-    
     const lots = await prisma.stockLot.findMany({
       where: { productId },
       include: { supplier: { select: { id: true, name: true } } },
@@ -1448,7 +1464,10 @@ export class ProductsService {
       });
     }
 
-    // 5. Sincronizar product.stock com a soma dos lotes
-    await this.syncProductStockAndCost(tx, productId);
+    // 5. Atualizar product.stock explicitamente (inclusive quando newStock === 0 sem lotes)
+    await tx.product.update({
+      where: { id: productId },
+      data: { stock: new Prisma.Decimal(newStock) },
+    });
   }
 }

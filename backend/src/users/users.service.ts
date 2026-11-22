@@ -2,6 +2,8 @@ import { Injectable, BadRequestException, NotFoundException } from '@nestjs/comm
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
 import * as bcrypt from 'bcrypt';
 
+const ALLOWED_TENANT_USER_ROLES = new Set(['admin', 'manager', 'operator', 'stockist']);
+
 @Injectable()
 export class UsersService {
   constructor(private heartPrisma: HeartPrismaService) {}
@@ -59,6 +61,11 @@ export class UsersService {
       throw new BadRequestException('Já existe um usuário cadastrado com este e-mail.');
     }
 
+    const role = data.role || 'operator';
+    if (!ALLOWED_TENANT_USER_ROLES.has(role)) {
+      throw new BadRequestException('Perfil de usuário inválido.');
+    }
+
     const hashedPassword = await bcrypt.hash(data.password, 10);
 
     return this.heartPrisma.user.create({
@@ -66,7 +73,7 @@ export class UsersService {
         name: data.name,
         email: data.email,
         password: hashedPassword,
-        role: data.role || 'operator',
+        role,
         pin: data.pin ? await bcrypt.hash(data.pin, 10) : null,
         tenantId
       },
@@ -101,6 +108,10 @@ export class UsersService {
     });
 
     if (!user) throw new NotFoundException('Usuário não encontrado.');
+
+    if (data.role !== undefined && !ALLOWED_TENANT_USER_ROLES.has(data.role)) {
+      throw new BadRequestException('Perfil de usuário inválido.');
+    }
 
     // 1. Impedir alteração de role de admin para outra coisa
     if (user.role === 'admin' && data.role && data.role !== 'admin') {

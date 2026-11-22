@@ -78,4 +78,33 @@ describe('Pet Shop checkout integrity', () => {
       expect.objectContaining({ kind: 'additional_charge', status: 'scheduled', saleId: 'sale-extra' }),
     ]));
   });
+
+  it('permite cobrar adicional/diferença antecipadamente em atendimento em andamento (bathing) mantendo fluxo normal bloqueado', async () => {
+    const db = tx('bathing') as any;
+    db.petAppointment.findUnique.mockResolvedValue({ status: 'bathing', stageHistory: [] });
+    db.comanda = { findFirst: jest.fn().mockResolvedValue(null) };
+    db.petAppointmentService = { count: jest.fn().mockResolvedValue(1), updateMany: jest.fn() };
+
+    await expect(claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, comanda)).rejects.toThrow();
+
+    const earlyAddon = {
+      notes: 'PET2:{"v":2,"a":"apt","addon":1}',
+      items: [{ notes: 'Serviço Pet Shop:diff-1' }],
+    };
+    expect(await claimPetshopCheckout(db, { petshopAppointmentId: 'apt' }, earlyAddon)).toBe('apt');
+
+    await completePetshopCheckout(db, 'apt', 'cashier', 'tenant', false, 'sale-diff', earlyAddon);
+    expect(db.petAppointmentService.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        appointmentId: 'apt',
+        chargedSaleId: null,
+        comboParentId: null,
+        coverageStatus: { notIn: ['reserved', 'consumed'] },
+      }),
+    }));
+    expect(db.petAppointment.update.mock.calls[0][0].data.status).toBeUndefined();
+    expect(db.petAppointment.update.mock.calls[0][0].data.stageHistory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'additional_charge', status: 'bathing', saleId: 'sale-diff' }),
+    ]));
+  });
 });

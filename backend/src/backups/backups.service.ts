@@ -11,10 +11,13 @@ import { google } from 'googleapis';
  * Executa mysqldump usando spawn (sem shell) e escreve o stdout direto em arquivo.
  * Evita problemas de quoting/escaping com caracteres especiais (@, #, etc.) na senha.
  */
-function runMysqldump(args: string[], filepath: string): Promise<void> {
+function runMysqldump(args: string[], filepath: string, password: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn('mysqldump', args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const out = fs.createWriteStream(filepath);
+    const child = spawn('mysqldump', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, MYSQL_PWD: password },
+    });
+    const out = fs.createWriteStream(filepath, { mode: 0o600 });
     child.stdout.pipe(out);
 
     let stderrBuf = '';
@@ -42,9 +45,12 @@ function runMysqldump(args: string[], filepath: string): Promise<void> {
 /**
  * Restaura um backup usando mysql sem shell — lê o arquivo e passa via stdin.
  */
-function runMysqlRestore(args: string[], filepath: string): Promise<void> {
+function runMysqlRestore(args: string[], filepath: string, password: string): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn('mysql', args, { stdio: ['pipe', 'ignore', 'pipe'] });
+    const child = spawn('mysql', args, {
+      stdio: ['pipe', 'ignore', 'pipe'],
+      env: { ...process.env, MYSQL_PWD: password },
+    });
     const input = fs.createReadStream(filepath);
     input.pipe(child.stdin);
 
@@ -85,7 +91,7 @@ export class BackupsService implements OnModuleInit {
 
   constructor(private heartPrisma: HeartPrismaService) {
     if (!fs.existsSync(this.backupDir)) {
-      fs.mkdirSync(this.backupDir, { recursive: true });
+      fs.mkdirSync(this.backupDir, { recursive: true, mode: 0o700 });
     }
   }
 
@@ -193,6 +199,7 @@ export class BackupsService implements OnModuleInit {
 
     } catch (e: any) {
       this.logger.error(`Falha ao enviar backup para o Google Drive: ${e.message}`);
+      throw e;
     }
   }
 
@@ -296,22 +303,23 @@ export class BackupsService implements OnModuleInit {
 
     if (type === 'heart' || type === 'all') {
       const folderPath = path.join(this.backupDir, 'heart');
-      if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+      if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true, mode: 0o700 });
 
       const filename = `backup_heart_${timestamp}.sql`;
       const filepath = path.join(folderPath, filename);
       const args = [
+        '--single-transaction',
+        '--quick',
         '--skip-ssl-verify-server-cert',
         '--default-auth=mysql_native_password',
         `-h${heartConfig.host}`,
         `-P${heartConfig.port}`,
         `-u${heartConfig.user}`,
-        `-p${heartConfig.password}`,
         heartConfig.db,
       ];
 
       try {
-        await runMysqldump(args, filepath);
+        await runMysqldump(args, filepath, heartConfig.password);
         this.logger.log(`Backup do Heart criado em: heart/${filename}`);
         await this.uploadToGoogleDrive(filepath, filename, 'heart.sql');
       } catch (e: any) {
@@ -325,25 +333,26 @@ export class BackupsService implements OnModuleInit {
       if (!tenant) throw new NotFoundException('Tenant não encontrado');
 
       const tConfig = this.getDbConfig(tenant.databaseUrl);
-      const slug = tenant.razaoSocial ? tenant.razaoSocial.replace(/[^a-zA-Z0-9]/g, '_') : tenant.name;
+      const slug = this.getTenantSlug(tenant);
       const folderName = `tenant_${slug}`;
       const folderPath = path.join(this.backupDir, folderName);
-      if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+      if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true, mode: 0o700 });
 
       const filename = `backup_tenant_${slug}_${timestamp}.sql`;
       const filepath = path.join(folderPath, filename);
       const args = [
+        '--single-transaction',
+        '--quick',
         '--skip-ssl-verify-server-cert',
         '--default-auth=mysql_native_password',
         `-h${tConfig.host}`,
         `-P${tConfig.port}`,
         `-u${tConfig.user}`,
-        `-p${tConfig.password}`,
         tConfig.db,
       ];
 
       try {
-        await runMysqldump(args, filepath);
+        await runMysqldump(args, filepath, tConfig.password);
         this.logger.log(`Backup do Tenant ${tenant.name} criado em: ${folderName}/${filename}`);
         await this.uploadToGoogleDrive(filepath, filename, `tenant_${slug}.sql`);
       } catch (e: any) {
@@ -354,47 +363,74 @@ export class BackupsService implements OnModuleInit {
 
     if (type === 'all') {
       const tenants = await this.heartPrisma.tenant.findMany();
+      const failures: string[] = [];
       for (const tenant of tenants) {
         const tConfig = this.getDbConfig(tenant.databaseUrl);
-        const slug = tenant.razaoSocial ? tenant.razaoSocial.replace(/[^a-zA-Z0-9]/g, '_') : tenant.name;
+        const slug = this.getTenantSlug(tenant);
         const folderName = `tenant_${slug}`;
         const folderPath = path.join(this.backupDir, folderName);
-        if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true });
+        if (!fs.existsSync(folderPath)) fs.mkdirSync(folderPath, { recursive: true, mode: 0o700 });
 
         const filename = `backup_tenant_${slug}_${timestamp}.sql`;
         const filepath = path.join(folderPath, filename);
         const args = [
+          '--single-transaction',
+          '--quick',
           '--skip-ssl-verify-server-cert',
           '--default-auth=mysql_native_password',
           `-h${tConfig.host}`,
           `-P${tConfig.port}`,
           `-u${tConfig.user}`,
-          `-p${tConfig.password}`,
           tConfig.db,
         ];
 
         try {
-          await runMysqldump(args, filepath);
+          await runMysqldump(args, filepath, tConfig.password);
           this.logger.log(`Backup do Tenant ${tenant.name} criado em: ${folderName}/${filename}`);
           await this.uploadToGoogleDrive(filepath, filename, `tenant_${slug}.sql`);
         } catch (e: any) {
           this.logger.error(`Falha no backup do Tenant ${tenant.name}: ${e.message}`);
+          failures.push(tenant.name || tenant.databaseName);
         }
       }
+      if (failures.length) throw new BadRequestException(`Backup incompleto para: ${failures.join(', ')}.`);
     }
 
     return { success: true, message: 'Backup concluído com sucesso' };
   }
 
+  private getTenantSlug(tenant: { razaoSocial?: string | null; name?: string | null; databaseName: string }): string {
+    return tenant.razaoSocial
+      ? tenant.razaoSocial.replace(/[^a-zA-Z0-9]/g, '_')
+      : (tenant.name || tenant.databaseName).replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
+  private resolveSafeBackupPath(folder: string, filename: string): string {
+    if (
+      !/^[a-zA-Z0-9_-]+$/.test(folder) ||
+      !/^[a-zA-Z0-9._-]+\.sql$/.test(filename) ||
+      folder.includes('..') ||
+      filename.includes('..')
+    ) {
+      throw new BadRequestException('Caminho de backup inválido.');
+    }
+    const baseDir = path.resolve(this.backupDir);
+    const resolved = path.resolve(baseDir, folder, filename);
+    if (!resolved.startsWith(baseDir + path.sep)) {
+      throw new BadRequestException('Caminho de backup inválido.');
+    }
+    return resolved;
+  }
+
   async deleteBackup(folder: string, filename: string) {
-    const filepath = path.join(this.backupDir, folder, filename);
+    const filepath = this.resolveSafeBackupPath(folder, filename);
     if (!fs.existsSync(filepath)) throw new NotFoundException('Arquivo de backup não encontrado');
     fs.unlinkSync(filepath);
     return { success: true };
   }
 
   async restoreBackup(folder: string, filename: string) {
-    const filepath = path.join(this.backupDir, folder, filename);
+    const filepath = this.resolveSafeBackupPath(folder, filename);
     if (!fs.existsSync(filepath)) throw new NotFoundException('Arquivo de backup não encontrado');
 
     const heartConfig = this.getDbConfig(process.env.DATABASE_URL_HEART!);
@@ -404,10 +440,7 @@ export class BackupsService implements OnModuleInit {
       // Mantém dbConfig = heartConfig
     } else if (folder.startsWith('tenant_')) {
       const tenants = await this.heartPrisma.tenant.findMany();
-      const tenant = tenants.find(t => {
-        const slug = t.razaoSocial ? t.razaoSocial.replace(/[^a-zA-Z0-9]/g, '_') : t.name;
-        return `tenant_${slug}` === folder;
-      });
+      const tenant = tenants.find(t => `tenant_${this.getTenantSlug(t)}` === folder);
       if (!tenant) throw new NotFoundException('Tenant referente a este backup não foi encontrado no banco de dados principal.');
 
       dbConfig = this.getDbConfig(tenant.databaseUrl);
@@ -421,11 +454,10 @@ export class BackupsService implements OnModuleInit {
       `-h${dbConfig.host}`,
       `-P${dbConfig.port}`,
       `-u${dbConfig.user}`,
-      `-p${dbConfig.password}`,
       dbConfig.db,
     ];
     try {
-      await runMysqlRestore(restoreArgs, filepath);
+      await runMysqlRestore(restoreArgs, filepath, dbConfig.password);
       this.logger.log(`Backup restaurado: ${folder}/${filename}`);
       return { success: true };
     } catch (e: any) {
@@ -435,7 +467,7 @@ export class BackupsService implements OnModuleInit {
   }
 
   getBackupFilePath(folder: string, filename: string) {
-    const filepath = path.join(this.backupDir, folder, filename);
+    const filepath = this.resolveSafeBackupPath(folder, filename);
     if (!fs.existsSync(filepath)) throw new NotFoundException('Arquivo não encontrado');
     return filepath;
   }

@@ -373,12 +373,26 @@ export class CashRegistersService {
   }
 
   async addMovement(registerId: string, type: 'IN' | 'OUT', value: number, reason?: string) {
+    if (type !== 'IN' && type !== 'OUT') {
+      throw new BadRequestException('Tipo de movimentação inválido.');
+    }
+    const numericValue = Number(value);
+    if (!Number.isFinite(numericValue) || numericValue <= 0) {
+      throw new BadRequestException('Valor da movimentação deve ser maior que zero.');
+    }
     const prisma = await this.getPrisma();
-    const register = await prisma.cashRegister.findUnique({ where: { id: registerId } });
-    if (!register || register.status !== 'open') throw new BadRequestException('Caixa fechado ou inexistente');
+    return prisma.$transaction(async (tx) => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw`SELECT id FROM cash_registers WHERE id = ${registerId} FOR UPDATE`;
+      }
+      const register = await tx.cashRegister.findUnique({ where: { id: registerId } });
+      if (!register || register.status !== 'open') {
+        throw new BadRequestException('Caixa fechado ou inexistente');
+      }
 
-    return prisma.cashMovement.create({
-      data: { cashRegisterId: registerId, type, value, reason }
+      return tx.cashMovement.create({
+        data: { cashRegisterId: registerId, type, value: numericValue, reason },
+      });
     });
   }
 
@@ -445,10 +459,10 @@ export class CashRegistersService {
       if (sale.status === 'cancelled' || sale.source === 'ajuste_fiscal') return;
       sale.payments.forEach((p: any) => {
         const v = new Prisma.Decimal(p.value as any);
-        if (p.method === 'dinheiro')      totalDinheiro = totalDinheiro.add(v);
-        else if (p.method === 'pix')      totalPix      = totalPix.add(v);
-        else if (p.method === 'credito')  totalCredito  = totalCredito.add(v);
-        else if (p.method === 'debito')   totalDebito   = totalDebito.add(v);
+        if (p.method === 'dinheiro' || p.method === 'cash' || p.method === 'money') totalDinheiro = totalDinheiro.add(v);
+        else if (p.method === 'pix')                                              totalPix      = totalPix.add(v);
+        else if (p.method === 'credito' || p.method === 'credit')                 totalCredito  = totalCredito.add(v);
+        else if (p.method === 'debito' || p.method === 'debit')                   totalDebito   = totalDebito.add(v);
         else if (p.method !== 'consumo_funcionario') {
           // Método customizado: usa label salvo ou o próprio method como fallback
           const key = p.method;

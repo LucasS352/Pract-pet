@@ -192,6 +192,7 @@ export default function PetshopWhatsappPage() {
   // Envio de Teste Modal
   const [testModalOpen, setTestModalOpen] = useState(false);
   const [testPhone, setTestPhone] = useState('');
+  const [testMessage, setTestMessage] = useState('Olá! Esta é uma mensagem de teste do Pet Shop.');
   const [sendingTest, setSendingTest] = useState(false);
 
   // Modal para Criar Nova Automação
@@ -235,10 +236,10 @@ export default function PetshopWhatsappPage() {
       if (rulesRes.status === 'fulfilled') {
         const loadedRules = Array.isArray(rulesRes.value.data) ? rulesRes.value.data : [];
         setRules(loadedRules);
-        if (loadedRules.length > 0 && !selectedRuleId) {
-          // Seleciona preferencialmente o lembrete 24h ou o primeiro
+        if (loadedRules.length > 0) {
+          // Seleciona preferencialmente o lembrete 24h ou o primeiro caso nenhuma esteja selecionada
           const pref = loadedRules.find(r => r.triggerMinutesBefore === 1440) || loadedRules[0];
-          setSelectedRuleId(pref.id);
+          setSelectedRuleId(prev => prev || pref.id);
         }
       }
       if (jobsRes.status === 'fulfilled') {
@@ -249,7 +250,7 @@ export default function PetshopWhatsappPage() {
     } finally {
       setLoading(false);
     }
-  }, [selectedRuleId]);
+  }, []);
 
   useEffect(() => {
     loadAll();
@@ -396,7 +397,7 @@ export default function PetshopWhatsappPage() {
     try {
       await api.post('/petshop/whatsapp/test', {
         phone: testPhone,
-        message: livePreviewMessage,
+        message: testModalOpen ? livePreviewMessage : testMessage,
       });
       toast.success('Mensagem de teste enviada com sucesso!');
       setTestModalOpen(false);
@@ -600,7 +601,7 @@ export default function PetshopWhatsappPage() {
                 }`}
               />
               {session?.status === 'CONNECTED'
-                ? `Conectado (${session.connectedPhone || '5514997603870'})`
+                ? `Conectado${session.connectedPhone ? ` (${session.connectedPhone})` : ''}`
                 : session?.status === 'QR_READY'
                   ? 'Aguardando leitura do QR Code'
                   : session?.status === 'CONNECTING'
@@ -1144,7 +1145,7 @@ export default function PetshopWhatsappPage() {
                         WhatsApp Conectado e Operando
                       </strong>
                       <span className="text-xs text-emerald-800">
-                        Número ativo: +{session.connectedPhone || '5514997603870'} · Notificações automáticas ativas
+                        {session.connectedPhone ? `Número ativo: +${session.connectedPhone}` : 'Número não informado'} · Notificações automáticas ativas
                       </span>
                     </div>
                   </div>
@@ -1236,8 +1237,8 @@ export default function PetshopWhatsappPage() {
                 <textarea
                   rows={4}
                   required
-                  value={livePreviewMessage}
-                  onChange={e => setEditorMessage(e.target.value)}
+                  value={testMessage}
+                  onChange={e => setTestMessage(e.target.value)}
                   className={inputClass}
                 />
               </div>

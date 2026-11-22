@@ -65,6 +65,7 @@ export function clientIp(req: Request): string {
  */
 export function createRateLimiter(rules: RateLimitRule[]) {
   const buckets = new Map<string, Bucket>();
+  const MAX_BUCKETS = 20_000;
 
   const sweep = setInterval(() => {
     const now = Date.now();
@@ -81,6 +82,16 @@ export function createRateLimiter(rules: RateLimitRule[]) {
       const key = `${rule.name}:${ip}`;
       let b = buckets.get(key);
       if (!b || b.resetAt <= now) {
+        if (!b && buckets.size >= MAX_BUCKETS) {
+          for (const [k, v] of buckets) {
+            if (v.resetAt <= now) buckets.delete(k);
+          }
+          while (buckets.size >= MAX_BUCKETS) {
+            const oldestKey = buckets.keys().next().value;
+            if (!oldestKey) break;
+            buckets.delete(oldestKey);
+          }
+        }
         b = { count: 0, resetAt: now + rule.windowMs };
         buckets.set(key, b);
       }

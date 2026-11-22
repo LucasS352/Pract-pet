@@ -20,9 +20,25 @@ export interface StorageResult {
 @Injectable()
 export class FiscalStorageService {
   private readonly logger = new Logger(FiscalStorageService.name);
-  private readonly baseDir = process.env.FISCAL_STORAGE_PATH || '/app/uploads/fiscal';
+  private readonly baseDir = process.env.FISCAL_STORAGE_PATH || path.resolve(process.cwd(), 'private-data', 'fiscal');
+  private readonly legacyBaseDir = path.resolve(process.cwd(), 'uploads', 'fiscal');
+
+  private resolveSafeXmlPath(xmlPath: string, rootDir: string): string | null {
+    if (!xmlPath || typeof xmlPath !== 'string' || path.isAbsolute(xmlPath)) return null;
+    const normalized = xmlPath.replace(/\\/g, '/').replace(/^\/+/, '');
+    const stripped = normalized.startsWith('fiscal/') ? normalized.slice('fiscal/'.length) : normalized;
+    if (!stripped) return null;
+    const base = path.resolve(rootDir);
+    const resolved = path.resolve(base, stripped);
+    if (!resolved.startsWith(base + path.sep)) return null;
+    return resolved;
+  }
 
   saveXml(chave: string, xmlContent: string): StorageResult {
+    const safeChave = String(chave || '').replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!safeChave) {
+      throw new Error('Chave fiscal inválida para armazenamento.');
+    }
     const now  = new Date();
     const year = now.getFullYear().toString();
     const month = (now.getMonth() + 1).toString().padStart(2, '0');
@@ -32,7 +48,7 @@ export class FiscalStorageService {
       fs.mkdirSync(dir, { recursive: true });
     }
 
-    const filename = `${chave}.xml`;
+    const filename = `${safeChave}.xml`;
     const fullPath = path.join(dir, filename);
     const relativePath = path.join('fiscal', year, month, filename);
 
@@ -51,12 +67,19 @@ export class FiscalStorageService {
   }
 
   readXml(xmlPath: string): string | null {
-    const fullPath = path.join('/app/uploads', xmlPath);
-    if (!fs.existsSync(fullPath)) {
-      this.logger.warn(`XML não encontrado: ${fullPath}`);
-      return null;
+    const candidates = [
+      this.resolveSafeXmlPath(xmlPath, this.baseDir),
+      this.resolveSafeXmlPath(xmlPath, this.legacyBaseDir),
+    ].filter((p): p is string => Boolean(p));
+
+    for (const fullPath of candidates) {
+      if (fs.existsSync(fullPath)) {
+        return fs.readFileSync(fullPath, 'utf-8');
+      }
     }
-    return fs.readFileSync(fullPath, 'utf-8');
+
+    this.logger.warn(`XML não encontrado: ${xmlPath}`);
+    return null;
   }
 
   verifyIntegrity(xmlPath: string, expectedHash: string): boolean {
@@ -67,17 +90,23 @@ export class FiscalStorageService {
   }
 
   deleteXml(xmlPath: string): boolean {
-    const fullPath = path.join('/app/uploads', xmlPath);
-    if (fs.existsSync(fullPath)) {
-      try {
-        fs.unlinkSync(fullPath);
-        this.logger.log(`XML excluido do disco: ${fullPath}`);
-        return true;
-      } catch (err: any) {
-        this.logger.error(`Falha ao excluir XML: ${fullPath} | ${err.message}`);
-        return false;
+    const candidates = [
+      this.resolveSafeXmlPath(xmlPath, this.baseDir),
+      this.resolveSafeXmlPath(xmlPath, this.legacyBaseDir),
+    ].filter((p): p is string => Boolean(p));
+
+    let deleted = false;
+    for (const fullPath of candidates) {
+      if (fs.existsSync(fullPath)) {
+        try {
+          fs.unlinkSync(fullPath);
+          this.logger.log(`XML excluido do disco: ${fullPath}`);
+          deleted = true;
+        } catch (err: any) {
+          this.logger.error(`Falha ao excluir XML: ${fullPath} | ${err.message}`);
+        }
       }
     }
-    return false;
+    return deleted;
   }
 }

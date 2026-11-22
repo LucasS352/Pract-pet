@@ -2,6 +2,7 @@ import { ReceptionRegistrationModal } from './ReceptionRegistrationModal';
 import { PaymentModal } from '@/components/PaymentModal';
 import { CancelAppointmentModal } from './CancelAppointmentModal';
 import { RescheduleAppointmentModal } from './RescheduleAppointmentModal';
+import { ExchangePackageServiceModal, type ExchangePackageServiceTarget } from './ExchangePackageServiceModal';
 import { buildWhatsAppMessage } from './appointment-media';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
 import { useAuthStore } from '@/store/auth';
@@ -35,6 +36,7 @@ import {
   PackageCheck,
   PawPrint,
   Plus,
+  RefreshCw,
   RotateCcw,
   Scissors,
   Search,
@@ -54,13 +56,18 @@ import {
   coatLabels,
   dateTime,
   extractStageOperatorsSummary,
+  formatSwapText,
   getHistoryEntryBadge,
   getPackageStatusMeta,
   getStageLabel,
+  isPackageSwapDiffService,
   money,
   PACKAGE_EVENT_TYPE_LABELS,
+  PACKAGE_UPGRADE_SERVICE_ID,
   resolveAppointmentStages,
   resolveAppointmentSteps,
+  resolveEffectivePetServicePrice,
+  summarizeAppointmentServices,
 } from './types';
 import {
   EmptyState,
@@ -142,6 +149,50 @@ function amountToCharge(appointment: Appointment): number {
   return Math.round((services + payableTaxiAmount(appointment)) * 100) / 100;
 }
 
+function getPendingPackageContract(appointment: Appointment): { id: string; planNameSnapshot: string } | null {
+  const match = (appointment.services || []).find(
+    service =>
+      (service.coverageStatus === 'reserved' || service.coverageStatus === 'consumed') &&
+      service.customerPackage?.paymentStatus === 'pending',
+  );
+  return match?.customerPackage
+    ? { id: match.customerPackage.id, planNameSnapshot: match.customerPackage.planNameSnapshot }
+    : null;
+}
+
+function isExtraServiceEntry(appointment: Appointment, service: Appointment['services'][number]): boolean {
+  return Boolean(
+    appointment.stageHistory?.some(
+      entry => entry.kind === 'service_added' && entry.appointmentServiceId === service.id,
+    ),
+  );
+}
+
+function canChargeExtraEarly(appointment: Appointment): boolean {
+  if (['cancelled', 'no_show'].includes(appointment.status)) return false;
+  if (amountToCharge(appointment) <= 0) return false;
+  return (appointment.services || []).every(service => {
+    if (service.comboParentId) return true;
+    if (service.coverageStatus === 'reserved' || service.coverageStatus === 'consumed') return true;
+    if (Number(service.coveredAmount || 0) >= Number(service.priceSnapshot || 0) - 0.009) return true;
+    if (service.chargedSaleId) return true;
+    if (appointment.paidAmount != null && !isExtraServiceEntry(appointment, service)) return true;
+    return isExtraServiceEntry(appointment, service);
+  });
+}
+
+function canAddServiceAndChargeNow(appointment: Appointment): boolean {
+  if (['requested', 'scheduled', 'ready', 'delivered'].includes(appointment.status)) return true;
+  if (['cancelled', 'no_show'].includes(appointment.status)) return false;
+  return (appointment.services || []).every(service => {
+    if (service.comboParentId) return true;
+    if (service.coverageStatus === 'reserved' || service.coverageStatus === 'consumed') return true;
+    if (Number(service.coveredAmount || 0) >= Number(service.priceSnapshot || 0) - 0.009) return true;
+    if (service.chargedSaleId) return true;
+    return appointment.paidAmount != null && !isExtraServiceEntry(appointment, service);
+  });
+}
+
 function keepPaymentStatus(updated: Appointment, previous: Appointment): Appointment {
   return {
     ...updated,
@@ -180,21 +231,7 @@ function sizeLabel(size?: string | null): string {
 }
 
 function getEffectiveServicePrice(svc: PetService, pet?: Pet | null): { price: number; duration: number; variantLabel?: string } {
-  if (!pet || !svc.pricingRules || svc.pricingRules.length === 0) {
-    return { price: Number(svc.price), duration: svc.durationMinutes };
-  }
-  const rules = svc.pricingRules;
-  const petSize = normalizeSizeKey(pet.size);
-  const match1 = rules.find(r => r.size === petSize && r.coatType === pet.coatType);
-  if (match1) return { price: Number(match1.price), duration: match1.durationMinutes || svc.durationMinutes, variantLabel: match1.label || sizeLabel(petSize) };
-
-  const match2 = rules.find(r => r.size === petSize && (!r.coatType || r.coatType === 'all'));
-  if (match2) return { price: Number(match2.price), duration: match2.durationMinutes || svc.durationMinutes, variantLabel: match2.label || sizeLabel(petSize) };
-
-  const match3 = rules.find(r => (!r.size || r.size === 'all') && r.coatType === pet.coatType);
-  if (match3) return { price: Number(match3.price), duration: match3.durationMinutes || svc.durationMinutes, variantLabel: match3.label || coatLabels[pet.coatType || ''] || 'Pelagem específica' };
-
-  return { price: Number(svc.price), duration: svc.durationMinutes };
+  return resolveEffectivePetServicePrice(svc, pet);
 }
 
 // Helpers de data e semana
@@ -429,7 +466,8 @@ export default function PetshopAgendaPage() {
   }, [selectedAppointment?.id, selectedAppointment?.status]);
   const [updatingId, setUpdatingId] = useState('');
   const [notifyingId, setNotifyingId] = useState('');
-  const [paymentItem, setPaymentItem] = useState<{ appointment: Appointment; total: number; prepay?: boolean } | null>(null);
+  const [paymentItem, setPaymentItem] = useState<{ appointment: Appointment; total: number; prepay?: boolean; addonOnly?: boolean } | null>(null);
+  const [exchangeTarget, setExchangeTarget] = useState<ExchangePackageServiceTarget | null>(null);
   const [chargeNow, setChargeNow] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState('pix');
   const [receiving, setReceiving] = useState(false);
@@ -453,6 +491,7 @@ export default function PetshopAgendaPage() {
   const [extraServiceId, setExtraServiceId] = useState('');
   const [extraServicePrice, setExtraServicePrice] = useState('');
   const [extraServiceRecipientId, setExtraServiceRecipientId] = useState('');
+  const [extraServiceChargeMode, setExtraServiceChargeMode] = useState<'charge_at_checkout' | 'charge_now' | 'add_to_package'>('charge_at_checkout');
   const [savingExtraService, setSavingExtraService] = useState(false);
   const [expandedManagementId, setExpandedManagementId] = useState<string | null>(null);
   const [managementTab, setManagementTab] = useState<'service' | 'commissions'>('service');
@@ -468,6 +507,7 @@ export default function PetshopAgendaPage() {
       setExtraServiceId('');
       setExtraServicePrice('');
       setExtraServiceRecipientId('');
+      setExtraServiceChargeMode('charge_at_checkout');
       try {
         const dt = new Date(selectedAppointment.startsAt);
         const pad = (n: number) => String(n).padStart(2, '0');
@@ -1106,6 +1146,14 @@ export default function PetshopAgendaPage() {
     }
     setSavingExtraService(true);
     try {
+      const pendingPackage = getPendingPackageContract(appointment);
+      const allowImmediateCharge = canAddServiceAndChargeNow(appointment);
+      const effectiveChargeMode =
+        extraServiceChargeMode === 'add_to_package' && !pendingPackage
+          ? 'charge_at_checkout'
+          : extraServiceChargeMode === 'charge_now' && !allowImmediateCharge
+          ? 'charge_at_checkout'
+          : extraServiceChargeMode;
       const customPriceNum = extraServicePrice.trim() !== '' ? Number(extraServicePrice) : undefined;
       const { data: updated } = await api.patch<Appointment>(`/petshop/appointments/${appointment.id}`, {
         addServices: [
@@ -1113,6 +1161,7 @@ export default function PetshopAgendaPage() {
             serviceId: extraServiceId,
             priceSnapshot: Number.isFinite(customPriceNum) ? customPriceNum : undefined,
             ...(canManageCommissions && extraServiceRecipientId ? { commissionRecipientId: extraServiceRecipientId } : {}),
+            chargeMode: effectiveChargeMode,
           },
         ],
       });
@@ -1123,8 +1172,22 @@ export default function PetshopAgendaPage() {
       setExtraServiceId('');
       setExtraServicePrice('');
       setExtraServiceRecipientId('');
-      toast.success('Serviço adicional incluído no atendimento!');
-      if (visibleUpdate.status === 'delivered' && amountToCharge(visibleUpdate) > 0) void handleChargeAppointment(visibleUpdate, false);
+      setExtraServiceChargeMode('charge_at_checkout');
+      toast.success(
+        effectiveChargeMode === 'add_to_package'
+          ? 'Serviço incluído e somado ao pagamento pendente do pacote!'
+          : 'Serviço adicional incluído no atendimento!',
+      );
+      if (effectiveChargeMode === 'charge_now' && amountToCharge(visibleUpdate) > 0) {
+        const useAddonOnly =
+          canChargeExtraEarly(visibleUpdate) &&
+          (visibleUpdate.services.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed' || Boolean(s.chargedSaleId)) ||
+            visibleUpdate.paidAmount != null);
+        const usePrepay = !useAddonOnly && ['requested', 'scheduled'].includes(visibleUpdate.status);
+        void handleChargeAppointment(visibleUpdate, usePrepay, useAddonOnly);
+      } else if (visibleUpdate.status === 'delivered' && amountToCharge(visibleUpdate) > 0) {
+        void handleChargeAppointment(visibleUpdate, false, false);
+      }
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Erro ao adicionar serviço.');
     } finally {
@@ -1176,7 +1239,7 @@ export default function PetshopAgendaPage() {
   };
 
   // Cobrar Atendimento (Valida caixa aberto e carrega no PDV)
-  const handleChargeAppointment = async (item: Appointment, prepay = false) => {
+  const handleChargeAppointment = async (item: Appointment, prepay = false, addonOnly = false) => {
     if (item.status === 'delivered' && amountToCharge(item) <= 0) {
       toast.info('Atendimento já foi cobrado e concluído!', {
         description: `O atendimento de ${item.pet?.name} já foi finalizado. Não é permitida cobrança em duplicidade.`,
@@ -1195,7 +1258,7 @@ export default function PetshopAgendaPage() {
 
       // Se TODOS os serviços do agendamento são cobertos por pacote e não há taxa avulsa de transporte:
       if (billableServices.length === 0 && hasCoveredServices && transportExtra === 0) {
-        if (prepay) { toast.info('Este agendamento já está coberto pelo pacote; não há valor avulso para cobrar agora.'); return; }
+        if (prepay || addonOnly) { toast.info('Este agendamento já está coberto pelo pacote; não há valor avulso para cobrar agora.'); return; }
         const { data: completed } = await api.patch(`/petshop/appointments/${item.id}/status`, { status: 'delivered' });
         setItems(curr => curr.map(row => row.id === item.id ? completed : row));
         setSelectedAppointment(completed);
@@ -1205,9 +1268,9 @@ export default function PetshopAgendaPage() {
         return;
       }
 
-      const { data: comanda } = await api.post(`/petshop/appointments/${item.id}/checkout`, { prepay });
+      const { data: comanda } = await api.post(`/petshop/appointments/${item.id}/checkout`, { prepay, addonOnly });
       if (comanda?.prepaid) {
-        if (!prepay) {
+        if (!prepay && !addonOnly) {
           await api.patch(`/petshop/appointments/${item.id}/status`, { status: 'delivered' });
           setSelectedAppointment(null);
           loadAppointments(false);
@@ -1220,7 +1283,7 @@ export default function PetshopAgendaPage() {
         return;
       }
       setSelectedAppointment(null);
-      setPaymentItem({ appointment: item, total: Number(comanda.total), prepay });
+      setPaymentItem({ appointment: item, total: Number(comanda.total), prepay, addonOnly });
       setPaymentMethod('pix');
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Erro ao preparar cobrança no caixa.');
@@ -2220,11 +2283,14 @@ export default function PetshopAgendaPage() {
                         </div>
                       ) : (
                         dayList.map(item => {
-                          const visibleServices = (item.services || []).filter(s => !s.comboParentId);
+                          const { displayServices, hasServiceSwap, swapLabel, diffTotal } = summarizeAppointmentServices(
+                            item.services,
+                            item.stageHistory,
+                          );
                           const isPackageCovered = item.services?.some(
                             s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed',
                           );
-                          const hasFooterTags = Boolean(item.isPaid || isPackageCovered || item.transport?.enabled || amountToCharge(item) > 0);
+                          const hasFooterTags = Boolean(item.isPaid || isPackageCovered || hasServiceSwap || item.transport?.enabled || amountToCharge(item) > 0);
 
                           return (
                             <article
@@ -2251,17 +2317,17 @@ export default function PetshopAgendaPage() {
 
                               {/* 2. Serviços: 1 item por serviço com quebra de linha completa (sem truncar) */}
                               <div className="mb-2 space-y-0.5">
-                                {(visibleServices.length > 0 ? visibleServices.slice(0, 4) : [{ id: 'fallback', nameSnapshot: 'Serviço' }]).map(s => (
+                                {(displayServices.length > 0 ? displayServices.slice(0, 4) : [{ id: 'fallback', nameSnapshot: 'Serviço' }]).map(s => (
                                   <div key={s.id} className="flex min-w-0 items-start gap-1.5 text-[11px] text-zinc-600">
                                     <Scissors size={11} className="mt-0.5 shrink-0 text-zinc-400" aria-hidden="true" />
                                     <span className="min-w-0 flex-1 font-medium leading-snug text-zinc-700 break-words">
-                                      {s.nameSnapshot}
+                                      {formatSwapText(s.nameSnapshot)}
                                     </span>
                                   </div>
                                 ))}
-                                {visibleServices.length > 4 && (
+                                {displayServices.length > 4 && (
                                   <p className="pl-4 text-[10px] font-medium text-zinc-400">
-                                    +{visibleServices.length - 4} serviço(s)
+                                    +{displayServices.length - 4} serviço(s)
                                   </p>
                                 )}
                               </div>
@@ -2326,6 +2392,15 @@ export default function PetshopAgendaPage() {
                                     >
                                       <PackageCheck size={10} className="text-zinc-500" aria-hidden="true" />
                                       <span>Pacote</span>
+                                    </span>
+                                  )}
+                                  {hasServiceSwap && (
+                                    <span
+                                      title={swapLabel || 'Serviço do pacote foi trocado neste atendimento'}
+                                      className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800"
+                                    >
+                                      <RefreshCw size={10} aria-hidden="true" />
+                                      <span>{diffTotal > 0 ? `Trocado · +${money(diffTotal)}` : 'Serviço trocado'}</span>
                                     </span>
                                   )}
                                   {item.transport?.enabled && (
@@ -2503,16 +2578,23 @@ export default function PetshopAgendaPage() {
                 const currentStepIdx = isDelivered ? steps.length : steps.findIndex(s => s.key === item.status);
                 const isInCare = currentStepIdx !== -1 && !isDelivered;
                 const isPendingArrival = item.status === 'scheduled' || item.status === 'confirmed' || item.status === 'requested';
+                const { displayServices, hasServiceSwap, swapLabel, diffTotal } = summarizeAppointmentServices(
+                  item.services,
+                  item.stageHistory,
+                );
                 const avulsoTotal = item.services
-                  .filter(s => s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
-                  .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0);
+                  .filter(s => s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed' && !isPackageSwapDiffService(s))
+                  .reduce((sum, s) => sum + Math.max(0, Number(s.priceSnapshot || 0) - Number(s.coveredAmount || 0)), 0);
                 const isPackageCovered = item.services.some(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed');
-                const visibleServicesLabel = item.services.filter(s => !s.comboParentId).map(s => s.nameSnapshot).join(' + ') || 'Serviço';
+                const visibleServicesLabel = displayServices.map(s => formatSwapText(s.nameSnapshot)).join(' + ') || 'Serviço';
                 const needsPaymentNow = ['ready', 'delivered'].includes(item.status) && amountToCharge(item) > 0;
+                const earlyAddonPayment = !needsPaymentNow && canChargeExtraEarly(item);
                 const managementOpen = expandedManagementId === item.id;
                 const commissionEntries = (item.stageHistory || []).filter(entry =>
                   !entry.skipped && !entry.rescheduledFrom &&
-                  ((entry.kind === 'service_added' && Number(entry.commissionAmount || 0) > 0) ||
+                  ((entry.kind === 'service_added' &&
+                    entry.serviceId !== PACKAGE_UPGRADE_SERVICE_ID &&
+                    (Number(entry.commissionAmount || 0) > 0 || Boolean(entry.operatorId) || Boolean(entry.commissionRecipientName))) ||
                     (!entry.kind && trackedStageKeys.has(entry.status))),
                 );
                 const canAddService = !['cancelled', 'no_show'].includes(item.status) && (item.status !== 'delivered' || canManageCommissions);
@@ -2634,6 +2716,15 @@ export default function PetshopAgendaPage() {
                               <PackageCheck size={11} className="text-zinc-500" aria-hidden="true" /> Pacote
                             </span>
                           )}
+                          {hasServiceSwap && (
+                            <span
+                              title={swapLabel || 'Serviço do pacote foi trocado neste atendimento'}
+                              className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-800 whitespace-nowrap"
+                            >
+                              <RefreshCw size={11} className="text-indigo-700" aria-hidden="true" />
+                              {diffTotal > 0 ? `Trocado · +${money(diffTotal)}` : 'Serviço trocado'}
+                            </span>
+                          )}
                           {item.transport?.enabled && (
                             <span title={`Transporte (${item.transport.mode === 'pickup' || item.transport.mode === 'pickup_only' ? 'Apenas Buscar' : item.transport.mode === 'dropoff' || item.transport.mode === 'dropoff_only' ? 'Apenas Levar' : 'Buscar e Levar'})${item.transport.address ? ` · ${item.transport.address}` : ''}`}
                               className="inline-flex items-center gap-1 rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 whitespace-nowrap">
@@ -2718,6 +2809,7 @@ export default function PetshopAgendaPage() {
                             setExtraServiceId('');
                             setExtraServicePrice('');
                             setExtraServiceRecipientId('');
+                            setExtraServiceChargeMode('charge_at_checkout');
                             setReopenReason('');
                           }}
                           className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 ${managementOpen ? 'border-teal-300 bg-teal-50 text-teal-900' : 'border-zinc-200 bg-white text-zinc-600 hover:border-teal-300 hover:bg-teal-50'}`}
@@ -2761,25 +2853,38 @@ export default function PetshopAgendaPage() {
                           {chargingId === item.id ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
                           Cobrar {money(amountToCharge(item))}
                         </button>
-                      ) : nextAction ? (
-                        <button
-                          type="button"
-                          disabled={updatingId === item.id}
-                          onClick={() => handleStageClick(item, nextAction.status, getStageLabel(nextAction.status, item.customStages))}
-                          title={nextAction.title}
-                          className="inline-flex h-10 items-center gap-1 rounded-xl bg-teal-800 px-3.5 text-xs font-semibold text-white hover:bg-teal-900 transition cursor-pointer shadow-2xs disabled:opacity-50"
-                        >
-                          <span>{nextAction.label}</span>
-                          <ChevronRight size={14} aria-hidden="true" />
-                        </button>
                       ) : (
-                        <button
-                          type="button"
-                          onClick={() => setSelectedAppointment(item)}
-                          className="inline-flex h-10 items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition cursor-pointer"
-                        >
-                          Ver ficha
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          {earlyAddonPayment && (
+                            <button type="button" disabled={chargingId === item.id}
+                              onClick={() => handleChargeAppointment(item, false, true)}
+                              title="Cobrar serviço extra ou diferença agora"
+                              className="inline-flex h-10 items-center gap-1.5 rounded-xl bg-amber-600 px-3 text-xs font-bold text-white hover:bg-amber-700 transition cursor-pointer disabled:opacity-50">
+                              {chargingId === item.id ? <Loader2 size={14} className="animate-spin" /> : <CreditCard size={14} />}
+                              Cobrar {money(amountToCharge(item))}
+                            </button>
+                          )}
+                          {nextAction ? (
+                            <button
+                              type="button"
+                              disabled={updatingId === item.id}
+                              onClick={() => handleStageClick(item, nextAction.status, getStageLabel(nextAction.status, item.customStages))}
+                              title={nextAction.title}
+                              className="inline-flex h-10 items-center gap-1 rounded-xl bg-teal-800 px-3.5 text-xs font-semibold text-white hover:bg-teal-900 transition cursor-pointer shadow-2xs disabled:opacity-50"
+                            >
+                              <span>{nextAction.label}</span>
+                              <ChevronRight size={14} aria-hidden="true" />
+                            </button>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAppointment(item)}
+                              className="inline-flex h-10 items-center gap-1 rounded-xl border border-zinc-200 bg-zinc-50 px-3 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 transition cursor-pointer"
+                            >
+                              Ver ficha
+                            </button>
+                          )}
+                        </div>
                       )}
                     </div>
                     </div>
@@ -2848,6 +2953,49 @@ export default function PetshopAgendaPage() {
                                 <button type="submit" disabled={savingExtraService || !extraServiceId} className="inline-flex h-11 items-center justify-center gap-2 rounded-xl bg-teal-700 px-4 text-xs font-bold text-white transition hover:bg-teal-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-700 disabled:cursor-not-allowed disabled:opacity-50">
                                   {savingExtraService ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />} Adicionar serviço
                                 </button>
+                                {(() => {
+                                  const pendingPkg = getPendingPackageContract(item);
+                                  const allowImmediateCharge = canAddServiceAndChargeNow(item);
+                                  const effectiveMode =
+                                    extraServiceChargeMode === 'add_to_package' && !pendingPkg
+                                      ? 'charge_at_checkout'
+                                      : extraServiceChargeMode === 'charge_now' && !allowImmediateCharge
+                                      ? 'charge_at_checkout'
+                                      : extraServiceChargeMode;
+                                  return (
+                                    <div className="lg:col-span-full flex flex-wrap items-center gap-2 rounded-xl border border-zinc-200 bg-white px-3 py-2">
+                                      <span className="text-[11px] font-bold text-zinc-700">Como cobrar:</span>
+                                      <button
+                                        type="button"
+                                        onClick={() => setExtraServiceChargeMode('charge_at_checkout')}
+                                        className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${effectiveMode === 'charge_at_checkout' ? 'border-teal-600 bg-teal-50 text-teal-900' : 'border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100'}`}
+                                      >
+                                        Na saída (checkout)
+                                      </button>
+                                      {allowImmediateCharge && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setExtraServiceChargeMode('charge_now')}
+                                          className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${effectiveMode === 'charge_now' ? 'border-amber-600 bg-amber-50 text-amber-900' : 'border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100'}`}
+                                        >
+                                          Cobrar agora
+                                        </button>
+                                      )}
+                                      {pendingPkg && (
+                                        <button
+                                          type="button"
+                                          onClick={() => setExtraServiceChargeMode('add_to_package')}
+                                          className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${effectiveMode === 'add_to_package' ? 'border-indigo-600 bg-indigo-50 text-indigo-900' : 'border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100'}`}
+                                        >
+                                          Somar no pacote pendente
+                                        </button>
+                                      )}
+                                      {!allowImmediateCharge && (
+                                        <span className="text-[11px] text-zinc-500">Serviço principal em aberto · cobrança conjunta na saída.</span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                                 {services.find(service => service.id === extraServiceId)?.commissionOnAdd && (
                                   <p className="text-xs text-teal-800 lg:col-span-full">Comissão prevista: {money(services.find(service => service.id === extraServiceId)?.commissionAmount || 0)}. O registro ficará no histórico do atendimento.</p>
                                 )}
@@ -2936,23 +3084,34 @@ export default function PetshopAgendaPage() {
                     <div className="text-[11px] text-zinc-400 italic pl-2">Nenhum atendimento</div>
                   ) : (
                     <div className="flex flex-wrap gap-2">
-                      {dayList.map(item => (
-                        <button
-                          key={item.id}
-                          type="button"
-                          onClick={() => setSelectedAppointment(item)}
-                          className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-1.5 text-left hover:bg-white hover:border-teal-400 hover:shadow-xs transition cursor-pointer"
-                        >
-                          <span className="text-xs font-bold text-zinc-900">{timeStr(item.startsAt)}</span>
-                          <span className="text-xs font-semibold text-teal-800">{item.pet?.name}</span>
-                          <span className="text-[11px] text-zinc-500 truncate max-w-[120px]">
-                            {item.services[0]?.nameSnapshot}
-                          </span>
-                          {renderStatusBadge(item.status, item)}
-                          {renderPaidBadge(item, true)}
-                          {renderChargeBadge(item)}
-                        </button>
-                      ))}
+                      {dayList.map(item => {
+                        const { displayServices, hasServiceSwap, swapLabel } = summarizeAppointmentServices(
+                          item.services,
+                          item.stageHistory,
+                        );
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            onClick={() => setSelectedAppointment(item)}
+                            className="flex items-center gap-2 rounded-xl border border-zinc-200 bg-zinc-50/80 px-3 py-1.5 text-left hover:bg-white hover:border-teal-400 hover:shadow-xs transition cursor-pointer"
+                          >
+                            <span className="text-xs font-bold text-zinc-900">{timeStr(item.startsAt)}</span>
+                            <span className="text-xs font-semibold text-teal-800">{item.pet?.name}</span>
+                            <span className="text-[11px] text-zinc-500 truncate max-w-[140px]">
+                              {displayServices.map(s => formatSwapText(s.nameSnapshot)).join(' + ')}
+                            </span>
+                            {hasServiceSwap && (
+                              <span title={swapLabel || 'Serviço trocado'} className="inline-flex items-center text-indigo-700">
+                                <RefreshCw size={11} aria-hidden="true" />
+                              </span>
+                            )}
+                            {renderStatusBadge(item.status, item)}
+                            {renderPaidBadge(item, true)}
+                            {renderChargeBadge(item)}
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -2992,26 +3151,40 @@ export default function PetshopAgendaPage() {
                     {opItems.length === 0 ? (
                       <p className="text-[11px] text-zinc-400 italic py-4 text-center">Nenhum atendimento</p>
                     ) : (
-                      opItems.map(item => (
-                        <div
-                          key={item.id}
-                          onClick={() => setSelectedAppointment(item)}
-                          className="rounded-lg border border-zinc-200 bg-white p-2 shadow-2xs hover:shadow-xs transition cursor-pointer text-xs"
-                        >
-                          <div className="flex justify-between items-center mb-1">
-                            <span className="font-bold text-zinc-900">{timeStr(item.startsAt)}</span>
-                            <span className="font-semibold text-teal-800">{item.pet?.name}</span>
+                      opItems.map(item => {
+                        const { displayServices, hasServiceSwap, swapLabel } = summarizeAppointmentServices(
+                          item.services,
+                          item.stageHistory,
+                        );
+                        return (
+                          <div
+                            key={item.id}
+                            onClick={() => setSelectedAppointment(item)}
+                            className="rounded-lg border border-zinc-200 bg-white p-2 shadow-2xs hover:shadow-xs transition cursor-pointer text-xs"
+                          >
+                            <div className="flex justify-between items-center mb-1">
+                              <span className="font-bold text-zinc-900">{timeStr(item.startsAt)}</span>
+                              <span className="font-semibold text-teal-800">{item.pet?.name}</span>
+                            </div>
+                            <p className="text-[11px] text-zinc-500 truncate mb-1">
+                              {displayServices.map(s => formatSwapText(s.nameSnapshot)).join(', ')}
+                            </p>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {renderStatusBadge(item.status, item)}
+                              {renderPaidBadge(item, true)}
+                              {renderChargeBadge(item)}
+                              {hasServiceSwap && (
+                                <span
+                                  title={swapLabel || 'Serviço trocado'}
+                                  className="inline-flex items-center gap-1 rounded border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-800"
+                                >
+                                  <RefreshCw size={9} aria-hidden="true" /> Trocado
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <p className="text-[11px] text-zinc-500 truncate mb-1">
-                            {item.services.map(s => s.nameSnapshot).join(', ')}
-                          </p>
-                          <div className="flex flex-wrap items-center gap-1">
-                            {renderStatusBadge(item.status, item)}
-                            {renderPaidBadge(item, true)}
-                            {renderChargeBadge(item)}
-                          </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 </div>
@@ -3229,6 +3402,51 @@ export default function PetshopAgendaPage() {
                       )}
                     </label>
                   )}
+                  {(() => {
+                    const pendingPkg = getPendingPackageContract(selectedAppointment);
+                    const allowImmediateCharge = canAddServiceAndChargeNow(selectedAppointment);
+                    const effectiveMode =
+                      extraServiceChargeMode === 'add_to_package' && !pendingPkg
+                        ? 'charge_at_checkout'
+                        : extraServiceChargeMode === 'charge_now' && !allowImmediateCharge
+                        ? 'charge_at_checkout'
+                        : extraServiceChargeMode;
+                    return (
+                      <div className="rounded-lg border border-teal-200 bg-white p-2.5 space-y-1.5">
+                        <p className="text-[11px] font-bold text-zinc-700">Como cobrar este serviço adicional?</p>
+                        <div className="flex flex-wrap gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => setExtraServiceChargeMode('charge_at_checkout')}
+                            className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${effectiveMode === 'charge_at_checkout' ? 'border-teal-600 bg-teal-50 text-teal-900' : 'border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100'}`}
+                          >
+                            Cobrar na saída
+                          </button>
+                          {allowImmediateCharge && (
+                            <button
+                              type="button"
+                              onClick={() => setExtraServiceChargeMode('charge_now')}
+                              className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${effectiveMode === 'charge_now' ? 'border-amber-600 bg-amber-50 text-amber-900' : 'border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100'}`}
+                            >
+                              Cobrar agora
+                            </button>
+                          )}
+                          {pendingPkg && (
+                            <button
+                              type="button"
+                              onClick={() => setExtraServiceChargeMode('add_to_package')}
+                              className={`rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition cursor-pointer ${effectiveMode === 'add_to_package' ? 'border-indigo-600 bg-indigo-50 text-indigo-900' : 'border-zinc-200 bg-zinc-50 text-zinc-600 hover:bg-zinc-100'}`}
+                            >
+                              Somar no pacote pendente
+                            </button>
+                          )}
+                        </div>
+                        {effectiveMode === 'add_to_package' && pendingPkg && (
+                          <p className="text-[10px] text-indigo-800">O valor será somado ao contrato &ldquo;{pendingPkg.planNameSnapshot}&rdquo; para pagamento único no pacote.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
                   <div className="flex justify-end">
                     <button
                       type="button"
@@ -3248,10 +3466,22 @@ export default function PetshopAgendaPage() {
                   const isCovered = svc.coverageStatus === 'reserved' || svc.coverageStatus === 'consumed';
                   const isComboChild = Boolean(svc.comboParentId);
                   const isComboParent = Boolean(svc.isCombo);
+                  const isSwapDiff = isPackageSwapDiffService(svc);
+                  const coveredValue = Number(svc.coveredAmount || 0);
+                  const isBundledIntoPackage =
+                    !isCovered && coveredValue > 0 && coveredValue >= Number(svc.priceSnapshot || 0) - 0.009;
+                  const canExchange =
+                    !isComboChild &&
+                    !isComboParent &&
+                    svc.coverageStatus === 'reserved' &&
+                    Boolean(svc.serviceId) &&
+                    Boolean(svc.customerPackageId) &&
+                    !['ready', 'delivered', 'cancelled', 'no_show'].includes(selectedAppointment.status);
                   const canRemove =
                     selectedAppointment.status !== 'delivered' &&
                     selectedAppointment.status !== 'cancelled' &&
                     !isCovered &&
+                    !isBundledIntoPackage &&
                     !isComboChild &&
                     selectedAppointment.services.filter(s => !s.comboParentId).length > 1;
                   return (
@@ -3264,8 +3494,16 @@ export default function PetshopAgendaPage() {
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-1.5">
                           {isComboChild && <span className="text-zinc-400 font-mono">↳</span>}
-                          <strong className="font-semibold text-zinc-800">{svc.nameSnapshot}</strong>
-                          <span className="text-zinc-400">({svc.durationMinutes} min)</span>
+                          {isSwapDiff && (
+                            <RefreshCw size={12} className="shrink-0 text-indigo-700" aria-hidden="true" />
+                          )}
+                          <strong className="font-semibold text-zinc-800">{formatSwapText(svc.nameSnapshot)}</strong>
+                          {svc.durationMinutes > 0 && <span className="text-zinc-400">({svc.durationMinutes} min)</span>}
+                          {isSwapDiff && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-1.5 py-0.5 text-[10px] font-bold text-indigo-800">
+                              Diferença da troca
+                            </span>
+                          )}
                           {selectedAppointment.stageHistory?.find(h => h.kind === 'service_added' && h.appointmentServiceId === svc.id)?.userName && (
                             <span className="rounded-md bg-sky-50 px-1.5 py-0.5 text-[10px] font-medium text-sky-800">
                               Incluído por {selectedAppointment.stageHistory.find(h => h.kind === 'service_added' && h.appointmentServiceId === svc.id)?.userName}
@@ -3291,6 +3529,11 @@ export default function PetshopAgendaPage() {
                               <PackageCheck size={10} /> Sessão Consumida do Pacote
                             </span>
                           )}
+                          {isBundledIntoPackage && (
+                            <span className="inline-flex items-center gap-1 rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-800">
+                              Somado ao pacote
+                            </span>
+                          )}
                         </div>
                         {svc.customerPackage && (
                           <p className="text-[10px] text-teal-700 mt-0.5">
@@ -3299,9 +3542,51 @@ export default function PetshopAgendaPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
-                        <span className={`font-bold tabular-nums ${isCovered || isComboChild ? 'text-teal-700' : 'text-zinc-900'}`}>
-                          {isCovered ? 'Coberto (R$ 0,00)' : isComboChild ? 'Incluso (R$ 0,00)' : money(Number(svc.priceSnapshot || 0))}
+                        <span className={`font-bold tabular-nums ${isCovered || isComboChild || isBundledIntoPackage ? 'text-teal-700' : 'text-zinc-900'}`}>
+                          {isCovered
+                            ? 'Coberto (R$ 0,00)'
+                            : isBundledIntoPackage
+                            ? `No pacote (${money(coveredValue)})`
+                            : isComboChild
+                            ? 'Incluso (R$ 0,00)'
+                            : money(Number(svc.priceSnapshot || 0))}
                         </span>
+                        {canExchange && (
+                          <button
+                            type="button"
+                            disabled={savingExtraService}
+                            onClick={() => {
+                              const existingUnpaidDiffTotal = (selectedAppointment.services || [])
+                                .filter(item => item.serviceId === PACKAGE_UPGRADE_SERVICE_ID)
+                                .reduce((sum, item) => sum + payableServiceAmount(selectedAppointment, item), 0);
+                              const otherPendingTotal = Math.max(
+                                0,
+                                Math.round((amountToCharge(selectedAppointment) - existingUnpaidDiffTotal) * 100) / 100,
+                              );
+                              setExchangeTarget({
+                                mode: 'session',
+                                contractId: svc.customerPackageId!,
+                                contractName: svc.customerPackage?.planNameSnapshot || 'Pacote',
+                                contractPaymentStatus: svc.customerPackage?.paymentStatus,
+                                appointmentId: selectedAppointment.id,
+                                appointmentStatus: selectedAppointment.status,
+                                pet: selectedAppointment.pet,
+                                oldAppointmentServiceId: svc.id,
+                                oldServiceId: svc.serviceId || '',
+                                oldServiceName: svc.nameSnapshot,
+                                oldServicePrice: Number(svc.priceSnapshot || 0),
+                                packageUnitValue: Number(svc.customerPackageItem?.unitValueSnapshot || 0),
+                                existingUnpaidDiffTotal: Math.round(existingUnpaidDiffTotal * 100) / 100,
+                                otherPendingTotal,
+                                currentProfessionalId: selectedAppointment.professional?.id || selectedAppointment.professionalId || null,
+                              });
+                            }}
+                            title="Trocar este serviço reservado do pacote por outro"
+                            className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100 transition cursor-pointer"
+                          >
+                            <RefreshCw size={11} /> Trocar serviço
+                          </button>
+                        )}
                         {canRemove && (
                           <button
                             type="button"
@@ -3400,14 +3685,7 @@ export default function PetshopAgendaPage() {
               <div className="pt-2 border-t border-zinc-200 flex justify-between items-center text-xs">
                 <span className="font-bold text-zinc-700">Total adicional a receber:</span>
                 <span className="text-sm font-bold text-teal-800 tabular-nums">
-                  {money(
-                    selectedAppointment.services
-                      .filter(s => s.coverageStatus !== 'reserved' && s.coverageStatus !== 'consumed')
-                      .reduce((sum, s) => sum + Number(s.priceSnapshot || 0), 0) +
-                      (selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage
-                        ? Number(selectedAppointment.transport.fee || 0)
-                        : 0),
-                  )}
+                  {money(amountToCharge(selectedAppointment))}
                 </span>
               </div>
             </div>
@@ -3692,7 +3970,9 @@ export default function PetshopAgendaPage() {
 
                   <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
                     {historyRows.map((h, hIdx) => {
-                      const stageLabel = h.label || statusLabelMap[h.status] || getStageLabel(h.status, selectedAppointment.customStages) || h.status;
+                      const stageLabel = formatSwapText(
+                        h.label || statusLabelMap[h.status] || getStageLabel(h.status, selectedAppointment.customStages) || h.status,
+                      );
                       const timeFormatted = new Date(h.at).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
                       const dateFormatted = new Date(h.at).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
                       const badge = getHistoryEntryBadge(h);
@@ -3701,7 +3981,7 @@ export default function PetshopAgendaPage() {
                         !h.skipped &&
                         !h.rescheduledFrom &&
                         ((!h.kind && !['scheduled', 'requested', 'cancelled', 'no_show', 'ready', 'delivered'].includes(h.status)) ||
-                          h.kind === 'service_added');
+                          (h.kind === 'service_added' && h.serviceId !== PACKAGE_UPGRADE_SERVICE_ID));
 
                       return (
                         <div
@@ -3709,11 +3989,16 @@ export default function PetshopAgendaPage() {
                           className={`flex items-start justify-between gap-2 rounded-lg p-2 text-xs border ${
                             h.skipped
                               ? 'bg-amber-50/70 border-amber-200 text-amber-950'
+                              : h.kind === 'service_swapped'
+                              ? 'bg-indigo-50/40 border-indigo-200 text-zinc-900'
                               : 'bg-white border-zinc-200 text-zinc-800'
                           }`}
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
+                              {h.kind === 'service_swapped' && (
+                                <RefreshCw size={13} className="shrink-0 text-indigo-700" aria-hidden="true" />
+                              )}
                               <strong className="font-bold">{stageLabel}</strong>
                               <span className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold ${badge.cls}`}>
                                 {badge.label}
@@ -3744,8 +4029,8 @@ export default function PetshopAgendaPage() {
                                 ) : null}
                               </p>
                             )}
-                            {h.reason && <p className="text-[10px] text-amber-800 mt-0.5">{h.reason}</p>}
-                            {h.notes && <p className="text-[11px] text-zinc-600 mt-0.5 italic">"{h.notes}"</p>}
+                            {h.reason && <p className="text-[10px] text-amber-800 mt-0.5">{formatSwapText(h.reason)}</p>}
+                            {h.notes && <p className="text-[11px] text-zinc-600 mt-0.5 italic">"{formatSwapText(h.notes)}"</p>}
                             {h.photoUrl && (
                               <div className="mt-2">
                                 <a
@@ -3927,6 +4212,9 @@ export default function PetshopAgendaPage() {
                                 >
                                   <div className="min-w-0">
                                     <div className="flex flex-wrap items-center gap-1.5">
+                                      {ev.eventType.startsWith('SERVICE_SWAP') && (
+                                        <RefreshCw size={11} className="shrink-0 text-indigo-700" aria-hidden="true" />
+                                      )}
                                       <span className={`rounded border px-1.5 py-0.5 text-[9px] font-bold ${evMeta.color}`}>
                                         {evMeta.label}
                                       </span>
@@ -3937,7 +4225,7 @@ export default function PetshopAgendaPage() {
                                       )}
                                     </div>
                                     <p className="text-zinc-700 mt-0.5 truncate">
-                                      {ev.reason || 'Movimentação registrada'}
+                                      {formatSwapText(ev.reason) || 'Movimentação registrada'}
                                     </p>
                                   </div>
                                   <span className="text-[10px] text-zinc-400 tabular-nums shrink-0">
@@ -4051,34 +4339,54 @@ export default function PetshopAgendaPage() {
                       Reativar / Reagendar
                     </button>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={chargingId === selectedAppointment.id || !['requested', 'scheduled', 'ready'].includes(selectedAppointment.status)}
-                    onClick={() => handleChargeAppointment(selectedAppointment, ['requested', 'scheduled'].includes(selectedAppointment.status))}
-                    className={`order-3 flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm cursor-pointer active:scale-95 ${
-                      ['requested', 'scheduled', 'ready'].includes(selectedAppointment.status)
-                        ? 'bg-teal-600 text-white hover:bg-teal-700 ring-2 ring-teal-400/40'
-                        : 'bg-zinc-800 text-white hover:bg-zinc-900'
-                    }`}
-                    title="Cobrar atendimento no Frente de Caixa (PDV) ou concluir via pacote"
-                  >
-                    {chargingId === selectedAppointment.id ? (
-                      <Loader2 size={15} className="animate-spin" />
-                    ) : selectedAppointment.status === 'ready' && selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0) ? (
-                      <PackageCheck size={15} />
-                    ) : (
-                      <CreditCard size={15} />
-                    )}
-                    <span>
-                      {selectedAppointment.status === 'ready' && amountToCharge(selectedAppointment) <= 0 && selectedAppointment.paidAmount != null
-                        ? 'Concluir entrega'
-                        : selectedAppointment.status === 'ready' && selectedAppointment.services.filter(s => !s.comboParentId).every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') && !(selectedAppointment.transport?.enabled && !selectedAppointment.transport.coveredByPackage && Number(selectedAppointment.transport.fee || 0) > 0)
-                        ? 'Concluir (Pacote)'
-                        : ['requested', 'scheduled'].includes(selectedAppointment.status) ? 'Cobrar agora' : `Cobrar ${money(amountToCharge(selectedAppointment))}`}
-                    </span>
-                  </button>
-                )}
+                ) : (() => {
+                  const canEarlyCharge = canChargeExtraEarly(selectedAppointment);
+                  const canTriggerFooterCharge =
+                    ['requested', 'scheduled', 'ready'].includes(selectedAppointment.status) || canEarlyCharge;
+                  const footerPrepay =
+                    !canEarlyCharge && ['requested', 'scheduled'].includes(selectedAppointment.status);
+                  const footerAddonOnly =
+                    canEarlyCharge && !['ready', 'delivered'].includes(selectedAppointment.status);
+                  const allServicesCoveredByPkg =
+                    selectedAppointment.services
+                      .filter(s => !s.comboParentId)
+                      .every(s => s.coverageStatus === 'reserved' || s.coverageStatus === 'consumed') &&
+                    !(
+                      selectedAppointment.transport?.enabled &&
+                      !selectedAppointment.transport.coveredByPackage &&
+                      Number(selectedAppointment.transport.fee || 0) > 0
+                    );
+                  return (
+                    <button
+                      type="button"
+                      disabled={chargingId === selectedAppointment.id || !canTriggerFooterCharge}
+                      onClick={() => handleChargeAppointment(selectedAppointment, footerPrepay, footerAddonOnly)}
+                      className={`order-3 flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold transition shadow-sm cursor-pointer active:scale-95 disabled:opacity-50 ${
+                        canTriggerFooterCharge
+                          ? 'bg-teal-600 text-white hover:bg-teal-700 ring-2 ring-teal-400/40'
+                          : 'bg-zinc-800 text-white hover:bg-zinc-900'
+                      }`}
+                      title="Cobrar atendimento no Frente de Caixa (PDV) ou concluir via pacote"
+                    >
+                      {chargingId === selectedAppointment.id ? (
+                        <Loader2 size={15} className="animate-spin" />
+                      ) : selectedAppointment.status === 'ready' && allServicesCoveredByPkg ? (
+                        <PackageCheck size={15} />
+                      ) : (
+                        <CreditCard size={15} />
+                      )}
+                      <span>
+                        {selectedAppointment.status === 'ready' && amountToCharge(selectedAppointment) <= 0 && selectedAppointment.paidAmount != null
+                          ? 'Concluir entrega'
+                          : selectedAppointment.status === 'ready' && allServicesCoveredByPkg
+                          ? 'Concluir (Pacote)'
+                          : ['requested', 'scheduled'].includes(selectedAppointment.status) && !canEarlyCharge
+                          ? 'Cobrar agora'
+                          : `Cobrar ${money(amountToCharge(selectedAppointment))}`}
+                      </span>
+                    </button>
+                  );
+                })()}
 
                 <button
                   type="button"
@@ -4125,7 +4433,7 @@ export default function PetshopAgendaPage() {
       )}
 
       {paymentItem && <PaymentModal isOpen onClose={() => setPaymentItem(null)} isOnline={navigator.onLine} tenantConfig={tenant}
-        petshopReceipt={{ customer: paymentItem.appointment.customer.name, total: paymentItem.total, submit: async (payments, discount) => { const { data } = await api.post(`/petshop/appointments/${paymentItem.appointment.id}/receive`, { payments, prepay: paymentItem.prepay, ...(discount ? { discount: discount.amount, discountPin: discount.pin } : {}) }); return data; } }}
+        petshopReceipt={{ customer: paymentItem.appointment.customer.name, total: paymentItem.total, submit: async (payments, discount) => { const { data } = await api.post(`/petshop/appointments/${paymentItem.appointment.id}/receive`, { payments, prepay: paymentItem.prepay, addonOnly: paymentItem.addonOnly, ...(discount ? { discount: discount.amount, discountPin: discount.pin } : {}) }); return data; } }}
         onSuccess={() => { setSelectedAppointment(null); loadAppointments(false); toast.success('Pagamento registrado.'); }} />}
 
       {stageAssignment && (
@@ -4884,6 +5192,24 @@ export default function PetshopAgendaPage() {
           }}
         />
       )}
+      <ExchangePackageServiceModal
+        target={exchangeTarget}
+        services={services}
+        operators={operators}
+        onClose={() => setExchangeTarget(null)}
+        onSuccess={({ appointment, differenceAmount, chargeMode, payNow }) => {
+          setExchangeTarget(null);
+          if (appointment) {
+            const updated = keepPaymentStatus(appointment, selectedAppointment || appointment);
+            setItems(curr => curr.map(row => (row.id === updated.id ? updated : row)));
+            setSelectedAppointment(curr => (curr?.id === updated.id ? updated : curr));
+            if (payNow || (chargeMode === 'charge_now' && differenceAmount > 0)) {
+              void handleChargeAppointment(updated, false, true);
+            }
+          }
+          void loadAppointments(false);
+        }}
+      />
     </div>
   );
 }

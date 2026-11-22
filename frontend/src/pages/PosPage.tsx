@@ -78,6 +78,8 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
   const [productToSetQuantity,setProductToSetQuantity]= useState<Product | null>(null);
   const [tempQuantity,        setTempQuantity]        = useState<number>(1);
   const productRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const prevComandasRef = useRef<any[]>([]);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
   const {
     operator,
     cashRegister,
@@ -168,40 +170,46 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
       if (user?.tenant && Array.isArray(newList)) {
         void db.comandas_cache.put({ tenantId: user.tenant, savedAt: Date.now(), items: newList }).catch(() => {});
       }
-      setOpenComandas(prev => {
-        const prevMap = new Map(prev.map((c: any) => [c.id, c.status]));
-        // Dispara beep e badge somente na TRANSIÇÃO de estado:
-        // 1. Nova comanda que não existia antes (se prev já tinha dados)
-        // 2. Comanda que transitou de open -> waiting_payment
-        const hasTransition = newList.some(c => {
-          const prevStatus = prevMap.get(c.id);
-          const isNewComanda = !prevStatus && prev.length > 0;
-          const isRequestedPayment = prevStatus === 'open' && c.status === 'waiting_payment';
-          return isNewComanda || isRequestedPayment;
-        });
-
-        if (hasTransition) {
-          setNewComandaBadge(true);
-          try {
-            const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            const gain = ctx.createGain();
-            osc.connect(gain);
-            gain.connect(ctx.destination);
-            osc.frequency.value = 880;
-            gain.gain.setValueAtTime(0.15, ctx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-            osc.start(ctx.currentTime);
-            osc.stop(ctx.currentTime + 0.3);
-          } catch { /* silencia se AudioContext não disponível */ }
-        }
-        return newList;
+      const prev = prevComandasRef.current;
+      const prevMap = new Map(prev.map((c: any) => [c.id, c.status]));
+      // Dispara beep e badge somente na TRANSIÇÃO de estado:
+      // 1. Nova comanda que não existia antes (se prev já tinha dados)
+      // 2. Comanda que transitou de open -> waiting_payment
+      const hasTransition = newList.some(c => {
+        const prevStatus = prevMap.get(c.id);
+        const isNewComanda = !prevStatus && prev.length > 0;
+        const isRequestedPayment = prevStatus === 'open' && c.status === 'waiting_payment';
+        return isNewComanda || isRequestedPayment;
       });
+      prevComandasRef.current = newList;
+      setOpenComandas(newList);
+
+      if (hasTransition) {
+        setNewComandaBadge(true);
+        try {
+          const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.frequency.value = 880;
+          gain.gain.setValueAtTime(0.15, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.3);
+          setTimeout(() => {
+            void ctx.close().catch(() => {});
+          }, 400);
+        } catch { /* silencia se AudioContext não disponível */ }
+      }
     } catch {
       if (user?.tenant) {
         try {
           const cached = await db.comandas_cache.get(user.tenant);
-          if (cached?.items) setOpenComandas(cached.items);
+          if (cached?.items) {
+            prevComandasRef.current = cached.items;
+            setOpenComandas(cached.items);
+          }
         } catch { /* silencia */ }
       }
     } finally {
@@ -412,7 +420,7 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
     // ── PASSO 1: Exibe cache local imediatamente (zero latência de rede) ──────
     // Só mostra spinner se não houver nada em cache para exibir.
     if (!backgroundOnly) {
-      getCachedProducts().then(cached => {
+      getCachedProducts(user?.tenant).then(cached => {
         if (cached.length > 0) {
           setProducts(sortProducts(cached as unknown as Product[]));
           setOfflineCatalog(false);
@@ -427,7 +435,7 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
     if (!isOnlineRef.current) {
       // Offline: garante que o cache já foi exibido no Passo 1
       if (backgroundOnly) {
-        getCachedProducts()
+        getCachedProducts(user?.tenant)
           .then(cached => {
             setProducts(sortProducts(cached as unknown as Product[]));
             setOfflineCatalog(true);
@@ -448,7 +456,7 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
         setProducts(sorted);
         setVisibleCount(40);
         setOfflineCatalog(false);
-        // Persiste no IndexedDB para próxima abertura (cache-first funcionar)
+        // Persiste no IndexedDB para próxima abertura (cache-first funcionar isolado por loja)
         await updateProductsCache(sorted.map((p: any) => ({
           id:         p.id,
           name:       p.name,
@@ -469,11 +477,11 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
           imageUrl:   p.imageUrl,
           isComposite:    p.isComposite ?? false,
           modifierGroups: p.modifierGroups ?? [],
-        })));
+        })), user?.tenant);
       })
       .catch(async () => {
         // API falhou: garante que o cache está exibido
-        const cached = await getCachedProducts();
+        const cached = await getCachedProducts(user?.tenant);
         if (cached.length > 0) {
           setProducts(sortProducts(cached as unknown as Product[]));
           setOfflineCatalog(true);
@@ -551,6 +559,21 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
     // Limita a exibição na tela para não travar o navegador com milhares de cards
     return filtered.slice(0, 50);
   }, [products, deferredSearch, isFoodTheme]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || visibleCount >= displayedProducts.length) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setVisibleCount(c => Math.min(c + 40, displayedProducts.length));
+        }
+      },
+      { rootMargin: '200px' },
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [visibleCount, displayedProducts.length]);
 
   const handleSearchKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && search.trim() !== '') {
@@ -877,17 +900,8 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
               {/* Sentinela de scroll infinito */}
               {visibleCount < displayedProducts.length && (
                 <div
+                  ref={sentinelRef}
                   className="flex items-center justify-center py-6 pb-[200px] lg:pb-12"
-                  ref={el => {
-                    if (!el) return;
-                    const obs = new IntersectionObserver(([entry]) => {
-                      if (entry.isIntersecting) {
-                        setVisibleCount(c => Math.min(c + 40, displayedProducts.length));
-                      }
-                    }, { rootMargin: '200px' });
-                    obs.observe(el);
-                    // Cleanup via GC — ref element será destruído quando não for mais visível
-                  }}
                 >
                   <span className="text-xs text-zinc-600">Mostrando {Math.min(visibleCount, displayedProducts.length)} de {displayedProducts.length} produtos</span>
                 </div>
@@ -1541,7 +1555,7 @@ function PosPageContent({ experience }: { experience?: 'food' }) {
           }
         }}
         isOnline={syncState.isOnline}
-        onPendingCountChange={syncState.syncNow}
+        onPendingCountChange={syncState.refreshPendingCount}
         tenantConfig={tenantConfig}
         onSuccess={loadProducts}
       />

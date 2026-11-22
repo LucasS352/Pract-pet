@@ -5,6 +5,7 @@ import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { PetshopPricingService } from './petshop-pricing.service';
 import { PetshopPackagesService } from './petshop-packages.service';
 import { normalizeTransport, serializeAppointmentTransport } from './petshop-transport';
+import { readTaxiDefaultFee } from './taxi-default-fee';
 
 @Injectable()
 export class PetshopPortalService {
@@ -182,7 +183,14 @@ export class PetshopPortalService {
     });
     const duration = resolvedServices.reduce((total, item) => total + item.durationMinutes, 0);
     const endsAt = new Date(startsAt.getTime() + duration * 60_000);
-    const transport = normalizeTransport(data.transport);
+    const rawTransport = normalizeTransport(data.transport);
+    const transport = rawTransport
+      ? {
+          ...rawTransport,
+          fee: await readTaxiDefaultFee(prisma),
+          coveredByPackage: false,
+        }
+      : null;
     // Serialize bookings for the same pet, including requests served by different API instances.
     return prisma.$transaction(async tx => {
       await tx.$queryRaw`SELECT id FROM pets WHERE id = ${petId} FOR UPDATE`;
@@ -235,6 +243,18 @@ export class PetshopPortalService {
     ];
 
     return prisma.$transaction(async tx => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${appointmentId} FOR UPDATE`;
+      }
+      const latest = await tx.petAppointment.findUnique({ where: { id: appointmentId }, select: { status: true } });
+      if (!latest) throw new NotFoundException('Agendamento não encontrado.');
+      if (['delivered', 'cancelled', 'no_show'].includes(latest.status)) {
+        throw new BadRequestException('Este agendamento já foi finalizado ou cancelado.');
+      }
+      if (['checked_in', 'bathing', 'grooming', 'finishing', 'ready'].includes(latest.status)) {
+        throw new BadRequestException('O pet já está sob cuidados da equipe. Entre em contato diretamente com o pet shop para alterações.');
+      }
+
       await this.packages.releaseReservedSessionsForAppointmentInTx(
         tx,
         appointmentId,
@@ -288,6 +308,17 @@ export class PetshopPortalService {
     const rescheduleReason = String(data.reason || 'Reagendado pelo tutor via portal').trim();
 
     return prisma.$transaction(async tx => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${appointmentId} FOR UPDATE`;
+      }
+      const latest = await tx.petAppointment.findUnique({ where: { id: appointmentId }, select: { status: true } });
+      if (!latest) throw new NotFoundException('Agendamento não encontrado.');
+      if (['delivered', 'cancelled', 'no_show'].includes(latest.status)) {
+        throw new BadRequestException('Não é possível reagendar um agendamento já finalizado ou cancelado.');
+      }
+      if (['checked_in', 'bathing', 'grooming', 'finishing', 'ready'].includes(latest.status)) {
+        throw new BadRequestException('O atendimento já está em andamento. Fale com a equipe do pet shop pelo WhatsApp.');
+      }
       await tx.$queryRaw`SELECT id FROM pets WHERE id = ${petId} FOR UPDATE`;
       const duplicate = await tx.petAppointment.findFirst({
         where: {

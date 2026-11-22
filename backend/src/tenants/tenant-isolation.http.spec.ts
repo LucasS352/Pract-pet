@@ -18,8 +18,12 @@ describe('Tenant administration isolation over HTTP', () => {
   const jwt = new JwtService({ secret });
   const previousSecret = jwtConstants.secret;
   const updateTenant = jest.fn(async (id: string) => ({ id }));
+  const updateTenantPlatform = jest.fn(async (id: string) => ({ id }));
+  const deleteTenant = jest.fn(async (id: string) => ({ success: true, id }));
+  const syncMasterCatalogFromTenants = jest.fn(async () => ({ synced: 0, tenants: 0, errors: [] }));
+  const getLogoImage = jest.fn(async () => null);
   const validatePin = jest.fn(async (pin: string) => pin === 'test-setup-pin');
-  const token = (role = 'admin', tenantId = 'tenant-a') => jwt.sign({ sub: 'user-a', role, tenantId });
+  const token = (role = 'admin', tenantId = 'tenant-a') => jwt.sign({ sub: `user-${role}-${tenantId}`, role, tenantId });
 
   beforeAll(async () => {
     jwtConstants.secret = secret;
@@ -27,8 +31,14 @@ describe('Tenant administration isolation over HTTP', () => {
       imports: [PassportModule], controllers: [TenantsController],
       providers: [JwtStrategy, JwtAuthGuard, StationAccessService,
         { provide: JwtService, useValue: jwt },
-        { provide: TenantsService, useValue: { updateTenant, validatePin } },
-        { provide: HeartPrismaService, useValue: { tenant: { findUnique: async () => ({ status: 'active', modulos: {} }) } } },
+        { provide: TenantsService, useValue: { updateTenant, updateTenantPlatform, deleteTenant, syncMasterCatalogFromTenants, getLogoImage, validatePin } },
+        { provide: HeartPrismaService, useValue: {
+          tenant: { findUnique: async () => ({ status: 'active', modulos: {} }) },
+          user: { findUnique: async ({ where }: any) => {
+            const [, role, ...tenantParts] = String(where.id).split('-');
+            return { id: where.id, tenantId: tenantParts.join('-'), email: 'qa@example.test', role, groupId: null, active: true, tenant: { status: 'active' } };
+          } },
+        } },
         { provide: TenantConnectionManager, useValue: { getTenantClient: async () => ({ tenantSettings: { findUnique: async () => null } }) } },
       ],
     }).compile();
@@ -72,10 +82,33 @@ describe('Tenant administration isolation over HTTP', () => {
   it('does not disclose the SaaS tenant directory to a customer administrator', async () => {
     await request(app.getHttpServer()).get('/api/tenants').auth(token(), { type: 'bearer' }).expect(403);
   });
-  it('also denies deleting another tenant', async () => {
+  it('also denies deleting own or another tenant as store admin, allowing only superadmin', async () => {
     await request(app.getHttpServer()).delete('/api/tenants/tenant-b').auth(token(), { type: 'bearer' }).expect(403);
+    await request(app.getHttpServer()).delete('/api/tenants/tenant-a').auth(token(), { type: 'bearer' }).expect(403);
+    expect(deleteTenant).not.toHaveBeenCalled();
+    await request(app.getHttpServer()).delete('/api/tenants/tenant-b').auth(token('superadmin'), { type: 'bearer' }).expect(200);
+    expect(deleteTenant).toHaveBeenCalledWith('tenant-b');
   });
   it('also denies replacing another tenant logo', async () => {
     await request(app.getHttpServer()).post('/api/tenants/tenant-b/logo').auth(token(), { type: 'bearer' }).expect(403);
+  });
+  it('routes store admin PATCH /tenants/me to store-only updateTenant and setup PATCH to updateTenantPlatform', async () => {
+    await request(app.getHttpServer()).patch('/api/tenants/me').auth(token('admin'), { type: 'bearer' }).send({ nomeFantasia: 'Loja', modulos: { petshop: true } }).expect(200);
+    expect(updateTenant).toHaveBeenCalledTimes(1);
+    expect(updateTenantPlatform).not.toHaveBeenCalled();
+
+    await request(app.getHttpServer()).patch('/api/tenants/setup/tenant-a').set('x-setup-pin', 'test-setup-pin').send({ status: 'suspended' }).expect(200);
+    expect(updateTenantPlatform).toHaveBeenCalledWith('tenant-a', { status: 'suspended' });
+  });
+  it('requires valid setup PIN for POST /tenants/trigger-sync', async () => {
+    await request(app.getHttpServer()).post('/api/tenants/trigger-sync').expect(401);
+    await request(app.getHttpServer()).post('/api/tenants/trigger-sync').set('x-setup-pin', 'wrong').expect(401);
+    expect(syncMasterCatalogFromTenants).not.toHaveBeenCalled();
+    await request(app.getHttpServer()).post('/api/tenants/trigger-sync').set('x-setup-pin', 'test-setup-pin').expect(201);
+    expect(syncMasterCatalogFromTenants).toHaveBeenCalledTimes(1);
+  });
+  it('blocks path traversal in GET /tenants/uploads/logos/:filename', async () => {
+    await request(app.getHttpServer()).get('/api/tenants/uploads/logos/..%2f..%2fpackage.json').expect(404);
+    await request(app.getHttpServer()).get('/api/tenants/uploads/logos/..%5cpackage.json').expect(404);
   });
 });

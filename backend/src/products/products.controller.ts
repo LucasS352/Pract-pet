@@ -27,9 +27,11 @@ export class ProductsController {
     @Query('includeInactive') includeInactive?: string,
     @Query('status') status?: string,
   ) {
+    const safePage = Math.max(1, Number(page || 1) || 1);
+    const safeLimit = Math.min(Math.max(1, Number(limit || 50) || 50), 5000);
     return this.productsService.findAll(
-      Number(page || 1), 
-      Number(limit || 50),
+      safePage,
+      safeLimit,
       search,
       includeInactive === 'true' || status === 'all' || status === 'inactive',
       status,

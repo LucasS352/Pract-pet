@@ -5,6 +5,9 @@ const serviceIdFromNote = (note: unknown) => typeof note === 'string' && note.st
   ? note.slice('Serviço Pet Shop:'.length) : null;
 export const chargedServiceIds = (comanda: any): string[] => (comanda?.items || [])
   .map((item: any) => serviceIdFromNote(item.notes)).filter((id: string | null): id is string => Boolean(id));
+const hasTaxiChargeLine = (comanda: any): boolean => (comanda?.items || []).some(
+  (item: any) => item?.notes === 'Táxi Dog Pet Shop' || item?.productId === 'petshop-taxi-dog-fee',
+);
 
 export async function recordAddedServiceCommissions(tx: any, appointment: any, tenantId: string, at: Date, serviceIds?: string[], activatePending = false) {
   const history = Array.isArray(appointment.stageHistory) ? appointment.stageHistory : [];
@@ -72,15 +75,23 @@ export async function claimPetshopCheckout(tx: any, data: any, comanda: any) {
   const appointment = await tx.petAppointment.findUnique({ where: { id: linkedId } });
   if (!appointment) throw new BadRequestException('Atendimento não encontrado.');
 
+  if (['cancelled', 'no_show'].includes(appointment.status)) {
+    throw new ConflictException('Atendimento cancelado não pode ser cobrado.');
+  }
+
   const activePayment = tx.comanda?.findFirst
     ? await tx.comanda.findFirst({ where: { notes: { contains: linkedId }, status: 'closed', sale: { is: { status: 'completed' } } }, select: { id: true } })
     : null;
   if (isAddon && activePayment) {
     const serviceIds = chargedServiceIds(comanda);
-    if (!serviceIds.length || new Set(serviceIds).size !== serviceIds.length) throw new ConflictException('Adicional sem serviços novos para cobrar.');
-    const available = await tx.petAppointmentService.count({ where: { id: { in: serviceIds }, appointmentId: linkedId,
-      chargedSaleId: null, coverageStatus: { notIn: ['reserved', 'consumed'] }, priceSnapshot: { gt: 0 } } });
-    if (available !== serviceIds.length) throw new ConflictException('Serviço adicional já cobrado. Reabra a Agenda.');
+    const hasTaxi = hasTaxiChargeLine(comanda);
+    if (!serviceIds.length && !hasTaxi) throw new ConflictException('Adicional sem serviços novos para cobrar.');
+    if (serviceIds.length) {
+      if (new Set(serviceIds).size !== serviceIds.length) throw new ConflictException('Adicional sem serviços novos para cobrar.');
+      const available = await tx.petAppointmentService.count({ where: { id: { in: serviceIds }, appointmentId: linkedId,
+        chargedSaleId: null, coverageStatus: { notIn: ['reserved', 'consumed'] }, priceSnapshot: { gt: 0 } } });
+      if (available !== serviceIds.length) throw new ConflictException('Serviço adicional já cobrado. Reabra a Agenda.');
+    }
   }
 
   if (appointment.status === 'delivered' || appointment.completedAt) {
@@ -95,6 +106,23 @@ export async function claimPetshopCheckout(tx: any, data: any, comanda: any) {
   }
   if (data.petshopPrepayment) {
     if (!['requested', 'scheduled'].includes(appointment.status)) throw new BadRequestException('Pagamento antecipado permitido somente antes do início do atendimento.');
+  } else if (isAddon && !activePayment && ['requested', 'scheduled', 'checked_in', 'bathing', 'grooming', 'finishing', 'ready'].includes(appointment.status)) {
+    const serviceIds = chargedServiceIds(comanda);
+    const hasTaxi = hasTaxiChargeLine(comanda);
+    if (!serviceIds.length && !hasTaxi) throw new ConflictException('Adicional sem serviços novos para cobrar.');
+    if (serviceIds.length && tx.petAppointmentService?.count) {
+      const available = await tx.petAppointmentService.count({
+        where: {
+          id: { in: serviceIds },
+          appointmentId: linkedId,
+          chargedSaleId: null,
+          coverageStatus: { notIn: ['reserved', 'consumed'] },
+          priceSnapshot: { gt: 0 },
+        },
+      });
+      if (available !== serviceIds.length) throw new ConflictException('Serviço adicional já cobrado. Reabra a Agenda.');
+    }
+    return linkedId;
   } else if (appointment.status !== 'ready') throw new BadRequestException('Conclua os cuidados antes de cobrar o atendimento.');
   return linkedId;
 }
@@ -106,7 +134,7 @@ export async function completePetshopCheckout(tx: any, appointmentId: string | n
   if (prepayment) {
     await tx.petAppointment.update({ where: { id: appointmentId }, data: {
       stageHistory: [...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []), {
-        kind: 'prepayment', status: appointment.status, label: 'Pagamento antecipado no agendamento', at: now.toISOString(), userId: actorId,
+        kind: 'prepayment', status: appointment.status, label: 'Pagamento antecipado no agendamento', at: now.toISOString(), userId: actorId, saleId,
       }],
     } });
     return;
@@ -114,7 +142,13 @@ export async function completePetshopCheckout(tx: any, appointmentId: string | n
   const serviceIds = chargedServiceIds(comanda);
   const isAddon = appointmentLinkFromComanda(comanda?.notes)?.isAddon === true;
   if (saleId && tx.petAppointmentService?.updateMany) await tx.petAppointmentService.updateMany({
-    where: { appointmentId, chargedSaleId: null, ...(serviceIds.length ? { id: { in: serviceIds } } : {}) },
+    where: {
+      appointmentId,
+      chargedSaleId: null,
+      comboParentId: null,
+      coverageStatus: { notIn: ['reserved', 'consumed'] },
+      ...(serviceIds.length ? { id: { in: serviceIds } } : {}),
+    },
     data: { chargedSaleId: saleId },
   });
   if (isAddon) {

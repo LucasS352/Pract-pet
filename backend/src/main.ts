@@ -50,32 +50,43 @@ async function bootstrap() {
   app.use(securityHeaders);
 
   const minute = 60_000;
+  const normPath = (req: any) => String(req.path || '').replace(/\/+$/, '') || '/';
   app.use(
     createRateLimiter([
       {
         name: 'pin-check',
-        match: req => req.method === 'POST' && req.path.endsWith('/tenants/setup/validate-pin'),
+        match: req => req.method === 'POST' && normPath(req).endsWith('/tenants/setup/validate-pin'),
         windowMs: 15 * minute,
         max: 10,
         message: 'Muitas tentativas de PIN. Aguarde alguns minutos.',
       },
       {
+        name: 'pin-verify',
+        match: req =>
+          req.method === 'POST' &&
+          (/\/api\/tenants\/me\/verify-(discount|cashier)-pin$/.test(normPath(req)) ||
+            /^\/api\/v1\/comandas\/[^/]+\/authorize$/.test(normPath(req))),
+        windowMs: 15 * minute,
+        max: 15,
+        message: 'Muitas tentativas de PIN. Aguarde alguns minutos.',
+      },
+      {
         name: 'auth',
-        match: req => req.method === 'POST' && /\/api\/auth\/(login|operator-login|station-login)$/.test(req.path),
+        match: req => req.method === 'POST' && /\/api\/auth\/(login|operator-login|station-login)$/.test(normPath(req)),
         windowMs: minute,
         max: 30,
         message: 'Muitas tentativas de login. Aguarde um minuto e tente novamente.',
       },
       {
         name: 'setup',
-        match: req => /\/api\/(tenants\/setup|groups\/setup|leads|sys-init|integrations\/(setup|ifood))/.test(req.path),
+        match: req => /\/api\/(tenants\/setup|groups\/setup|leads|sys-init|integrations\/(setup|ifood))/.test(normPath(req)),
         windowMs: minute,
         max: 120,
         message: 'Muitas requisições administrativas. Aguarde um minuto.',
       },
       {
         name: 'public',
-        match: req => /\/api\/(petshop\/public|demo)/.test(req.path),
+        match: req => /\/api\/(petshop\/public|demo)/.test(normPath(req)),
         windowMs: minute,
         max: 120,
         message: 'Muitas requisições. Aguarde um minuto.',

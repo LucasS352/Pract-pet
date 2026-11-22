@@ -13,6 +13,7 @@ import type { OfflineSale, OfflineSalePayment } from '@/lib/db';
 import { submitDurableCheckout } from '@/lib/durable-checkout';
 import { withSaleOperationLock } from '@/lib/sale-operation-lock';
 import { sendCheckout } from '@/lib/checkout-api';
+import { escapeHtml } from '@/lib/escape-html';
 import {
   CreditCard, Banknote, QrCode, X, Loader2, Plus, Trash2, Delete,
   ShoppingBag, Receipt, CheckCircle2, XCircle, Clock, ChevronDown, ChevronUp, User, WifiOff, Tag, Lock, Printer, Settings2, UtensilsCrossed, Search, PawPrint
@@ -385,18 +386,18 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
       <div class="item">
         <div class="item-header">
           <span class="item-num">${String(idx + 1).padStart(2, '0')}</span>
-          <span class="item-name">${item.name}</span>
+          <span class="item-name">${escapeHtml(item.name)}</span>
           <span class="item-total">R$ ${item.subtotal.toFixed(2)}</span>
         </div>
         <div class="item-detail">
-          ${item.quantity} UN x R$ ${Number(item.priceSell).toFixed(2)}
+          ${escapeHtml(item.quantity)} UN x R$ ${Number(item.priceSell).toFixed(2)}
         </div>
       </div>
     `).join('');
 
     const paymentsHtml = payments.map(p => `
       <div class="payment-row">
-        <span>${{ dinheiro: 'DINHEIRO', pix: 'PIX', credito: 'CRÉDITO', debito: 'DÉBITO' }[p.method] || p.method}</span>
+        <span>${escapeHtml({ dinheiro: 'DINHEIRO', pix: 'PIX', credito: 'CRÉDITO', debito: 'DÉBITO' }[p.method] || p.method)}</span>
         <span>R$ ${p.value.toFixed(2)}</span>
       </div>
     `).join('');
@@ -449,15 +450,15 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
 </head>
 <body>
   <div class="header">
-    <div class="company">${companyName}</div>
-    ${cnpj    ? `<div class="subtitle">CNPJ: ${cnpj}</div>` : ''}
-    ${address ? `<div class="subtitle">${address}</div>`  : ''}
-    ${phone   ? `<div class="subtitle">Tel: ${phone}</div>` : ''}
+    <div class="company">${escapeHtml(companyName)}</div>
+    ${cnpj    ? `<div class="subtitle">CNPJ: ${escapeHtml(cnpj)}</div>` : ''}
+    ${address ? `<div class="subtitle">${escapeHtml(address)}</div>`  : ''}
+    ${phone   ? `<div class="subtitle">Tel: ${escapeHtml(phone)}</div>` : ''}
   </div>
   <div class="divider"></div>
   <div class="label-row">CUPOM NÃO FISCAL</div>
-  <div class="meta"><span>${dateStr} ${timeStr}</span><span>Venda #${String(saleData.id || '—').slice(0, 8)}</span></div>
-  <div class="meta"><span>Operador: ${ (operator?.name || user?.name || 'Operador') }</span></div>
+  <div class="meta"><span>${escapeHtml(dateStr)} ${escapeHtml(timeStr)}</span><span>Venda #${escapeHtml(String(saleData.id || '—').slice(0, 8))}</span></div>
+  <div class="meta"><span>Operador: ${escapeHtml(operator?.name || user?.name || 'Operador')}</span></div>
   <div class="divider"></div>
   ${itemsHtml}
   <div class="divider"></div>
@@ -470,7 +471,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
   ${paymentsHtml}
   ${ changeVal > 0 ? `<div class="change-row"><span>TROCO:</span><span>R$ ${changeVal.toFixed(2)}</span></div>` : '' }
   <div class="divider"></div>
-  <div class="footer">${footerMsg}</div>
+  <div class="footer">${escapeHtml(footerMsg)}</div>
   <br/><br/>
 </body>
 </html>`;
@@ -927,8 +928,17 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
         syncStatus:     'SYNCING',
       } satisfies Omit<OfflineSale, 'id'>;
 
+      const clearPetshopCheckoutIntent = () => {
+        const apptId = sessionStorage.getItem('petshop_checkout_appointment_id');
+        sessionStorage.removeItem('petshop_checkout_appointment_id');
+        sessionStorage.removeItem('petshop_checkout_customer_name');
+        sessionStorage.removeItem('petshop_checkout_customer_phone');
+        return apptId;
+      };
+
       if (offlineOnly) {
         await withSaleOperationLock(localSale.tenantId, operationId, () => saveOfflineSale({ ...localSale, syncStatus: 'PENDING' }));
+        clearPetshopCheckoutIntent();
         setSavedOfflineTotal(localSale.total);
         releaseOwnCart();
         clearOwnCart();
@@ -945,6 +955,7 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
         return;
       }
       if (outcome.kind === 'pending') {
+        clearPetshopCheckoutIntent();
         setSavedOfflineTotal(localSale.total);
         clearOwnCart();
         setSavedOffline(true);
@@ -966,11 +977,8 @@ export function PaymentModal({ isOpen, onClose, isOnline, onPendingCountChange, 
       clearOwnCart();
       onSuccess?.();
       useDemoMissionsStore.getState().completeMission('saleCompleted');
-      const petshopApptId = sessionStorage.getItem('petshop_checkout_appointment_id');
+      const petshopApptId = clearPetshopCheckoutIntent();
       if (petshopApptId) {
-        sessionStorage.removeItem('petshop_checkout_appointment_id');
-        sessionStorage.removeItem('petshop_checkout_customer_name');
-        sessionStorage.removeItem('petshop_checkout_customer_phone');
         api.patch('/petshop/appointments/' + petshopApptId + '/status', { status: 'delivered' }).catch(console.error);
       }
       if (actualMode === 'nfce') { toast.info('NFC-e em processamento...', { duration: 3000 }); setNfcePolling(true); }

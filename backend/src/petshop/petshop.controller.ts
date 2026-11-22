@@ -69,7 +69,11 @@ export class PetshopController {
   @Get('appointments') listAppointments(@Query('from') from?: string, @Query('to') to?: string) { return this.petshop.listAppointments(from, to); }
   @Get('appointments/overdue-pickups') overduePickups(@Query('before') before?: string) { return this.petshop.listOverduePickups(before); }
   @Post('appointments') createAppointment(@Body() body: any) { return this.petshop.createAppointment(body); }
-  @Post('appointments/:id/checkout') prepareCheckout(@Param('id') id: string, @Body() body: any) { return this.petshop.prepareCheckout(id, body?.prepay === true); }
+  @Post('appointments/:id/checkout') prepareCheckout(@Param('id') id: string, @Body() body: any) { return this.petshop.prepareCheckout(id, body?.prepay === true, body?.addonOnly === true); }
+  @Post('appointments/:id/exchange-package-service')
+  async exchangeAppointmentPackageService(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.packages.exchangeAppointmentPackageService(id, body, await this.resolvePackageActor(req, body));
+  }
   @Get('appointments/:id/payment') appointmentPayment(@Param('id') id: string) { return this.petshop.appointmentPayment(id); }
   @Post('appointments/:id/reverse-payment') reverseAppointmentPayment(@Param('id') id: string, @Body('reason') reason: string) { return this.petshop.reverseAppointmentPayment(id, reason); }
   @Patch('appointments/:id') updateAppointment(@Param('id') id: string, @Body() body: any, @Req() req: any) { return this.petshop.updateAppointment(id, body, req); }
@@ -178,6 +182,16 @@ export class PetshopController {
   @Post('packages/contracts/:id/refund-session')
   async refundPackageSession(@Param('id') id: string, @Body() body: any, @Req() req: any) {
     return this.packages.refundConsumedSession(id, body, await this.resolvePackageActor(req, body));
+  }
+
+  @Post('packages/contracts/:id/exchange-session-service')
+  async exchangePackageSessionService(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.packages.exchangeSessionService(id, body, await this.resolvePackageActor(req, body));
+  }
+
+  @Post('packages/contracts/:id/exchange-credit')
+  async exchangePackageCredit(@Param('id') id: string, @Body() body: any, @Req() req: any) {
+    return this.packages.exchangeAvailableCredit(id, body, await this.resolvePackageActor(req, body));
   }
 
   @Post('packages/contracts/:id/cancel')

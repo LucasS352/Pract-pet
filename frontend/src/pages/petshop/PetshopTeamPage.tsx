@@ -264,25 +264,13 @@ export default function PetshopTeamPage() {
   const [confirmDiscountPin, setConfirmDiscountPin] = useState('');
   const [savingDiscountPin, setSavingDiscountPin] = useState(false);
 
-  // Cache de PINs cadastrados/editados localmente para conveniência visual
-  const [pinCache, setPinCache] = useState<Record<string, string>>(() => {
+  useEffect(() => {
     try {
-      const stored = localStorage.getItem('petshop_operator_pin_cache');
-      return stored ? JSON.parse(stored) : {};
-    } catch {
-      return {};
-    }
-  });
-
-  const savePinToCache = (id: string, pin: string) => {
-    const updated = { ...pinCache, [id]: pin };
-    setPinCache(updated);
-    try {
-      localStorage.setItem('petshop_operator_pin_cache', JSON.stringify(updated));
+      localStorage.removeItem('petshop_operator_pin_cache');
     } catch {
       // ignore
     }
-  };
+  }, []);
 
   // Filtros
   const [search, setSearch] = useState('');
@@ -353,11 +341,9 @@ export default function PetshopTeamPage() {
       // Busca
       if (search.trim()) {
         const q = search.toLowerCase();
-        const pin = pinCache[item.id] || '';
         const matchesName = item.name.toLowerCase().includes(q);
         const matchesRole = (item.jobTitle || '').toLowerCase().includes(q);
-        const matchesPin = pin.includes(q);
-        if (!matchesName && !matchesRole && !matchesPin) return false;
+        if (!matchesName && !matchesRole) return false;
       }
 
       // Cargo
@@ -405,7 +391,7 @@ export default function PetshopTeamPage() {
     });
 
     return result;
-  }, [items, search, selectedRole, selectedStatus, selectedAccess, sortField, sortAsc, pinCache]);
+  }, [items, search, selectedRole, selectedStatus, selectedAccess, sortField, sortAsc]);
 
   const toggleSort = (field: typeof sortField) => {
     if (sortField === field) {
@@ -427,7 +413,7 @@ export default function PetshopTeamPage() {
     setForm({
       name: item.name,
       jobTitle: item.jobTitle || '',
-      pin: pinCache[item.id] || '',
+      pin: '',
       isManager: item.isManager,
       canManageAppointmentCommissions: Boolean(item.canManageAppointmentCommissions),
     });
@@ -460,12 +446,10 @@ export default function PetshopTeamPage() {
       if (form.pin) payload.pin = form.pin;
 
       if (editing) {
-        const res = await api.patch(`/operators/${editing.id}`, payload);
-        if (form.pin) savePinToCache(editing.id, form.pin);
+        await api.patch(`/operators/${editing.id}`, payload);
         toast.success('Colaborador atualizado com sucesso.');
       } else {
-        const res = await api.post('/operators', payload);
-        if (res.data?.id && form.pin) savePinToCache(res.data.id, form.pin);
+        await api.post('/operators', payload);
         toast.success('Colaborador cadastrado com sucesso.');
       }
 
@@ -517,7 +501,6 @@ export default function PetshopTeamPage() {
     setSaving(true);
     try {
       await api.patch(`/operators/${pinOperator.id}`, { pin: quickPin });
-      savePinToCache(pinOperator.id, quickPin);
       toast.success(`PIN de ${pinOperator.name} atualizado.`);
       setPinModalOpen(false);
       setPinOperator(null);
@@ -756,12 +739,6 @@ export default function PetshopTeamPage() {
                   </span>
                   <span className="text-zinc-400">·</span>
                   <span>{item.isManager ? 'Totais visíveis' : 'Auditoria cega'}</span>
-                  {pinCache[item.id] && (
-                    <>
-                      <span className="text-zinc-400">·</span>
-                      <span className="font-mono font-semibold text-zinc-700">PIN {pinCache[item.id]}</span>
-                    </>
-                  )}
                   {item.hasOpenRegister && (
                     <>
                       <span className="text-zinc-400">·</span>
@@ -1090,8 +1067,7 @@ export default function PetshopTeamPage() {
               <tbody className="divide-y divide-[var(--pc-border)]">
                 {filteredItems.map(item => {
                   const RoleIcon = getRoleIcon(item.jobTitle);
-                  const cachedPin = pinCache[item.id];
-                  const pinDisplay = cachedPin || '••••';
+                  const pinDisplay = '••••';
                   const initials = item.name.slice(0, 2).toUpperCase();
                   const rel = formatRelativeAccess(item.updatedAt, item.id);
                   const userAccount = users.find(

@@ -41,6 +41,7 @@ describe('Operational authorization over HTTP', () => {
         { provide: JwtService, useValue: jwt },
         { provide: HeartPrismaService, useValue: {
           tenant: { findUnique: async () => tenant },
+          user: { findUnique: async () => ({ id: 'admin', tenantId: tenant.id, email: 'qa@example.test', role: 'admin', groupId: null, active: true, tenant: { status: 'active' } }) },
           stationAccessLink: { findUnique: async () => link },
         } },
         { provide: TenantConnectionManager, useValue: {

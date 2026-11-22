@@ -144,10 +144,40 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
     return this.tenantManager.getTenantClient(tenantId, databaseUrl);
   }
 
+  private getSessionsBaseDir(): string {
+    return process.env.WHATSAPP_SESSIONS_DIR
+      ? path.resolve(process.env.WHATSAPP_SESSIONS_DIR)
+      : path.resolve(process.cwd(), 'private-data', 'whatsapp-sessions');
+  }
+
+  private getLegacySessionsBaseDir(): string {
+    return path.resolve(process.cwd(), 'uploads', 'whatsapp-sessions');
+  }
+
+  private migrateLegacySessionDir(safeId: string): void {
+    const legacyDir = path.join(this.getLegacySessionsBaseDir(), safeId);
+    const targetDir = path.join(this.getSessionsBaseDir(), safeId);
+    if (!fs.existsSync(legacyDir)) return;
+    try {
+      const legacyCreds = path.join(legacyDir, 'creds.json');
+      const targetCreds = path.join(targetDir, 'creds.json');
+      if (!fs.existsSync(targetCreds)) {
+        fs.mkdirSync(this.getSessionsBaseDir(), { recursive: true });
+        fs.cpSync(legacyDir, targetDir, { recursive: true });
+      }
+      if (!fs.existsSync(legacyCreds) || fs.existsSync(targetCreds)) {
+        fs.rmSync(legacyDir, { recursive: true, force: true });
+      }
+    } catch (err: any) {
+      this.logger.warn(`Não foi possível migrar sessão WhatsApp legada (${safeId}): ${err?.message}`);
+    }
+  }
+
   private getSessionDir(tenantId: string): string {
     const safeId = String(tenantId || '').replace(/[^a-zA-Z0-9_-]/g, '');
     if (!safeId) throw new BadRequestException('Tenant inválido para sessão WhatsApp.');
-    return path.resolve(process.cwd(), 'uploads', 'whatsapp-sessions', safeId);
+    this.migrateLegacySessionDir(safeId);
+    return path.join(this.getSessionsBaseDir(), safeId);
   }
 
   private getOrCreateRuntime(tenantId: string): TenantWhatsappRuntime {
@@ -174,7 +204,23 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async restorePersistedSessions() {
-    const baseDir = path.resolve(process.cwd(), 'uploads', 'whatsapp-sessions');
+    const legacyBaseDir = this.getLegacySessionsBaseDir();
+    if (fs.existsSync(legacyBaseDir)) {
+      try {
+        const legacyEntries = fs.readdirSync(legacyBaseDir, { withFileTypes: true });
+        for (const entry of legacyEntries) {
+          if (!entry.isDirectory()) continue;
+          const safeId = String(entry.name || '').replace(/[^a-zA-Z0-9_-]/g, '');
+          if (safeId && safeId === entry.name) {
+            this.migrateLegacySessionDir(safeId);
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Falha ao verificar sessões WhatsApp legadas: ${err?.message}`);
+      }
+    }
+
+    const baseDir = this.getSessionsBaseDir();
     if (!fs.existsSync(baseDir)) return;
 
     const entries = fs.readdirSync(baseDir, { withFileTypes: true });
@@ -379,15 +425,22 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
         sock.ev.on('creds.update', saveCreds);
 
         sock.ev.on('connection.update', async (update: any) => {
+          // Eventos tardios de um socket substituído/desconectado não podem iniciar outra sessão.
+          if (rt.socket !== sock) return;
           const { connection, lastDisconnect, qr } = update;
 
           if (qr) {
             if (!allowNewQr && rt.reconnectAttempts > 2) {
               // Evita ficar gerando QR infinito em background sem ação do usuário
+              rt.socket = null;
               try {
                 sock.end(undefined);
               } catch {}
               rt.status = 'DISCONNECTED';
+              rt.lastError = 'Sessão precisa de novo QR Code. Conecte manualmente.';
+              await this.persistSessionState(tenantId, databaseUrl, {
+                status: 'DISCONNECTED', lastDisconnectedAt: new Date(), lastDisconnectReason: rt.lastError,
+              });
               return;
             }
             try {
@@ -469,23 +522,10 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
               rt.status = 'DISCONNECTED';
               rt.socket = null;
               rt.lastError = reasonMsg;
-
-              if (rt.reconnectAttempts < 5) {
-                rt.reconnectAttempts += 1;
-                const delayMs = Math.min(30_000, rt.reconnectAttempts * 4000);
-                this.logger.log(
-                  `Agendando reconexão WhatsApp para tenant ${tenantId} (tentativa ${rt.reconnectAttempts}/5 em ${delayMs}ms)`,
-                );
-                rt.reconnectTimer = setTimeout(() => {
-                  this.startBaileysSession(tenantId, databaseUrl, allowNewQr).catch(() => {});
-                }, delayMs);
-              } else {
-                await this.persistSessionState(tenantId, databaseUrl, {
-                  status: 'DISCONNECTED',
-                  lastDisconnectedAt: new Date(),
-                  lastDisconnectReason: `Limite de tentativas de reconexão atingido: ${reasonMsg}`,
-                });
-              }
+              await this.persistSessionState(tenantId, databaseUrl, {
+                status: 'DISCONNECTED', lastDisconnectedAt: new Date(), lastDisconnectReason: reasonMsg,
+              });
+              this.scheduleReconnect(rt, tenantId, databaseUrl);
             }
           }
         });
@@ -493,12 +533,24 @@ export class PetshopWhatsappService implements OnModuleInit, OnModuleDestroy {
         rt.status = 'DISCONNECTED';
         rt.lastError = err?.message || 'Erro ao inicializar cliente WhatsApp.';
         this.logger.error(`Falha ao iniciar sessão Baileys para tenant ${tenantId}: ${rt.lastError}`);
+        this.scheduleReconnect(rt, tenantId, databaseUrl);
       } finally {
         rt.connectingPromise = null;
       }
     })();
 
     return rt.connectingPromise;
+  }
+
+  private scheduleReconnect(rt: TenantWhatsappRuntime, tenantId: string, databaseUrl: string) {
+    if (rt.reconnectTimer) clearTimeout(rt.reconnectTimer);
+    rt.reconnectAttempts += 1;
+    const delayMs = Math.min(300_000, 4000 * 2 ** Math.min(rt.reconnectAttempts - 1, 7));
+    this.logger.log(`Agendando reconexão WhatsApp para tenant ${tenantId} em ${delayMs}ms (tentativa ${rt.reconnectAttempts})`);
+    rt.reconnectTimer = setTimeout(() => {
+      rt.reconnectTimer = null;
+      this.startBaileysSession(tenantId, databaseUrl, false).catch(() => {});
+    }, delayMs);
   }
 
   private async persistSessionState(

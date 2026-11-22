@@ -457,9 +457,11 @@ export type AppointmentServiceItem = {
     planNameSnapshot: string;
     expiresAt: string;
     status: string;
+    paymentStatus?: string;
   } | null;
   customerPackageItem?: {
     id: string;
+    unitValueSnapshot?: string | number | null;
     totalQuantity: number;
     usedQuantity: number;
     reservedQuantity: number;
@@ -580,10 +582,12 @@ export type PackageScheduledAppointment = {
   customStages?: (string | PetshopStageItem)[] | null;
   notes?: string | null;
   updatedAt: string;
+  pendingUpgradeTotal?: number;
+  pendingExtraTotal?: number;
   stageHistory?: StageHistoryEntry[] | null;
   professional?: { id: string; name: string } | null;
-  pet: { id: string; name: string };
-  services: Array<{ id: string; nameSnapshot: string; coverageStatus: string; customerPackageItemId?: string | null }>;
+  pet: { id: string; name: string; species?: string | null; size?: string | null; coatType?: string | null };
+  services: Array<{ id: string; serviceId?: string; nameSnapshot: string; priceSnapshot?: string | number; coverageStatus: string; customerPackageItemId?: string | null; customerPackageId?: string | null }>;
 };
 
 export type CustomerPetPackageGroup = {
@@ -700,6 +704,52 @@ export const coatLabels: Record<string, string> = {
   double: 'Pelagem Dupla / Densa',
 };
 
+export function normalizePetSizeKey(rawSize?: string | null): string {
+  if (!rawSize) return 'small';
+  const s = rawSize.toLowerCase().trim();
+  if (s.includes('mini')) return 'mini';
+  if (s.includes('pequeno') || s === 'small' || s === 'p') return 'small';
+  if (s.includes('médio') || s.includes('medio') || s === 'medium' || s === 'm') return 'medium';
+  if (s.includes('grande') || s === 'large' || s === 'g') return 'large';
+  if (s.includes('gigante') || s === 'giant' || s === 'gg') return 'giant';
+  return s;
+}
+
+export function formatPetSizeLabel(size?: string | null): string {
+  if (!size) return 'Não informado';
+  const s = normalizePetSizeKey(size);
+  const map: Record<string, string> = {
+    mini: 'Mini (< 5kg)',
+    small: 'Pequeno (5-10kg)',
+    medium: 'Médio (10-20kg)',
+    large: 'Grande (20-35kg)',
+    giant: 'Gigante (> 35kg)',
+  };
+  return map[s] || size;
+}
+
+/** Resolve o preço e duração efetivos de um serviço conforme espécie/porte/pelagem do pet. */
+export function resolveEffectivePetServicePrice(
+  svc: PetService,
+  pet?: { size?: string | null; coatType?: string | null } | null,
+): { price: number; duration: number; variantLabel?: string } {
+  if (!pet || !svc.pricingRules || svc.pricingRules.length === 0) {
+    return { price: Number(svc.price), duration: svc.durationMinutes };
+  }
+  const rules = svc.pricingRules;
+  const petSize = normalizePetSizeKey(pet.size);
+  const match1 = rules.find(r => r.size === petSize && r.coatType === pet.coatType);
+  if (match1) return { price: Number(match1.price), duration: match1.durationMinutes || svc.durationMinutes, variantLabel: match1.label || formatPetSizeLabel(petSize) };
+
+  const match2 = rules.find(r => r.size === petSize && (!r.coatType || r.coatType === 'all'));
+  if (match2) return { price: Number(match2.price), duration: match2.durationMinutes || svc.durationMinutes, variantLabel: match2.label || formatPetSizeLabel(petSize) };
+
+  const match3 = rules.find(r => (!r.size || r.size === 'all') && r.coatType === pet.coatType);
+  if (match3) return { price: Number(match3.price), duration: match3.durationMinutes || svc.durationMinutes, variantLabel: match3.label || coatLabels[pet.coatType || ''] || 'Pelagem específica' };
+
+  return { price: Number(svc.price), duration: svc.durationMinutes };
+}
+
 export const money = (value: string | number) => Number(value).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 export const dateTime = (value: string) => new Intl.DateTimeFormat('pt-BR', { dateStyle: 'short', timeStyle: 'short' }).format(new Date(value));
 
@@ -717,6 +767,9 @@ export const PACKAGE_EVENT_TYPE_LABELS: Record<string, { label: string; color: s
   RELEASE_RESERVATION: { label: 'Reserva Liberada', color: 'bg-slate-100 text-slate-700 border-slate-200' },
   REFUND: { label: 'Estorno de Sessão', color: 'bg-amber-50 text-amber-800 border-amber-200' },
   CANCEL: { label: 'Cancelamento', color: 'bg-rose-50 text-rose-700 border-rose-200' },
+  SERVICE_SWAP_OUT: { label: 'Troca (Saída)', color: 'bg-amber-50 text-amber-800 border-amber-200' },
+  SERVICE_SWAP_IN: { label: 'Troca (Entrada)', color: 'bg-indigo-50 text-indigo-800 border-indigo-200' },
+  VALUE_ADJUSTMENT: { label: 'Ajuste de Valor', color: 'bg-emerald-50 text-emerald-800 border-emerald-200' },
 };
 
 export function getPackageStatusMeta(contract: Pick<CustomerPetPackage, 'status' | 'paymentStatus' | 'expiresAt'>) {
@@ -746,7 +799,15 @@ export function extractStageOperatorsSummary(
   const byStage = new Map<string, { status: string; label: string; userName: string; at: string }>();
   const ignoredKeys = new Set(['scheduled', 'requested', 'cancelled', 'no_show']);
   for (const entry of stageHistory as StageHistoryEntry[]) {
-    if (!entry || entry.skipped || entry.kind === 'service_added' || entry.kind === 'prepayment' || entry.kind === 'additional_charge') {
+    if (
+      !entry ||
+      entry.skipped ||
+      entry.kind === 'service_added' ||
+      entry.kind === 'service_swapped' ||
+      entry.kind === 'taxi_added' ||
+      entry.kind === 'prepayment' ||
+      entry.kind === 'additional_charge'
+    ) {
       continue;
     }
     const responsibleName = entry.operatorName || entry.userName;
@@ -774,6 +835,9 @@ export function getHistoryEntryBadge(entry: StageHistoryEntry): { label: string;
   if (entry.kind === 'stage_assigned') {
     return { label: 'Responsável', cls: 'bg-teal-50 border-teal-200 text-teal-800' };
   }
+  if (entry.kind === 'service_swapped') {
+    return { label: 'Troca de Serviço', cls: 'bg-indigo-50 border-indigo-200 text-indigo-800' };
+  }
   if (entry.kind === 'service_added') {
     return { label: 'Adicionado', cls: 'bg-sky-50 border-sky-200 text-sky-800' };
   }
@@ -796,4 +860,55 @@ export function getHistoryEntryBadge(entry: StageHistoryEntry): { label: string;
     return { label: 'Cancelado', cls: 'bg-rose-50 border-rose-200 text-rose-800' };
   }
   return { label: 'Concluída', cls: 'bg-teal-50 border-teal-200 text-teal-800' };
+}
+
+export const PACKAGE_UPGRADE_SERVICE_ID = 'petshop-package-upgrade-fee';
+
+export function formatSwapText(text?: string | null): string {
+  if (!text) return '';
+  return String(text).replace(/\s*(?:→|->)\s*/g, ' por ');
+}
+
+export function isPackageSwapDiffService(service?: {
+  serviceId?: string | null;
+  nameSnapshot?: string | null;
+} | null): boolean {
+  if (!service) return false;
+  if (service.serviceId === PACKAGE_UPGRADE_SERVICE_ID) return true;
+  const name = String(service.nameSnapshot || '').trim();
+  return name.startsWith('Diferença:') || name.startsWith('Diferença (') || name.startsWith('Diferença da troca');
+}
+
+export function summarizeAppointmentServices<
+  T extends {
+    id: string;
+    serviceId?: string | null;
+    nameSnapshot: string;
+    priceSnapshot?: string | number | null;
+    comboParentId?: string | null;
+  },
+>(services?: T[] | null, stageHistory?: StageHistoryEntry[] | null) {
+  const topLevel = (services || []).filter(s => !s.comboParentId);
+  const diffServices = topLevel.filter(s => isPackageSwapDiffService(s));
+  const mainServices = topLevel.filter(s => !isPackageSwapDiffService(s));
+  const displayServices = mainServices.length > 0 ? mainServices : topLevel;
+  const swapEntries = Array.isArray(stageHistory)
+    ? stageHistory.filter(h => h?.kind === 'service_swapped')
+    : [];
+  const hasServiceSwap = swapEntries.length > 0 || diffServices.length > 0;
+  const latestSwap = swapEntries.length > 0 ? swapEntries[swapEntries.length - 1] : null;
+  const swapLabel = latestSwap?.label
+    ? formatSwapText(latestSwap.label)
+    : diffServices[0]?.nameSnapshot
+      ? formatSwapText(diffServices[0].nameSnapshot)
+      : '';
+  const diffTotal = diffServices.reduce((sum, s) => sum + Math.max(0, Number(s.priceSnapshot || 0)), 0);
+
+  return {
+    displayServices,
+    diffServices,
+    hasServiceSwap,
+    swapLabel,
+    diffTotal: Math.round(diffTotal * 100) / 100,
+  };
 }

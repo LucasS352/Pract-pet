@@ -80,6 +80,11 @@ export class PurchaseOrdersService {
 
   async updateStatus(id: string, status: string) {
     const prisma = await this.getPrisma();
+    const current = await prisma.purchaseOrder.findUnique({ where: { id }, select: { status: true } });
+    if (!current) throw new NotFoundException('Pedido de compra não encontrado.');
+    if (current.status === 'COMPLETED') {
+      throw new BadRequestException('Não é possível alterar o status de um pedido já recebido.');
+    }
     return prisma.purchaseOrder.update({
       where: { id },
       data: { status },
@@ -96,8 +101,19 @@ export class PurchaseOrdersService {
 
     if (!order) throw new NotFoundException('Pedido de compra não encontrado.');
     if (order.status === 'COMPLETED') throw new BadRequestException('Este pedido já foi recebido.');
+    if (order.status === 'CANCELLED') throw new BadRequestException('Não é possível receber um pedido cancelado.');
+
+    const tenantId = this.tenantContext.get().tenantId;
 
     const result = await prisma.$transaction(async (tx) => {
+      const claim = await tx.purchaseOrder.updateMany({
+        where: { id, status: { notIn: ['COMPLETED', 'CANCELLED'] } },
+        data: { status: 'COMPLETED' },
+      });
+      if (claim.count === 0) {
+        throw new BadRequestException('Este pedido já foi recebido ou cancelado.');
+      }
+
       let totalReal = new Prisma.Decimal(0);
       const updatedProductIds: string[] = [];
 
@@ -161,10 +177,7 @@ export class PurchaseOrdersService {
         }
       }
 
-      // Invalidate the cache because the stock was updated
-      this.productsService.invalidateCache(this.tenantContext.get().tenantId);
-
-      // Atualizar o pedido para COMPLETED e setar o total real
+      // Atualizar o pedido com a data de recebimento e o total real
       const updatedOrder = await tx.purchaseOrder.update({
         where: { id: order.id },
         data: {
@@ -177,8 +190,10 @@ export class PurchaseOrdersService {
       return { updatedOrder, updatedProductIds };
     });
 
+    this.productsService.invalidateCache(tenantId);
+
     if (result.updatedProductIds.length > 0) {
-      this.integrationsService.syncProductStock(this.tenantContext.get().tenantId, [...new Set(result.updatedProductIds)]).catch(e => console.error(e));
+      this.integrationsService.syncProductStock(tenantId, [...new Set(result.updatedProductIds)]).catch(e => console.error(e));
     }
 
     return result.updatedOrder;

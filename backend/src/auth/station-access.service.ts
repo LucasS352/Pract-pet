@@ -9,12 +9,33 @@ import { pinVersion } from './operator-session';
 @Injectable()
 export class StationAccessService {
   private readonly petshopOnlyOperatorTenants = new Map<string, number>();
+  private readonly shopUsers = new Map<string, { expiresAt: number; user: { id: string; tenantId: string; email: string; role: string; groupId: string | null; active: boolean; tenant: { status: string } } | null }>();
   constructor(private readonly heart: HeartPrismaService, private readonly jwt: JwtService,
     private readonly manager: TenantConnectionManager) {}
 
   signWaiterSession(tenantId: string, operator: { id: string; pin: string }) {
     return this.jwt.sign({ type: 'op', opId: operator.id, tenantId, context: 'waiter',
       pinVersion: pinVersion(operator.pin, process.env.JWT_SECRET!), persistent: true });
+  }
+
+  async validateShopUser(userId: string, tenantId: string) {
+    if (!userId || !tenantId) throw new UnauthorizedException('Sessão inválida. Entre novamente.');
+    const cacheKey = `${tenantId}:${userId}`;
+    const cached = this.shopUsers.get(cacheKey);
+    let user = cached && cached.expiresAt > Date.now() ? cached.user : undefined;
+    if (user === undefined) {
+      user = await this.heart.user.findUnique({
+        where: { id: userId },
+        select: { id: true, tenantId: true, email: true, role: true, groupId: true, active: true,
+          tenant: { select: { status: true } } },
+      });
+      if (this.shopUsers.size > 5000) this.shopUsers.clear();
+      this.shopUsers.set(cacheKey, { expiresAt: Date.now() + 10_000, user });
+    }
+    if (!user?.active || user.tenantId !== tenantId || (user.tenant.status !== 'active' && user.role !== 'superadmin')) {
+      throw new UnauthorizedException('Usuário desativado ou loja indisponível. Entre novamente.');
+    }
+    return user;
   }
 
   async validateWaiterSession(payload: any, tenantId: string) {

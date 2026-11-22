@@ -250,6 +250,17 @@ export default function SysInitPage() {
   const [integrationCreds, setIntegrationCreds] = useState<{clientId: string, clientSecret: string, merchantId: string, allowedCategories?: string[], priceMarkup?: number, syncStock?: boolean}>({ clientId: '', clientSecret: '', merchantId: '', allowedCategories: [], priceMarkup: 0, syncStock: false });
   const [tenantCategories, setTenantCategories] = useState<any[]>([]);
   const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoPreviewUrl, setLogoPreviewUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!logoFile) {
+      setLogoPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(logoFile);
+    setLogoPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [logoFile]);
   const [modulos, setModulos] = useState<any>({});
   const [editLoading, setEditLoading] = useState(false);
   const [syncLoading, setSyncLoading] = useState(false);
@@ -1987,8 +1998,8 @@ export default function SysInitPage() {
                       <label className="text-xs text-zinc-400 uppercase tracking-wider mb-2 block">Logotipo (White Label)</label>
                       <div className="flex items-center gap-4">
                         <div className="w-20 h-20 bg-zinc-950 border border-zinc-800 rounded-2xl flex items-center justify-center overflow-hidden">
-                          {logoFile ? (
-                            <img src={URL.createObjectURL(logoFile)} alt="Preview" className="w-full h-full object-cover" />
+                          {logoPreviewUrl ? (
+                            <img src={logoPreviewUrl} alt="Preview" className="w-full h-full object-cover" />
                           ) : editingTenant.logoUrl ? (
                             <img src={getFullUrl(editingTenant.logoUrl)} alt="Logo" className="w-full h-full object-contain p-1" />
                           ) : (

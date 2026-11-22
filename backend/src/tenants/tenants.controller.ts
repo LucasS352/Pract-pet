@@ -5,8 +5,8 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { Response } from 'express';
-import { createReadStream, existsSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { createReadStream, existsSync, lstatSync, mkdirSync } from 'fs';
+import { join, resolve, sep } from 'path';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TenantsService } from './tenants.service';
 import { ProvisionTenantDto } from './provision-tenant.dto';
@@ -66,7 +66,7 @@ export class TenantsController {
   @UseGuards(JwtAuthGuard)
   @Get('me')
   getMe(@Request() req: any) {
-    return this.tenantsService.findById(req.user.tenantId);
+    return this.tenantsService.findById(req.user.tenantId, req.user.role);
   }
 
   /**
@@ -87,7 +87,7 @@ export class TenantsController {
     const pin = req.headers['x-setup-pin'] as string;
     const valid = await this.tenantsService.validatePin(pin);
     if (!valid) throw new UnauthorizedException('PIN inválido.');
-    return this.tenantsService.updateTenant(id, body);
+    return this.tenantsService.updateTenantPlatform(id, body);
   }
 
   /**
@@ -97,6 +97,9 @@ export class TenantsController {
   @Patch(':id')
   updateTenant(@Request() req: any, @Param('id') id: string, @Body() body: any) {
     this.assertTenantAdmin(req.user, id);
+    if (req.user.role === 'superadmin') {
+      return this.tenantsService.updateTenantPlatform(id, body);
+    }
     return this.tenantsService.updateTenant(id, body);
   }
 
@@ -165,9 +168,14 @@ export class TenantsController {
       // Fallback para arquivo físico em caso de erro (ex: UUID inválido)
     }
 
-    // Fallback: Busca arquivo físico (Logos antigos)
-    const filePath = join(process.cwd(), 'uploads/logos', filename);
-    if (!existsSync(filePath)) {
+    // Fallback: Busca arquivo físico (Logos antigos) com prevenção contra path traversal
+    if (!/^[a-zA-Z0-9._-]+$/.test(filename) || filename.includes('..')) {
+      res.status(404).send('Logo not found');
+      return;
+    }
+    const baseDir = resolve(process.cwd(), 'uploads', 'logos');
+    const filePath = resolve(baseDir, filename);
+    if (!filePath.startsWith(baseDir + sep) || !existsSync(filePath) || !lstatSync(filePath).isFile()) {
       res.status(404).send('Logo not found');
       return;
     }
@@ -271,7 +279,9 @@ export class TenantsController {
   @UseGuards(JwtAuthGuard)
   @Delete(':id')
   async deleteTenant(@Request() req: any, @Param('id') id: string) {
-    this.assertTenantAdmin(req.user, id);
+    if (req.user.role !== 'superadmin') {
+      throw new ForbiddenException('Somente superadmins podem excluir empresas SaaS.');
+    }
     return this.tenantsService.deleteTenant(id);
   }
 
@@ -380,7 +390,10 @@ export class TenantsController {
   }
 
   @Post('trigger-sync')
-  async triggerSync() {
+  async triggerSync(@Request() req: any) {
+    const pin = req.headers['x-setup-pin'] as string;
+    const valid = await this.tenantsService.validatePin(pin);
+    if (!valid) throw new UnauthorizedException('PIN inválido.');
     return this.tenantsService.syncMasterCatalogFromTenants();
   }
 }

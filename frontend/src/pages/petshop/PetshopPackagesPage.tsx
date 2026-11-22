@@ -1,4 +1,7 @@
 import { PackagePaymentFields, type PackagePaymentRow, packagePaymentLabels, paymentAmount, packagePaymentsValid } from './PackagePaymentFields';
+import { PaymentModal } from '@/components/PaymentModal';
+import { ExchangePackageServiceModal, type ExchangePackageServiceTarget } from './ExchangePackageServiceModal';
+import { usePetshopContext } from '@/layouts/PetshopLayout';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
@@ -12,6 +15,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Clock,
   Copy,
   CreditCard,
@@ -39,6 +43,7 @@ import {
   Wallet,
   X,
   XCircle,
+  Zap,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '@/lib/api';
@@ -56,11 +61,13 @@ import type {
 import {
   dateTime,
   extractStageOperatorsSummary,
+  formatSwapText,
   getHistoryEntryBadge,
   getPackageStatusMeta,
   getStageLabel,
   money,
   PACKAGE_EVENT_TYPE_LABELS,
+  summarizeAppointmentServices,
 } from './types';
 import {
   EmptyState,
@@ -117,6 +124,7 @@ export default function PetshopPackagesPage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const { operator } = useShift();
+  const { tenant } = usePetshopContext();
 
   const [activeTab, setActiveTab] = useState<ActiveTab>('contracts');
   const [loading, setLoading] = useState(true);
@@ -281,10 +289,20 @@ export default function PetshopPackagesPage() {
   const [cancelReason, setCancelReason] = useState('');
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [submittingCancel, setSubmittingCancel] = useState(false);
+  const [exchangeTarget, setExchangeTarget] = useState<ExchangePackageServiceTarget | null>(null);
+  const [collapsedSessionHistories, setCollapsedSessionHistories] = useState<Record<string, boolean>>({});
+  const [showAllLedgerEvents, setShowAllLedgerEvents] = useState(false);
+  const [pendingPayment, setPendingPayment] = useState<{
+    appointmentId: string;
+    customerName: string;
+    total: number;
+  } | null>(null);
 
   useEffect(() => {
     const contractId = selectedContract?.id;
     if (!contractId) return;
+    setShowAllLedgerEvents(false);
+    setCollapsedSessionHistories({});
     let active = true;
     setLoadingContractDetails(true);
     setContractDetailsError(false);
@@ -3941,7 +3959,8 @@ export default function PetshopPackagesPage() {
          ===================================================================== */}
       {selectedContract && (
         <Modal
-          suspended={Boolean(receiptTarget)}
+          suspended={Boolean(receiptTarget || exchangeTarget || pendingPayment)}
+          maxWidth="sm:max-w-3xl"
           title={
             selectedGroupContracts.length > 1
               ? `Pacote Família (${selectedGroupContracts.length} pets): ${selectedContract.planNameSnapshot}`
@@ -4047,56 +4066,59 @@ export default function PetshopPackagesPage() {
                   {(() => {
                     const modalStatusMeta = getPackageStatusMeta(selectedContract);
                     return (
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-3.5 text-xs">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="font-bold text-sm text-[var(--pc-text)]">
-                              {selectedContract.customer?.name} ·{' '}
-                              {selectedContract.pet?.name ||
-                                (selectedContract.packageGroup?.petNames?.length
-                                  ? `Compartilhado (${selectedContract.packageGroup.petNames.join(', ')})`
-                                  : 'Compartilhado entre pets')}
+                      <div className="flex flex-col gap-3 rounded-2xl border border-zinc-200/90 bg-zinc-50/75 p-4 text-xs shadow-2xs sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700">
+                            <PawPrint size={18} aria-hidden="true" />
+                          </span>
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-bold text-zinc-900">
+                                {selectedContract.customer?.name} ·{' '}
+                                {selectedContract.pet?.name ||
+                                  (selectedContract.packageGroup?.petNames?.length
+                                    ? `Compartilhado (${selectedContract.packageGroup.petNames.join(', ')})`
+                                    : 'Compartilhado entre pets')}
+                              </p>
+                              <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${modalStatusMeta.cls}`}>
+                                {modalStatusMeta.label}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-zinc-600">
+                              Contratado em {new Date(selectedContract.startDate).toLocaleDateString('pt-BR')} · Vencimento:{' '}
+                              {new Date(selectedContract.expiresAt).toLocaleDateString('pt-BR')}
+                              {selectedContract.createdByOperatorName ? ` · Por ${selectedContract.createdByOperatorName}` : ''}
                             </p>
-                            <span className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${modalStatusMeta.cls}`}>
-                              {modalStatusMeta.label}
-                            </span>
                           </div>
-                          <p className="text-[var(--pc-text-secondary)] mt-0.5">
-                            Contratado em {new Date(selectedContract.startDate).toLocaleDateString('pt-BR')} ·
-                            Vencimento: {new Date(selectedContract.expiresAt).toLocaleDateString('pt-BR')}
-                            {selectedContract.createdByOperatorName ? ` · Por ${selectedContract.createdByOperatorName}` : ''}
-                          </p>
                         </div>
-                        <div className="text-right">
-                      <p className="text-sm font-bold text-[var(--pc-action)]">
-                        {money(selectedContract.finalPrice)}
-                      </p>
-                      {contractTaxiFee > 0 ? (
-                        <p className="mt-0.5 text-[11px] font-semibold text-amber-800">
-                          Pacote {money(contractPackageBase)} + Frete {money(contractTaxiFee)}
-                          {contractDiscount > 0 ? ` − Desc. ${money(contractDiscount)}` : ''}
-                        </p>
-                      ) : isGroupModal && groupTaxiFeeTotal > 0 ? (
-                        <p className="mt-0.5 text-[11px] text-[var(--pc-text-secondary)]">
-                          Só pacote · Frete ({money(groupTaxiFeeTotal)}) em {groupTaxiHolder?.pet?.name || 'grupo'}
-                        </p>
-                      ) : contractDiscount > 0 ? (
-                        <p className="mt-0.5 text-[11px] text-[var(--pc-text-secondary)]">
-                          Pacote {money(contractPackageBase)} − Desc. {money(contractDiscount)}
-                        </p>
-                      ) : null}
-                      {(selectedContract.paymentStatus === 'pending' || selectedGroupContracts.some(member => member.paymentStatus === 'pending')) && (
-                        <button
-                          type="button"
-                          onClick={() => openReceiptPayment(selectedContract, selectedGroupContracts.length > 1 ? selectedGroupContracts : [selectedContract])}
-                          className="mt-1 inline-flex items-center gap-1 rounded bg-emerald-600 px-2 py-1 text-[11px] font-semibold text-white hover:bg-emerald-700"
-                        >
-                          <CheckCircle2 size={12} />{' '}
-                          {isGroupModal
-                            ? 'Confirmar Recebimento (Grupo)'
-                            : 'Confirmar Recebimento'}
-                        </button>
-                      )}
+                        <div className="shrink-0 border-t border-zinc-200/80 pt-2 text-left sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0 sm:text-right">
+                          <p className="text-lg font-extrabold text-emerald-700 tabular-nums">
+                            {money(selectedContract.finalPrice)}
+                          </p>
+                          {contractTaxiFee > 0 ? (
+                            <p className="mt-0.5 text-[11px] font-semibold text-amber-800">
+                              Pacote {money(contractPackageBase)} + Frete {money(contractTaxiFee)}
+                              {contractDiscount > 0 ? ` − Desc. ${money(contractDiscount)}` : ''}
+                            </p>
+                          ) : isGroupModal && groupTaxiFeeTotal > 0 ? (
+                            <p className="mt-0.5 text-[11px] text-zinc-500">
+                              Só pacote · Frete ({money(groupTaxiFeeTotal)}) em {groupTaxiHolder?.pet?.name || 'grupo'}
+                            </p>
+                          ) : contractDiscount > 0 ? (
+                            <p className="mt-0.5 text-[11px] text-zinc-500">
+                              Pacote {money(contractPackageBase)} − Desc. {money(contractDiscount)}
+                            </p>
+                          ) : null}
+                          {(selectedContract.paymentStatus === 'pending' || selectedGroupContracts.some(member => member.paymentStatus === 'pending')) && (
+                            <button
+                              type="button"
+                              onClick={() => openReceiptPayment(selectedContract, selectedGroupContracts.length > 1 ? selectedGroupContracts : [selectedContract])}
+                              className="mt-1.5 inline-flex items-center gap-1 rounded-lg bg-emerald-600 px-2.5 py-1.5 text-[11px] font-semibold text-white hover:bg-emerald-700 cursor-pointer"
+                            >
+                              <CheckCircle2 size={12} />{' '}
+                              {isGroupModal ? 'Confirmar Recebimento (Grupo)' : 'Confirmar Recebimento'}
+                            </button>
+                          )}
                         </div>
                       </div>
                     );
@@ -4152,51 +4174,147 @@ export default function PetshopPackagesPage() {
             })()}
 
             {selectedContract.receipt && (
-              <section className="rounded-xl border border-emerald-200 bg-emerald-50 p-3" aria-label="Recebimento do contrato">
-                <h4 className="text-sm font-semibold text-emerald-950">Recebido em {new Date(selectedContract.receipt.receivedAt).toLocaleString('pt-BR')}</h4>
-                {Number(selectedContract.receipt.discountAmount || 0) > 0 && (
-                  <p className="mt-1 flex justify-between gap-2 text-sm text-amber-900"><span>Desconto autorizado{selectedContract.receipt.discountAuthorizedBy?.name ? ` por ${selectedContract.receipt.discountAuthorizedBy.name}` : ''}</span><strong>-{money(selectedContract.receipt.discountAmount || 0)}</strong></p>
-                )}
-                {selectedContract.receipt.payments.map((payment, index) => <p key={index} className="mt-1 flex justify-between gap-2 text-sm text-emerald-900"><span>{packagePaymentLabels[payment.method] || payment.method}</span><strong>{money(payment.amount)}</strong></p>)}
+              <section
+                className="flex flex-col gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/85 p-3.5 sm:flex-row sm:items-center sm:justify-between"
+                aria-label="Recebimento do contrato"
+              >
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-emerald-100 text-emerald-700">
+                    <CreditCard size={18} aria-hidden="true" />
+                  </span>
+                  <div className="min-w-0">
+                    <h4 className="text-sm font-bold text-emerald-950">
+                      Recebido em {new Date(selectedContract.receipt.receivedAt).toLocaleString('pt-BR')}
+                    </h4>
+                    <div className="mt-0.5 space-y-0.5 text-xs text-emerald-900">
+                      {selectedContract.receipt.payments.map((payment, index) => (
+                        <p key={index} className="flex items-center gap-1.5">
+                          <span>{packagePaymentLabels[payment.method] || payment.method}</span>
+                          {selectedContract.receipt!.payments.length > 1 && (
+                            <strong>· {money(payment.amount)}</strong>
+                          )}
+                        </p>
+                      ))}
+                      {Number(selectedContract.receipt.discountAmount || 0) > 0 && (
+                        <p className="text-amber-900">
+                          Desconto autorizado
+                          {selectedContract.receipt.discountAuthorizedBy?.name
+                            ? ` por ${selectedContract.receipt.discountAuthorizedBy.name}`
+                            : ''}:{' '}
+                          <strong>-{money(selectedContract.receipt.discountAmount || 0)}</strong>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                <div className="shrink-0 border-t border-emerald-200/80 pt-2 text-left sm:border-l sm:border-t-0 sm:pl-4 sm:pt-0 sm:text-right">
+                  <strong className="text-lg font-extrabold text-emerald-700 tabular-nums">
+                    {money(
+                      selectedContract.receipt.payments.reduce((sum, p) => sum + Number(p.amount || 0), 0) ||
+                        selectedContract.finalPrice,
+                    )}
+                  </strong>
+                </div>
               </section>
             )}
 
             {/* Itens de Saldo com Botão de Estorno de Sessão */}
             <div>
-              <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--pc-text-muted)]">
-                Saldo por Serviço e Ações de Estorno
+              <h4 className="mb-2.5 flex items-center gap-2 text-sm font-bold text-zinc-900">
+                <Layers size={16} className="text-teal-700" aria-hidden="true" />
+                <span>Saldo por serviço e ações de estorno</span>
               </h4>
-              <div className="space-y-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {selectedContract.items.map(item => (
                   <div
                     key={item.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--pc-border)] bg-white p-3"
+                    className="flex flex-col justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-white p-3.5 shadow-2xs"
                   >
-                    <div>
-                      <p className="text-sm font-semibold text-[var(--pc-text)]">
-                        {item.serviceNameSnapshot}
-                      </p>
-                      <p className="text-xs text-[var(--pc-text-secondary)]">
-                        Contratadas: <strong>{item.totalQuantity}</strong> · Realizadas:{' '}
-                        <strong>{item.usedQuantity}</strong> · Reservadas:{' '}
-                        <strong>{item.reservedQuantity}</strong> · Livres:{' '}
-                        <strong className="text-[var(--pc-action)]">{item.availableQuantity}</strong>
-                      </p>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-700">
+                          <Scissors size={15} aria-hidden="true" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-zinc-900 leading-snug break-words">
+                            {item.serviceNameSnapshot}
+                          </p>
+                          {item.totalQuantity === 0 && (
+                            <span className="mt-0.5 inline-block rounded-md border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
+                              Substituído
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      {(item.availableQuantity > 0 && selectedContract.status === 'active') ||
+                      (item.usedQuantity > 0 && selectedContract.status !== 'cancelled') ? (
+                        <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
+                          {item.availableQuantity > 0 && selectedContract.status === 'active' && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setExchangeTarget({
+                                  mode: 'credit',
+                                  contractId: selectedContract.id,
+                                  contractName: selectedContract.planNameSnapshot,
+                                  contractPaymentStatus: selectedContract.paymentStatus,
+                                  pet: selectedContract.pet,
+                                  oldServiceId: item.serviceId,
+                                  oldServiceName: item.serviceNameSnapshot,
+                                  availableQuantity: item.availableQuantity,
+                                  oldServicePrice: Number(item.unitValueSnapshot || 0),
+                                  packageUnitValue: Number(item.unitValueSnapshot || 0),
+                                })
+                              }
+                              className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100 cursor-pointer"
+                            >
+                              <RefreshCw size={12} aria-hidden="true" />
+                              Converter saldo
+                            </button>
+                          )}
+                          {item.usedQuantity > 0 && selectedContract.status !== 'cancelled' && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setRefundTargetItem(item);
+                                setRefundReason('');
+                                setRefundAppointmentId('');
+                              }}
+                              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
+                            >
+                              <RotateCcw size={12} aria-hidden="true" />
+                              Estornar 1
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
                     </div>
-                    {item.usedQuantity > 0 && selectedContract.status !== 'cancelled' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setRefundTargetItem(item);
-                          setRefundReason('');
-                          setRefundAppointmentId('');
-                        }}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-                      >
-                        <RotateCcw size={13} />
-                        Estornar 1 Sessão
-                      </button>
-                    )}
+                    <div className="grid grid-cols-4 divide-x divide-zinc-100 border-t border-zinc-100 pt-2.5 text-center">
+                      <div>
+                        <span className="block text-[11px] text-zinc-500">Contratadas</span>
+                        <strong className="mt-0.5 block text-sm font-extrabold text-zinc-900 tabular-nums">
+                          {item.totalQuantity}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="block text-[11px] text-zinc-500">Realizadas</span>
+                        <strong className="mt-0.5 block text-sm font-extrabold text-zinc-900 tabular-nums">
+                          {item.usedQuantity}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="block text-[11px] text-zinc-500">Reservadas</span>
+                        <strong className="mt-0.5 block text-sm font-extrabold text-zinc-900 tabular-nums">
+                          {item.reservedQuantity}
+                        </strong>
+                      </div>
+                      <div>
+                        <span className="block text-[11px] text-zinc-500">Livres</span>
+                        <strong className="mt-0.5 block text-sm font-extrabold text-emerald-700 tabular-nums">
+                          {item.availableQuantity}
+                        </strong>
+                      </div>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -4256,11 +4374,12 @@ export default function PetshopPackagesPage() {
 
             {/* Datas atuais das sessões vinculadas à agenda */}
             <section aria-label="Sessões do pacote agendadas">
-              <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--pc-text-muted)]">
-                Sessões na agenda
+              <h4 className="mb-2.5 flex items-center gap-2 text-sm font-bold text-zinc-900">
+                <Calendar size={16} className="text-teal-700" aria-hidden="true" />
+                <span>Sessões na agenda</span>
               </h4>
               {loadingContractDetails ? (
-                <p className="rounded-xl border border-[var(--pc-border)] p-3 text-xs text-[var(--pc-text-secondary)]">
+                <p className="rounded-xl border border-zinc-200 p-3 text-xs text-zinc-500">
                   Carregando datas das sessões...
                 </p>
               ) : contractDetailsError ? (
@@ -4268,11 +4387,14 @@ export default function PetshopPackagesPage() {
                   Não foi possível carregar as datas. Feche e abra o contrato para tentar novamente.
                 </p>
               ) : selectedContract.scheduledAppointments?.length ? (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   {selectedContract.scheduledAppointments.map((appointment, index) => {
                     const canReschedule = selectedContract.status === 'active' &&
                       ['scheduled', 'requested'].includes(appointment.status) &&
                       appointment.services.some(service => service.coverageStatus === 'reserved');
+                    const canExchangeSession = selectedContract.status === 'active' &&
+                      !['ready', 'delivered', 'cancelled', 'no_show'].includes(appointment.status) &&
+                      appointment.services.some(service => service.coverageStatus === 'reserved' && Boolean(service.serviceId));
                     const isEditing = editingAppointmentId === appointment.id;
                     const historyList = Array.isArray(appointment.stageHistory)
                       ? (appointment.stageHistory as StageHistoryEntry[])
@@ -4288,128 +4410,231 @@ export default function PetshopPackagesPage() {
                       if (Number.isNaN(d.getTime())) return '';
                       return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
                     })();
+                    const { displayServices, hasServiceSwap, swapLabel, diffTotal } = summarizeAppointmentServices(
+                      appointment.services,
+                      historyList,
+                    );
+                    const historyOpen = !collapsedSessionHistories[appointment.id];
+                    const sessionAccentCls = isRealized
+                      ? 'border-l-emerald-500'
+                      : !canReschedule
+                      ? 'border-l-teal-600'
+                      : 'border-l-sky-500';
 
                     return (
-                      <div key={appointment.id} className="rounded-xl border border-[var(--pc-border)] bg-white p-3 space-y-2.5">
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div className="min-w-0">
+                      <div
+                        key={appointment.id}
+                        className={`rounded-2xl border border-zinc-200/90 border-l-4 ${sessionAccentCls} bg-white p-4 shadow-2xs space-y-3`}
+                      >
+                        <div className="space-y-2">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <p className="text-sm font-bold text-zinc-900">
+                              Sessão {index + 1} · {displayServices.map(service => formatSwapText(service.nameSnapshot)).join(', ')}
+                              {selectedContract.isShared ? ` · ${appointment.pet.name}` : ''}
+                            </p>
+                            {hasServiceSwap && (
+                              <span
+                                title={swapLabel || 'Serviço trocado neste atendimento'}
+                                className="inline-flex items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-[10px] font-bold text-indigo-800"
+                              >
+                                <RefreshCw size={10} aria-hidden="true" />
+                                {diffTotal > 0 ? `Trocado · +${money(diffTotal)}` : 'Trocado'}
+                              </span>
+                            )}
+                            {isRealized ? (
+                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">
+                                Concluída
+                              </span>
+                            ) : canReschedule ? (
+                              <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[10px] font-bold text-sky-700">
+                                Agendada
+                              </span>
+                            ) : (
+                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-800">
+                                Em andamento
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="flex items-center gap-2 text-sm font-bold text-zinc-900 tabular-nums">
+                              <Calendar size={15} className="text-zinc-600 shrink-0" aria-hidden="true" />
+                              <span>{dateTime(appointment.startsAt)}</span>
+                            </p>
                             <div className="flex flex-wrap items-center gap-1.5">
-                              <p className="text-xs font-semibold text-[var(--pc-text-secondary)]">
-                                Sessão {index + 1} · {appointment.services.map(service => service.nameSnapshot).join(', ')}
-                                {selectedContract.isShared ? ` · ${appointment.pet.name}` : ''}
-                              </p>
-                              {isRealized ? (
-                                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-                                  Concluída
+                              {agendaDateYmd && (
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/petshop/agenda?date=${agendaDateYmd}`)}
+                                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:bg-zinc-100 cursor-pointer"
+                                >
+                                  <Calendar size={12} className="text-zinc-500" aria-hidden="true" />
+                                  <span>Ver na Agenda</span>
+                                  <ArrowRight size={12} aria-hidden="true" />
+                                </button>
+                              )}
+                              {canExchangeSession && !isEditing && appointment.services
+                                .filter(service => service.coverageStatus === 'reserved' && Boolean(service.serviceId))
+                                .map((reservedSvc, _sIdx, arr) => (
+                                  <button
+                                    key={reservedSvc.id}
+                                    type="button"
+                                    onClick={() => {
+                                      const pkgItem = selectedContract.items.find(
+                                        i => i.id === reservedSvc.customerPackageItemId || i.serviceId === reservedSvc.serviceId,
+                                      );
+                                      const existingUnpaidDiffTotal = Number(appointment.pendingUpgradeTotal || 0);
+                                      const otherPendingTotal = Math.max(
+                                        0,
+                                        Math.round((Number(appointment.pendingExtraTotal || 0) - existingUnpaidDiffTotal) * 100) / 100,
+                                      );
+                                      setExchangeTarget({
+                                        mode: 'session',
+                                        contractId: selectedContract.id,
+                                        contractName: selectedContract.planNameSnapshot,
+                                        contractPaymentStatus: selectedContract.paymentStatus,
+                                        appointmentId: appointment.id,
+                                        appointmentStatus: appointment.status,
+                                        pet: appointment.pet,
+                                        oldAppointmentServiceId: reservedSvc.id,
+                                        oldServiceId: reservedSvc.serviceId!,
+                                        oldServiceName: reservedSvc.nameSnapshot,
+                                        oldServicePrice: Number(reservedSvc.priceSnapshot || 0),
+                                        packageUnitValue: Number(pkgItem?.unitValueSnapshot || 0),
+                                        existingUnpaidDiffTotal,
+                                        otherPendingTotal,
+                                        currentProfessionalId: appointment.professional?.id || null,
+                                      });
+                                    }}
+                                    className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-semibold text-sky-800 hover:bg-sky-100 cursor-pointer"
+                                    aria-label={`Trocar serviço ${reservedSvc.nameSnapshot} da sessão ${index + 1}`}
+                                  >
+                                    <RefreshCw size={12} aria-hidden="true" />
+                                    {arr.length > 1 ? `Trocar: ${reservedSvc.nameSnapshot}` : 'Trocar serviço'}
+                                  </button>
+                                ))}
+                              {canReschedule && !isEditing && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingAppointmentId(appointment.id);
+                                    setRescheduleStartsAt(localDateTimeInput(appointment.startsAt));
+                                  }}
+                                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100 cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
+                                  aria-label={`Alterar data da sessão ${index + 1}`}
+                                >
+                                  <Pencil size={12} aria-hidden="true" /> Alterar data
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
+                          {(appointment.professional?.name || stageExecutors.length > 0 || latestReschedule) && (
+                            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                              {stageExecutors.map(ex => (
+                                <span
+                                  key={ex.status}
+                                  className="inline-flex items-center gap-1 rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-900"
+                                >
+                                  <span>{ex.label}:</span>
+                                  <strong>{ex.userName}</strong>
                                 </span>
-                              ) : canReschedule ? (
-                                <span className="rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700">
-                                  Agendada
+                              ))}
+                              {appointment.professional?.name && (
+                                <span className="inline-flex items-center gap-1 rounded-md border border-zinc-200 bg-zinc-50 px-2 py-0.5 text-[11px] text-zinc-700">
+                                  Profissional: <strong>{appointment.professional.name}</strong>
                                 </span>
-                              ) : (
-                                <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-800">
-                                  Em andamento
+                              )}
+                              {latestReschedule && (
+                                <span className="text-[11px] text-zinc-500">
+                                  Reagendado em {dateTime(latestReschedule.at)}
+                                  {latestReschedule.rescheduledFrom
+                                    ? ` · anterior: ${dateTime(latestReschedule.rescheduledFrom)}`
+                                    : ''}
                                 </span>
                               )}
                             </div>
-                            <p className="mt-1 flex items-center gap-1.5 text-sm font-bold text-[var(--pc-text)]">
-                              <Calendar size={15} aria-hidden="true" /> {dateTime(appointment.startsAt)}
-                            </p>
-                            {appointment.professional?.name && (
-                              <p className="mt-0.5 text-[11px] text-[var(--pc-text-secondary)]">
-                                Profissional responsável: <strong className="text-[var(--pc-text)]">{appointment.professional.name}</strong>
-                              </p>
-                            )}
-                            {stageExecutors.length > 0 && (
-                              <div className="mt-1.5 flex flex-wrap gap-1">
-                                {stageExecutors.map(ex => (
-                                  <span
-                                    key={ex.status}
-                                    className="inline-flex items-center gap-1 rounded-md border border-teal-200 bg-teal-50/50 px-1.5 py-0.5 text-[10px] text-teal-900"
-                                  >
-                                    <span className="text-zinc-500">{ex.label}:</span>
-                                    <strong>{ex.userName}</strong>
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-                            {latestReschedule && (
-                              <p className="mt-1 text-[11px] text-[var(--pc-text-secondary)]">
-                                Reagendado em {dateTime(latestReschedule.at)}
-                                {latestReschedule.rescheduledFrom
-                                  ? ` · data anterior: ${dateTime(latestReschedule.rescheduledFrom)}`
-                                  : ''}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap items-center gap-1.5">
-                            {agendaDateYmd && (
-                              <button
-                                type="button"
-                                onClick={() => navigate(`/petshop/agenda?date=${agendaDateYmd}`)}
-                                className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-[11px] font-semibold text-zinc-700 hover:bg-zinc-100 cursor-pointer"
-                              >
-                                <span>Ver na Agenda</span>
-                                <ArrowRight size={12} />
-                              </button>
-                            )}
-                            {canReschedule && !isEditing && (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setEditingAppointmentId(appointment.id);
-                                  setRescheduleStartsAt(localDateTimeInput(appointment.startsAt));
-                                }}
-                                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-3 py-1.5 text-xs font-semibold text-teal-800 hover:bg-teal-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600"
-                                aria-label={`Alterar data da sessão ${index + 1}`}
-                              >
-                                <Pencil size={13} aria-hidden="true" /> Alterar data
-                              </button>
-                            )}
-                          </div>
+                          )}
                         </div>
 
                         {historyList.length > 0 && (
-                          <div className="rounded-lg border border-zinc-200/80 bg-zinc-50/70 p-2.5 space-y-1.5">
-                            <p className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-zinc-600">
-                              <History size={12} className="text-teal-700" />
-                              Histórico de alterações e execução ({historyList.length})
-                            </p>
-                            <div className="space-y-1 max-h-40 overflow-y-auto pr-1">
-                              {historyList.map((h, hIdx) => {
-                                const stageLabel = h.label || getStageLabel(h.status, appointment.customStages) || h.status;
-                                const badge = getHistoryEntryBadge(h);
-                                return (
-                                  <div
-                                    key={hIdx}
-                                    className={`flex items-start justify-between gap-2 rounded border px-2 py-1 text-[11px] ${
-                                      h.skipped
-                                        ? 'border-amber-200 bg-amber-50/70 text-amber-950'
-                                        : 'border-zinc-200 bg-white text-zinc-800'
-                                    }`}
-                                  >
-                                    <div className="min-w-0">
-                                      <div className="flex flex-wrap items-center gap-1.5">
-                                        <strong className="font-semibold">{stageLabel}</strong>
-                                        <span className={`rounded border px-1.5 py-0.2 text-[9px] font-semibold ${badge.cls}`}>
-                                          {badge.label}
-                                        </span>
-                                        {h.userName && (
-                                          <span className="text-zinc-500">
-                                            por <strong className="text-zinc-700">{h.userName}</strong>
+                          <div className="rounded-xl border border-zinc-200/90 bg-zinc-50/75 overflow-hidden">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCollapsedSessionHistories(curr => ({
+                                  ...curr,
+                                  [appointment.id]: !curr[appointment.id],
+                                }))
+                              }
+                              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left hover:bg-zinc-100/70 transition cursor-pointer"
+                            >
+                              <span className="flex items-center gap-1.5 text-xs font-bold text-zinc-700">
+                                <History size={13} className="text-teal-700" aria-hidden="true" />
+                                Histórico de alterações e execução ({historyList.length})
+                              </span>
+                              {historyOpen ? (
+                                <ChevronUp size={15} className="text-zinc-500" aria-hidden="true" />
+                              ) : (
+                                <ChevronDown size={15} className="text-zinc-500" aria-hidden="true" />
+                              )}
+                            </button>
+                            {historyOpen && (
+                              <div className="border-t border-zinc-200/80 px-3.5 py-3">
+                                <ol className="relative ml-1.5 border-l border-zinc-200 pl-4 space-y-3">
+                                  {historyList.map((h, hIdx) => {
+                                    const stageLabel = formatSwapText(
+                                      h.label || getStageLabel(h.status, appointment.customStages) || h.status,
+                                    );
+                                    const badge = getHistoryEntryBadge(h);
+                                    const dotCls = h.skipped
+                                      ? 'bg-amber-500'
+                                      : h.kind === 'service_swapped'
+                                      ? 'bg-indigo-600'
+                                      : h.kind === 'service_added'
+                                      ? 'bg-sky-600'
+                                      : 'bg-emerald-600';
+                                    return (
+                                      <li key={hIdx} className="relative text-xs">
+                                        <span
+                                          aria-hidden="true"
+                                          className={`absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${dotCls}`}
+                                        />
+                                        <div className="flex items-start justify-between gap-3">
+                                          <div className="min-w-0 flex-1 space-y-0.5">
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                              {h.kind === 'service_swapped' && (
+                                                <RefreshCw size={12} className="shrink-0 text-indigo-700" aria-hidden="true" />
+                                              )}
+                                              <strong className="font-bold text-zinc-900">{stageLabel}</strong>
+                                            </div>
+                                            <div className="flex flex-wrap items-center gap-1.5">
+                                              <span className={`rounded border px-1.5 py-0.2 text-[10px] font-semibold ${badge.cls}`}>
+                                                {badge.label}
+                                              </span>
+                                              {h.userName && (
+                                                <span className="text-[11px] text-zinc-600">
+                                                  por <strong className="text-zinc-800">{h.userName}</strong>
+                                                </span>
+                                              )}
+                                            </div>
+                                            {h.notes && (
+                                              <p className="text-[11px] text-zinc-500 italic">"{formatSwapText(h.notes)}"</p>
+                                            )}
+                                            {h.reason && (
+                                              <p className="text-[11px] text-amber-800">{formatSwapText(h.reason)}</p>
+                                            )}
+                                          </div>
+                                          <span className="text-[11px] text-zinc-400 tabular-nums shrink-0 pt-0.5">
+                                            {dateTime(h.at)}
                                           </span>
-                                        )}
-                                      </div>
-                                      {h.notes && <p className="text-[10px] text-zinc-500 italic mt-0.5">"{h.notes}"</p>}
-                                      {h.reason && <p className="text-[10px] text-amber-800 mt-0.5">{h.reason}</p>}
-                                    </div>
-                                    <span className="text-[10px] text-zinc-400 tabular-nums shrink-0">
-                                      {dateTime(h.at)}
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                                        </div>
+                                      </li>
+                                    );
+                                  })}
+                                </ol>
+                              </div>
+                            )}
                           </div>
                         )}
                         {isEditing && (
@@ -4449,57 +4674,98 @@ export default function PetshopPackagesPage() {
 
             {/* Histórico de Movimentações (Ledger Imutável) */}
             <div>
-              <h4 className="mb-2 text-xs font-bold uppercase tracking-wider text-[var(--pc-text-muted)]">
-                Histórico Auditável de Movimentações
-              </h4>
-              <div className="max-h-56 space-y-2 overflow-y-auto pr-1">
-                {(selectedContract.ledgerEvents || []).map(ev => {
+              <div className="mb-2.5 flex items-center justify-between gap-2">
+                <h4 className="flex items-center gap-2 text-sm font-bold text-zinc-900">
+                  <Zap size={16} className="text-teal-700" aria-hidden="true" />
+                  <span>Histórico auditável de movimentações</span>
+                </h4>
+                {(selectedContract.ledgerEvents?.length || 0) > 5 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAllLedgerEvents(curr => !curr)}
+                    className="text-xs font-semibold text-teal-700 hover:underline cursor-pointer"
+                  >
+                    {showAllLedgerEvents
+                      ? 'Mostrar recentes'
+                      : `Ver todas (${selectedContract.ledgerEvents!.length})`}
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2">
+                {(showAllLedgerEvents
+                  ? selectedContract.ledgerEvents || []
+                  : (selectedContract.ledgerEvents || []).slice(0, 5)
+                ).map(ev => {
                   const meta = EVENT_TYPE_LABELS[ev.eventType] || {
                     label: ev.eventType,
                     color: 'bg-slate-100 text-slate-700 border-slate-200',
                   };
+                  const ledgerIcon = ev.eventType.startsWith('SERVICE_SWAP') ? (
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-indigo-50 text-indigo-700 border border-indigo-100">
+                      <RefreshCw size={14} aria-hidden="true" />
+                    </span>
+                  ) : ev.eventType === 'RESERVE' ? (
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-sky-50 text-sky-700 border border-sky-100">
+                      <Calendar size={14} aria-hidden="true" />
+                    </span>
+                  ) : ev.eventType === 'CONSUME' ? (
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-700 border border-emerald-100">
+                      <CheckCircle2 size={14} aria-hidden="true" />
+                    </span>
+                  ) : ev.eventType === 'REFUND' || ev.eventType === 'RELEASE_RESERVATION' ? (
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-amber-50 text-amber-800 border border-amber-100">
+                      <RotateCcw size={14} aria-hidden="true" />
+                    </span>
+                  ) : (
+                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-700 border border-teal-100">
+                      <Zap size={14} aria-hidden="true" />
+                    </span>
+                  );
                   return (
                     <div
                       key={ev.id}
-                      className="flex items-start justify-between gap-3 rounded-lg border border-[var(--pc-border)] bg-[var(--pc-surface-subtle)] p-2.5 text-xs"
+                      className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-zinc-200/85 bg-zinc-50/55 p-3 text-xs"
                     >
-                      <div>
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span
-                            className={`inline-block rounded border px-2 py-0.5 text-[10px] font-semibold ${meta.color}`}
-                          >
-                            {meta.label}
-                          </span>
-                          {ev.customerPackageItem?.serviceNameSnapshot && (
-                            <span className="rounded bg-white border border-zinc-200 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700">
-                              {ev.customerPackageItem.serviceNameSnapshot}
+                      <div className="flex min-w-0 flex-1 items-start gap-2.5">
+                        {ledgerIcon}
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span
+                              className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-semibold ${meta.color}`}
+                            >
+                              {meta.label}
                             </span>
-                          )}
-                          {ev.pet?.name && (
-                            <span className="rounded bg-teal-50 border border-teal-200 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
-                              {ev.pet.name}
-                            </span>
+                            {ev.customerPackageItem?.serviceNameSnapshot && (
+                              <span className="rounded-md bg-white border border-zinc-200 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-700">
+                                {ev.customerPackageItem.serviceNameSnapshot}
+                              </span>
+                            )}
+                            {ev.pet?.name && (
+                              <span className="rounded-md bg-teal-50 border border-teal-200 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800">
+                                {ev.pet.name}
+                              </span>
+                            )}
+                          </div>
+                          <p className="mt-1 font-semibold text-zinc-900">
+                            {formatSwapText(ev.reason) || 'Movimentação registrada'}
+                          </p>
+                          <p className="text-[11px] text-zinc-500">
+                            {ev.operatorName ? `Operador: ${ev.operatorName} · ` : ''}
+                            Registrado em {dateTime(ev.createdAt)}
+                          </p>
+                          {ev.appointment && ['RESERVE', 'CONSUME', 'RELEASE_RESERVATION', 'REFUND'].includes(ev.eventType) && (
+                            <p className="mt-0.5 text-[11px] text-sky-800">
+                              Sessão na agenda: {dateTime(ev.appointment.startsAt)}
+                              {ev.appointment.professional?.name ? ` · Prof.: ${ev.appointment.professional.name}` : ''}
+                            </p>
                           )}
                         </div>
-                        <p className="mt-1 font-medium text-[var(--pc-text)]">
-                          {ev.reason || 'Movimentação registrada'}
-                        </p>
-                        <p className="text-[11px] text-[var(--pc-text-secondary)]">
-                          {ev.operatorName ? `Operador: ${ev.operatorName} · ` : ''}
-                          Registrado em {dateTime(ev.createdAt)}
-                        </p>
-                        {ev.appointment && ['RESERVE', 'CONSUME', 'RELEASE_RESERVATION', 'REFUND'].includes(ev.eventType) && (
-                          <p className="mt-1 text-[11px] text-sky-800">
-                            Sessão na agenda: {dateTime(ev.appointment.startsAt)}
-                            {ev.appointment.professional?.name ? ` · Prof.: ${ev.appointment.professional.name}` : ''}
-                          </p>
-                        )}
                       </div>
-                      <div className="text-right font-mono text-xs">
-                        <span className="block font-bold text-[var(--pc-text)]">
+                      <div className="shrink-0 text-right tabular-nums">
+                        <span className="block font-bold text-zinc-900">
                           Saldo livre: {ev.balanceAfter}
                         </span>
-                        <span className="text-[11px] text-[var(--pc-text-muted)]">
+                        <span className="text-[11px] text-zinc-500">
                           Usadas: {ev.usedAfter} · Reserv.: {ev.reservedAfter}
                         </span>
                       </div>
@@ -4511,14 +4777,14 @@ export default function PetshopPackagesPage() {
 
             {/* Cancelamento de Contrato */}
             {selectedContract.status === 'active' && (
-              <div className="border-t border-[var(--pc-border)] pt-3">
+              <div className="border-t border-zinc-200/80 pt-3">
                 {!showCancelConfirm ? (
                   <button
                     type="button"
                     onClick={() => setShowCancelConfirm(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:underline"
+                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
                   >
-                    <XCircle size={14} />
+                    <Trash2 size={14} aria-hidden="true" />
                     Cancelar este contrato de pacote
                   </button>
                 ) : (
@@ -4635,6 +4901,90 @@ export default function PetshopPackagesPage() {
             </div>
           </form>
         </Modal>
+      )}
+      <ExchangePackageServiceModal
+        target={exchangeTarget}
+        services={services}
+        operators={operators}
+        onClose={() => setExchangeTarget(null)}
+        onSuccess={async ({ appointment, contract, differenceAmount, chargeMode, payNow }) => {
+          const currentContractId = selectedContract?.id;
+          setExchangeTarget(null);
+          if (contract) {
+            setSelectedContract(contract);
+            setSelectedGroupContracts(curr =>
+              curr.map(c => (c.id === contract.id ? contract : c)),
+            );
+          }
+          if (currentContractId) {
+            try {
+              const { data: freshContract } = await api.get<CustomerPetPackage>(
+                `/petshop/packages/contracts/${currentContractId}`,
+              );
+              setSelectedContract(freshContract);
+              setSelectedGroupContracts(curr =>
+                curr.map(c => (c.id === freshContract.id ? freshContract : c)),
+              );
+            } catch {
+              // Mantém o retorno já atualizado acima
+            }
+          }
+          void loadAll(false);
+          if ((payNow || (chargeMode === 'charge_now' && differenceAmount > 0)) && appointment?.id) {
+            try {
+              const { data: comanda } = await api.post(`/petshop/appointments/${appointment.id}/checkout`, {
+                prepay: false,
+                addonOnly: true,
+              });
+              if (comanda && Number(comanda.total) > 0) {
+                setPendingPayment({
+                  appointmentId: appointment.id,
+                  customerName: selectedContract?.customer?.name || 'Cliente',
+                  total: Number(comanda.total),
+                });
+              }
+            } catch (err: any) {
+              toast.error(err.response?.data?.message || 'Troca salva, mas não foi possível abrir o caixa agora.');
+            }
+          }
+        }}
+      />
+
+      {pendingPayment && (
+        <PaymentModal
+          isOpen
+          onClose={() => setPendingPayment(null)}
+          isOnline={navigator.onLine}
+          tenantConfig={tenant}
+          petshopReceipt={{
+            customer: pendingPayment.customerName,
+            total: pendingPayment.total,
+            submit: async (payments, discount) => {
+              const { data } = await api.post(
+                `/petshop/appointments/${pendingPayment.appointmentId}/receive`,
+                {
+                  payments,
+                  prepay: false,
+                  addonOnly: true,
+                  ...(discount ? { discount: discount.amount, discountPin: discount.pin } : {}),
+                },
+              );
+              return data;
+            },
+          }}
+          onSuccess={() => {
+            const currentContractId = selectedContract?.id;
+            setPendingPayment(null);
+            toast.success('Diferença recebida e registrada com sucesso!');
+            if (currentContractId) {
+              api
+                .get<CustomerPetPackage>(`/petshop/packages/contracts/${currentContractId}`)
+                .then(({ data }) => setSelectedContract(data))
+                .catch(() => {});
+            }
+            void loadAll(false);
+          }}
+        />
       )}
     </div>
   );

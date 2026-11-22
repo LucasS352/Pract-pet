@@ -11,6 +11,9 @@ export class OperatorsController {
 
   @Post()
   async create(@Request() req: any, @Body() body: { name: string; pin: string; isManager?: boolean; jobTitle?: string; canManageAppointmentCommissions?: boolean }) {
+    if (!['admin', 'superadmin', 'manager'].includes(req.user.role)) {
+      throw new ForbiddenException('Apenas administradores ou gerentes podem gerenciar colaboradores.');
+    }
     if (body.canManageAppointmentCommissions) this.access.assertPetshopCommissionGrantAdmin(req);
     return this.operatorsService.create(req.user.tenantId, body);
   }
@@ -57,6 +60,9 @@ export class OperatorsController {
 
   @Patch(':id')
   async update(@Request() req: any, @Param('id') id: string, @Body() body: { name?: string; pin?: string; active?: boolean; isManager?: boolean; jobTitle?: string; canManageAppointmentCommissions?: boolean }) {
+    if (!['admin', 'superadmin', 'manager'].includes(req.user.role)) {
+      throw new ForbiddenException('Apenas administradores ou gerentes podem gerenciar colaboradores.');
+    }
     if (body.pin && !['admin', 'superadmin'].includes(req.user.role)) throw new ForbiddenException('Apenas administradores podem trocar o PIN.');
     if (body.canManageAppointmentCommissions !== undefined) this.access.assertPetshopCommissionGrantAdmin(req);
     return this.operatorsService.update(req.user.tenantId, id, body);
@@ -64,6 +70,9 @@ export class OperatorsController {
 
   @Delete(':id')
   remove(@Request() req: any, @Param('id') id: string) {
+    if (!['admin', 'superadmin', 'manager'].includes(req.user.role)) {
+      throw new ForbiddenException('Apenas administradores ou gerentes podem gerenciar colaboradores.');
+    }
     return this.operatorsService.remove(req.user.tenantId, id);
   }
 }

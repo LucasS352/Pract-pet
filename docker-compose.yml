@@ -51,6 +51,7 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /app/google-credentials.json
     volumes:
       - uploads_data:/app/uploads
+      - private_data:/app/private-data
       - ./backups:/app/backups
       - ./backend/google-credentials.json:/app/google-credentials.json:ro
     depends_on:
@@ -115,6 +116,8 @@ volumes:
     name: practpet_mysql_data
   uploads_data:
     name: practpet_uploads_data
+  private_data:
+    name: practpet_private_data
 
 networks:
   practpet_network:

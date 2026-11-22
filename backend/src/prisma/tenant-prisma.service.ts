@@ -114,6 +114,14 @@ export class TenantConnectionManager implements OnModuleDestroy {
     timer.unref?.();
   }
 
+  async evictTenant(tenantId: string) {
+    const entry = this.clients.get(tenantId);
+    if (entry) {
+      this.clients.delete(tenantId);
+      await entry.client.$disconnect().catch(() => {});
+    }
+  }
+
   async onModuleDestroy() {
     this.logger.log('Encerrando todas as conexões de tenants...');
     const disconnectPromises = Array.from(this.clients.values()).map((entry) =>

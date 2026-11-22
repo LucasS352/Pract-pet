@@ -54,6 +54,7 @@ services:
       TZ: America/Sao_Paulo
     volumes:
       - uploads_data:/app/uploads
+      - private_data:/app/private-data
       - ./backups:/app/backups
     depends_on:
       mysql:
@@ -124,6 +125,8 @@ volumes:
     name: practpet_mysql_data
   uploads_data:
     name: practpet_uploads_data
+  private_data:
+    name: practpet_private_data
 
 networks:
   practpet_network:

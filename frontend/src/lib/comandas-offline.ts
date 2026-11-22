@@ -9,10 +9,10 @@ function assertScope(tenantId: string) {
     throw new Error('A loja mudou. Reabra as comandas.');
 }
 
-/** Retorna true se o erro é de rede/timeout/cancelamento (sem resposta do servidor). */
+/** Retorna true se o erro é de rede, timeout, cancelamento ou 5xx do servidor. */
 function isNetworkError(err: any): boolean {
-  if (!err.response) return true; // sem resposta = falha de rede, timeout ou cancelamento
-  return false;
+  if (!err?.response) return true; // sem resposta = falha de rede, timeout ou cancelamento
+  return Number(err.response.status) >= 500;
 }
 
 async function excludeCharged(tenantId: string, items: any[]) {

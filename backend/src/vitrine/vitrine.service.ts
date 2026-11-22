@@ -67,14 +67,17 @@ export class VitrineService {
     private tenantContext: TenantContextService,
   ) {}
 
+  private readonly ensuredDatabases = new Set<string>();
+
   /** Retorna o cliente Prisma do tenant atual via contexto */
   private async getTenantPrisma() {
     const { tenantId, databaseUrl } = this.tenantContext.get();
-    return this.tenantManager.getTenantClient(tenantId, databaseUrl);
+    return { prisma: await this.tenantManager.getTenantClient(tenantId, databaseUrl), key: tenantId };
   }
 
-  /** Garante que a tabela vitrine_config existe no banco do tenant (auto-healing) */
-  private async ensureTableExists(prisma: any) {
+  /** Garante que a tabela vitrine_config existe no banco do tenant (auto-healing em memória por tenant) */
+  private async ensureTableExists(prisma: any, key?: string) {
+    if (key && this.ensuredDatabases.has(key)) return;
     try {
       await prisma.$executeRawUnsafe(`
         CREATE TABLE IF NOT EXISTS \`vitrine_config\` (
@@ -101,6 +104,7 @@ export class VitrineService {
       await prisma.$executeRawUnsafe(`
         ALTER TABLE \`vitrine_config\` MODIFY COLUMN \`logoPosition\` TEXT NULL;
       `).catch(() => {});
+      if (key) this.ensuredDatabases.add(key);
     } catch (err: any) {
       this.logger.warn(`ensureTableExists (vitrine_config): ${err.message}`);
     }
@@ -120,8 +124,8 @@ export class VitrineService {
   /** Retorna configuração completa (rascunho + info de publicação) */
   async getConfig() {
     try {
-      const prisma = await this.getTenantPrisma();
-      await this.ensureTableExists(prisma);
+      const { prisma, key } = await this.getTenantPrisma();
+      await this.ensureTableExists(prisma, key);
 
       const config = await prisma.vitrineConfig.findFirst().catch(() => null);
 
@@ -198,8 +202,8 @@ export class VitrineService {
   /** Salva rascunho sem publicar */
   async saveDraft(data: DraftDto) {
     try {
-      const prisma = await this.getTenantPrisma();
-      await this.ensureTableExists(prisma);
+      const { prisma, key } = await this.getTenantPrisma();
+      await this.ensureTableExists(prisma, key);
 
       const existing = await prisma.vitrineConfig.findFirst().catch(() => null);
 
@@ -263,8 +267,8 @@ export class VitrineService {
    */
   async publish(dto: PublishDto) {
     try {
-      const prisma = await this.getTenantPrisma();
-      await this.ensureTableExists(prisma);
+      const { prisma, key } = await this.getTenantPrisma();
+      await this.ensureTableExists(prisma, key);
 
       let existing = await prisma.vitrineConfig.findFirst().catch(() => null);
 
@@ -305,8 +309,8 @@ export class VitrineService {
   /** Liga ou desliga a vitrine sem republicar */
   async setActive(active: boolean) {
     try {
-      const prisma = await this.getTenantPrisma();
-      await this.ensureTableExists(prisma);
+      const { prisma, key } = await this.getTenantPrisma();
+      await this.ensureTableExists(prisma, key);
 
       const existing = await prisma.vitrineConfig.findFirst().catch(() => null);
 
@@ -359,7 +363,7 @@ export class VitrineService {
         tenant.id,
         tenant.databaseUrl,
       );
-      await this.ensureTableExists(tenantPrisma);
+      await this.ensureTableExists(tenantPrisma, tenant.id);
 
       // 3. Buscar configuração da vitrine
       const config = await tenantPrisma.vitrineConfig.findFirst().catch(() => null);

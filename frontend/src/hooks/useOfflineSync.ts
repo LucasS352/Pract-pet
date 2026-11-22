@@ -41,6 +41,8 @@ export interface OfflineSyncState {
   isSyncing: boolean;
   /** Dispara o sync manualmente (útil para botão "Sincronizar agora") */
   syncNow: () => Promise<void>;
+  /** Reconta pendências locais sem disparar envio imediato */
+  refreshPendingCount: () => Promise<void>;
 }
 
 // ── Mapa de método → tPag SEFAZ (espelha o backend) ─────────────────────────
@@ -271,5 +273,6 @@ export function useOfflineSync(): OfflineSyncState {
     pendingCount,
     isSyncing,
     syncNow: syncPendingSales,
+    refreshPendingCount,
   };
 }

@@ -72,6 +72,17 @@ test('cross-tab lock skips an active sender; browser without locks falls back gr
   const unavailable = load('lib/sale-operation-lock.ts', {}, { navigator: {} });
   await unavailable.withSaleOperationLock('shop', 'operation', async () => runs++);
   assert.equal(runs, 1);
+
+  let errorRuns = 0;
+  const failingLock = load('lib/sale-operation-lock.ts', {}, { navigator: { locks: { request: async (_name, _options, callback) => callback({}) } } });
+  await assert.rejects(
+    failingLock.withSaleOperationLock('shop', 'operation', async () => {
+      errorRuns++;
+      throw new Error('IndexedDB failure inside work');
+    }),
+    /IndexedDB failure inside work/,
+  );
+  assert.equal(errorRuns, 1);
 });
 test('F5 reload restores scoped draft identity and items; another operator gets another draft', () => {
   const memory = new Map(); const sessionStorage = { getItem: k => memory.get(k), setItem: (k, v) => memory.set(k, v) };

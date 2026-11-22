@@ -2,6 +2,7 @@ import { BadRequestException, HttpStatus } from '@nestjs/common';
 import { lastValueFrom, of } from 'rxjs';
 import { AllExceptionsFilter } from '../filters/all-exceptions.filter';
 import { TenantContextService, TenantInterceptor } from '../../prisma/tenant-context.service';
+import { UsersService } from '../../users/users.service';
 import { clientIp, createRateLimiter, safeEqual } from './security';
 
 describe('Security and reliability helpers', () => {
@@ -105,5 +106,25 @@ describe('Security and reliability helpers', () => {
 
     await expect(call('t-active')).resolves.toBe('ok');
     await expect(call('t-suspended')).rejects.toMatchObject({ status: 401 });
+  });
+
+  it('UsersService blocks role escalation to superadmin or group_owner', async () => {
+    const heart = {
+      tenant: { findUnique: jest.fn().mockResolvedValue({ modulos: { petshop: true } }) },
+      user: {
+        count: jest.fn().mockResolvedValue(1),
+        findUnique: jest.fn().mockResolvedValue(null),
+        findFirst: jest.fn().mockResolvedValue({ id: 'u2', role: 'operator', email: 'op@a.com' }),
+        create: jest.fn(),
+        update: jest.fn(),
+      },
+    };
+    const users = new UsersService(heart as any);
+
+    await expect(users.create('t1', { name: 'X', email: 'x@a.com', password: '123', role: 'superadmin' })).rejects.toThrow(BadRequestException);
+    await expect(users.create('t1', { name: 'X', email: 'x@a.com', password: '123', role: 'group_owner' })).rejects.toThrow(BadRequestException);
+    await expect(users.update('t1', 'u2', { role: 'superadmin' })).rejects.toThrow(BadRequestException);
+    expect(heart.user.create).not.toHaveBeenCalled();
+    expect(heart.user.update).not.toHaveBeenCalled();
   });
 });

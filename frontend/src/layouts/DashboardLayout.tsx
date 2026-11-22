@@ -60,7 +60,9 @@ export function DashboardLayout() {
     return { estoque: true, nfce: true, dashboardMobile: true };
   })();
 
-  const isPetshop = modules?.petshop !== false;
+  const isPetshop = tenantConfig !== null
+    ? modules?.petshop !== false
+    : user?.modules?.petshop === true;
 
   useEffect(() => {
     if (isPetshop) navigate('/petshop', { replace: true });

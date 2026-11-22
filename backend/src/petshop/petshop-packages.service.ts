@@ -12,7 +12,7 @@ import { Prisma } from '@prisma/client';
 import { TenantConnectionManager } from '../prisma/tenant-prisma.service';
 import { TenantContextService } from '../prisma/tenant-context.service';
 import { HeartPrismaService } from '../prisma/heart-prisma.service';
-import { hasTaxiDropoff, hasTaxiPickup, type TaxiMode } from './petshop-transport';
+import { hasTaxiDropoff, hasTaxiPickup, parseAppointmentTransport, type TaxiMode } from './petshop-transport';
 import { allocatePackageDiscount, allocatePackagePayments, contractMetadata, moneyCents, normalizePackagePayments, packageReceivedAmount, receiptNotes } from './package-receipts';
 import { readTaxiDefaultFee } from './taxi-default-fee';
 import { PetshopCommissionsService } from './petshop-commissions.service';
@@ -23,6 +23,8 @@ import {
   resolveChosenServicesStages,
   resolvePrimaryStageOperatorId,
 } from './appointment-history.helper';
+
+export const PACKAGE_UPGRADE_SERVICE_ID = 'petshop-package-upgrade-fee';
 
 const VALID_SPECIES = new Set(['all', 'dog', 'cat']);
 const VALID_SIZES = new Set(['all', 'small', 'medium', 'large', 'giant']);
@@ -699,7 +701,7 @@ export class PetshopPackagesService {
         updatedAt: true,
         stageHistory: true,
         professional: { select: { id: true, name: true } },
-        pet: { select: { id: true, name: true } },
+        pet: { select: { id: true, name: true, species: true, size: true, coatType: true } },
         services: {
           where: {
             customerPackageId: id,
@@ -707,7 +709,9 @@ export class PetshopPackagesService {
           },
           select: {
             id: true,
+            serviceId: true,
             nameSnapshot: true,
+            priceSnapshot: true,
             coverageStatus: true,
             customerPackageItemId: true,
             service: { select: { id: true, name: true, category: true, customStages: true } },
@@ -721,8 +725,47 @@ export class PetshopPackagesService {
       },
       orderBy: { startsAt: 'asc' },
     });
+    const pendingByAppointment = new Map<string, { pendingUpgradeTotal: number; pendingExtraTotal: number }>();
+    const aptIds = (Array.isArray(rawScheduledAppointments) ? rawScheduledAppointments : []).map((a: any) => a.id).filter(Boolean);
+    if (aptIds.length > 0 && typeof prisma.petAppointmentService?.findMany === 'function') {
+      const unpaidRows = await prisma.petAppointmentService.findMany({
+        where: {
+          appointmentId: { in: aptIds },
+          comboParentId: null,
+          chargedSaleId: null,
+          coverageStatus: { notIn: ['reserved', 'consumed'] },
+        },
+        select: {
+          appointmentId: true,
+          serviceId: true,
+          priceSnapshot: true,
+          coveredAmount: true,
+        },
+      });
+      for (const row of unpaidRows) {
+        const net = Math.max(0, Number(row.priceSnapshot || 0) - Number(row.coveredAmount || 0));
+        if (net <= 0) continue;
+        const curr = pendingByAppointment.get(row.appointmentId) || { pendingUpgradeTotal: 0, pendingExtraTotal: 0 };
+        curr.pendingExtraTotal = Math.round((curr.pendingExtraTotal + net) * 100) / 100;
+        if (row.serviceId === PACKAGE_UPGRADE_SERVICE_ID) {
+          curr.pendingUpgradeTotal = Math.round((curr.pendingUpgradeTotal + net) * 100) / 100;
+        }
+        pendingByAppointment.set(row.appointmentId, curr);
+      }
+    }
     const scheduledAppointments = (Array.isArray(rawScheduledAppointments) ? rawScheduledAppointments : []).map(
-      (apt: any) => enrichAppointmentHistory(apt, this.pricing),
+      (apt: any) => {
+        const pendingInfo = pendingByAppointment.get(apt.id);
+        return {
+          ...enrichAppointmentHistory(apt, this.pricing),
+          ...(pendingInfo
+            ? {
+                pendingUpgradeTotal: pendingInfo.pendingUpgradeTotal,
+                pendingExtraTotal: pendingInfo.pendingExtraTotal,
+              }
+            : {}),
+        };
+      },
     );
     return { ...this.enrichContractTransport(contract), scheduledAppointments };
   }
@@ -1947,6 +1990,77 @@ export class PetshopPackagesService {
   /**
    * Libera reservas de sessões caso um agendamento seja cancelado ou marcado como falta (no_show) antes da conclusão.
    */
+  async releaseSingleReservedServiceInTx(
+    tx: any,
+    appointmentId: string,
+    petId: string,
+    svc: { id: string; serviceId: string; customerPackageId: string | null; customerPackageItemId: string | null; coverageStatus: string },
+    reason: string,
+    actor?: PackageActor,
+    keyPrefix = 'release-svc',
+  ) {
+    if (svc.coverageStatus !== 'reserved' || !svc.customerPackageItemId || !svc.customerPackageId) {
+      return;
+    }
+
+    const idempotencyKey = keyPrefix === 'release'
+      ? `release:${appointmentId}:${svc.serviceId}`
+      : `${keyPrefix}:${appointmentId}:${svc.id}`;
+    const existingRelease = await tx.customerPetPackageLedger.findUnique({
+      where: { idempotencyKey },
+    });
+    if (existingRelease) return;
+
+    const itemRows: any[] = await tx.$queryRaw(
+      Prisma.sql`SELECT id, totalQuantity, reservedQuantity, usedQuantity, availableQuantity
+                 FROM customer_pet_package_items
+                 WHERE id = ${svc.customerPackageItemId}
+                 FOR UPDATE`,
+    );
+    if (!itemRows.length) return;
+    const pkgItem = itemRows[0];
+
+    const nextReserved = Math.max(0, Number(pkgItem.reservedQuantity) - 1);
+    const nextAvailable = Math.max(
+      0,
+      Number(pkgItem.totalQuantity) - Number(pkgItem.usedQuantity) - nextReserved,
+    );
+
+    await tx.customerPetPackageItem.update({
+      where: { id: pkgItem.id },
+      data: {
+        reservedQuantity: nextReserved,
+        availableQuantity: nextAvailable,
+      },
+    });
+
+    await tx.petAppointmentService.update({
+      where: { id: svc.id },
+      data: {
+        coverageStatus: 'released',
+        coveredAmount: new Prisma.Decimal(0),
+      },
+    });
+
+    await tx.customerPetPackageLedger.create({
+      data: {
+        idempotencyKey,
+        customerPackageId: svc.customerPackageId,
+        customerPackageItemId: pkgItem.id,
+        appointmentId,
+        petId,
+        eventType: 'RELEASE_RESERVATION',
+        quantityDelta: 1,
+        balanceAfter: nextAvailable,
+        usedAfter: Number(pkgItem.usedQuantity),
+        reservedAfter: nextReserved,
+        operatorId: actor?.operatorId || actor?.userId || null,
+        operatorName: actor?.name || null,
+        reason: reason || 'Cancelamento / Não comparecimento no agendamento',
+      },
+    });
+  }
+
   async releaseReservedSessionsForAppointmentInTx(
     tx: any,
     appointmentId: string,
@@ -1960,64 +2074,15 @@ export class PetshopPackagesService {
     if (!appointment) return;
 
     for (const svc of appointment.services) {
-      if (svc.coverageStatus !== 'reserved' || !svc.customerPackageItemId || !svc.customerPackageId) {
-        continue;
-      }
-
-      const idempotencyKey = `release:${appointmentId}:${svc.serviceId}`;
-      const existingRelease = await tx.customerPetPackageLedger.findUnique({
-        where: { idempotencyKey },
-      });
-      if (existingRelease) continue;
-
-      const itemRows: any[] = await tx.$queryRaw(
-        Prisma.sql`SELECT id, totalQuantity, reservedQuantity, usedQuantity, availableQuantity
-                   FROM customer_pet_package_items
-                   WHERE id = ${svc.customerPackageItemId}
-                   FOR UPDATE`,
+      await this.releaseSingleReservedServiceInTx(
+        tx,
+        appointmentId,
+        appointment.petId,
+        svc,
+        reason,
+        actor,
+        'release',
       );
-      if (!itemRows.length) continue;
-      const pkgItem = itemRows[0];
-
-      const nextReserved = Math.max(0, Number(pkgItem.reservedQuantity) - 1);
-      const nextAvailable = Math.max(
-        0,
-        Number(pkgItem.totalQuantity) - Number(pkgItem.usedQuantity) - nextReserved,
-      );
-
-      await tx.customerPetPackageItem.update({
-        where: { id: pkgItem.id },
-        data: {
-          reservedQuantity: nextReserved,
-          availableQuantity: nextAvailable,
-        },
-      });
-
-      await tx.petAppointmentService.update({
-        where: { id: svc.id },
-        data: {
-          coverageStatus: 'released',
-          coveredAmount: new Prisma.Decimal(0),
-        },
-      });
-
-      await tx.customerPetPackageLedger.create({
-        data: {
-          idempotencyKey,
-          customerPackageId: svc.customerPackageId,
-          customerPackageItemId: pkgItem.id,
-          appointmentId,
-          petId: appointment.petId,
-          eventType: 'RELEASE_RESERVATION',
-          quantityDelta: 1,
-          balanceAfter: nextAvailable,
-          usedAfter: Number(pkgItem.usedQuantity),
-          reservedAfter: nextReserved,
-          operatorId: actor?.operatorId || actor?.userId || null,
-          operatorName: actor?.name || null,
-          reason: reason || 'Cancelamento / Não comparecimento no agendamento',
-        },
-      });
     }
   }
 
@@ -2136,6 +2201,9 @@ export class PetshopPackagesService {
     actor = resolvedActor;
 
     return prisma.$transaction(async tx => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw`SELECT id FROM customer_pet_packages WHERE id = ${contractId} FOR UPDATE`;
+      }
       const contract = await tx.customerPetPackage.findUnique({
         where: { id: contractId },
         include: { items: true },
@@ -2143,6 +2211,13 @@ export class PetshopPackagesService {
       if (!contract) throw new NotFoundException('Contrato não encontrado.');
       if (contract.status === 'cancelled') {
         throw new BadRequestException('Este contrato já está cancelado.');
+      }
+
+      if (contract.comandaId && tx.comanda?.updateMany) {
+        await tx.comanda.updateMany({
+          where: { id: contract.comandaId, status: { in: ['open', 'waiting_payment'] } },
+          data: { status: 'cancelled' },
+        });
       }
 
       for (const item of contract.items) {
@@ -2199,6 +2274,941 @@ export class PetshopPackagesService {
         },
       });
     });
+  }
+
+  async ensurePackageUpgradeBackingInTx(tx: any) {
+    await tx.petService.upsert({
+      where: { id: PACKAGE_UPGRADE_SERVICE_ID },
+      update: {
+        active: false,
+        customStages: ['checked_in', 'ready'],
+      },
+      create: {
+        id: PACKAGE_UPGRADE_SERVICE_ID,
+        name: 'Diferença / Adicional de Pacote',
+        serviceType: 'INDIVIDUAL',
+        category: 'Ajuste de Pacote',
+        targetSpecies: 'all',
+        durationMinutes: 0,
+        price: new Prisma.Decimal(0),
+        active: false,
+        customStages: ['checked_in', 'ready'],
+      },
+    });
+
+    let servicosCat = await tx.category.findFirst({ where: { name: 'Serviços' } });
+    if (!servicosCat) {
+      servicosCat = await tx.category.create({ data: { name: 'Serviços' } });
+    }
+
+    await tx.product.upsert({
+      where: { id: PACKAGE_UPGRADE_SERVICE_ID },
+      update: {
+        name: 'Diferença / Adicional de Pacote',
+        active: true,
+        categoryId: servicosCat.id,
+      },
+      create: {
+        id: PACKAGE_UPGRADE_SERVICE_ID,
+        name: 'Diferença / Adicional de Pacote',
+        priceSell: new Prisma.Decimal(0),
+        priceCost: new Prisma.Decimal(0),
+        stock: new Prisma.Decimal(99999),
+        unit: 'SV',
+        active: true,
+        categoryId: servicosCat.id,
+        emiteNfce: false,
+      },
+    });
+  }
+
+  async appendPendingContractValueInTx(
+    tx: any,
+    params: {
+      contract: {
+        id: string;
+        customerId: string;
+        status: string;
+        paymentStatus: string;
+        basePriceSnapshot: any;
+        finalPrice: any;
+        comandaId?: string | null;
+        notes?: string | null;
+        items?: any[];
+      };
+      amountCents: number;
+      description: string;
+      appointmentId?: string | null;
+      petId?: string | null;
+      ledgerItemId?: string | null;
+      actor?: PackageActor;
+      idempotencySuffix?: string;
+    },
+  ) {
+    const { contract, amountCents, description } = params;
+    if (amountCents <= 0) return;
+    if (contract.status !== 'active') {
+      throw new BadRequestException('Somente pacotes ativos podem receber acréscimo de valor.');
+    }
+    if (contract.paymentStatus !== 'pending') {
+      throw new BadRequestException('Este pacote já está pago. Use "Cobrar agora" ou "Cobrar na saída".');
+    }
+
+    const amountDec = new Prisma.Decimal(amountCents).div(100).toDecimalPlaces(2);
+    const nextBase = new Prisma.Decimal(contract.basePriceSnapshot || 0).plus(amountDec).toDecimalPlaces(2);
+    const nextFinal = new Prisma.Decimal(contract.finalPrice || 0).plus(amountDec).toDecimalPlaces(2);
+
+    let nextNotes = contract.notes ?? null;
+    if (typeof nextNotes === 'string' && nextNotes.trim().startsWith('{')) {
+      try {
+        const parsed = JSON.parse(nextNotes);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.packageGroup) {
+          const prevGroupTotal = Number(parsed.packageGroup.totalGroupPrice || 0);
+          parsed.packageGroup = {
+            ...parsed.packageGroup,
+            totalGroupPrice: Number((prevGroupTotal + Number(amountDec)).toFixed(2)),
+          };
+          nextNotes = JSON.stringify(parsed);
+        }
+      } catch {}
+    }
+
+    await tx.customerPetPackage.update({
+      where: { id: contract.id },
+      data: {
+        basePriceSnapshot: nextBase,
+        finalPrice: nextFinal,
+        notes: nextNotes,
+      },
+    });
+
+    if (contract.comandaId && tx.comanda?.findUnique) {
+      const cmd = await tx.comanda.findUnique({ where: { id: contract.comandaId } });
+      if (cmd && ['open', 'waiting_payment'].includes(cmd.status) && !cmd.saleId) {
+        await this.ensurePackageUpgradeBackingInTx(tx);
+        await tx.comandaItem.create({
+          data: {
+            comandaId: cmd.id,
+            productId: PACKAGE_UPGRADE_SERVICE_ID,
+            quantity: new Prisma.Decimal(1),
+            unitPrice: amountDec,
+            totalPrice: amountDec,
+            notes: description.slice(0, 50),
+            stockDeducted: true,
+            kdsStatus: 'READY',
+          },
+        });
+        await tx.comanda.update({
+          where: { id: cmd.id },
+          data: {
+            total: new Prisma.Decimal(cmd.total || 0).plus(amountDec).toDecimalPlaces(2),
+          },
+        });
+      }
+    }
+
+    const ledgerItem =
+      (params.ledgerItemId ? contract.items?.find(i => i.id === params.ledgerItemId) : null) ||
+      contract.items?.[0];
+    if (ledgerItem) {
+      await tx.customerPetPackageLedger.create({
+        data: {
+          idempotencyKey: `value-adj:${contract.id}:${params.idempotencySuffix || randomUUID()}`,
+          customerPackageId: contract.id,
+          customerPackageItemId: ledgerItem.id,
+          appointmentId: params.appointmentId || null,
+          petId: params.petId || null,
+          eventType: 'VALUE_ADJUSTMENT',
+          quantityDelta: 0,
+          balanceAfter: Number(ledgerItem.availableQuantity || 0),
+          usedAfter: Number(ledgerItem.usedQuantity || 0),
+          reservedAfter: Number(ledgerItem.reservedQuantity || 0),
+          operatorId: params.actor?.operatorId || params.actor?.userId || null,
+          operatorName: params.actor?.name || null,
+          reason: `${description} (+R$ ${amountDec.toFixed(2)})`,
+        },
+      });
+    }
+  }
+
+  private resolveServicePriceAndDurationFallback(service: any, petChar: { species?: string | null; size?: string | null; coatType?: string | null }) {
+    if (this.pricing?.resolvePriceAndDuration) {
+      return this.pricing.resolvePriceAndDuration(service, petChar);
+    }
+    return {
+      price: Number(service?.price || 0),
+      durationMinutes: Math.max(15, Number(service?.durationMinutes || 60)),
+      matchedRule: null,
+    };
+  }
+
+  /**
+   * Troca um serviço reservado de pacote em um agendamento por outro serviço do catálogo,
+   * ajustando saldo em CustomerPetPackageItem, ledger auditável, etapas (customStages) e diferença financeira opcional.
+   */
+  async exchangeSessionService(
+    contractId: string,
+    body: {
+      appointmentId: string;
+      oldAppointmentServiceId?: string;
+      oldServiceId?: string;
+      newServiceId: string;
+      differenceAmount?: number;
+      chargeMode?: 'none' | 'add_to_package' | 'charge_at_checkout' | 'charge_now';
+      replaceUnpaidUpgradeFees?: boolean;
+      keepPackageValue?: boolean;
+      reason?: string;
+      commissionRecipientId?: string;
+      professionalId?: string;
+    },
+    rawActor?: PackageActor,
+  ) {
+    const prisma = await this.prisma();
+    const actor = await this.resolveActor(prisma, rawActor);
+
+    const appointmentId = String(body?.appointmentId ?? '').trim();
+    const newServiceId = String(body?.newServiceId ?? '').trim();
+    const oldAppointmentServiceId = body?.oldAppointmentServiceId ? String(body.oldAppointmentServiceId).trim() : null;
+    const oldServiceIdInput = body?.oldServiceId ? String(body.oldServiceId).trim() : null;
+    if (!appointmentId) throw new BadRequestException('Informe o atendimento da sessão.');
+    if (!newServiceId) throw new BadRequestException('Selecione o novo serviço desejado.');
+
+    const shouldReplaceUnpaidFees = body?.replaceUnpaidUpgradeFees === true;
+    const differenceCents = moneyCents(body?.differenceAmount ?? 0, 'Diferença de valor');
+    const differenceAmount = differenceCents / 100;
+    const requestedChargeMode = String(body?.chargeMode || (differenceCents > 0 ? 'charge_at_checkout' : 'none')).trim();
+    if (differenceCents > 0 && !['add_to_package', 'charge_at_checkout', 'charge_now'].includes(requestedChargeMode)) {
+      throw new BadRequestException('Modo de cobrança da diferença inválido.');
+    }
+    const effectiveChargeMode = differenceCents === 0 ? 'none' : (requestedChargeMode as 'add_to_package' | 'charge_at_checkout' | 'charge_now');
+    const reason = String(body?.reason ?? '').trim() || 'Troca de serviço no pacote';
+    if (reason.length > 500) throw new BadRequestException('Motivo muito longo (máximo 500 caracteres).');
+
+    const [preContract, newService] = await Promise.all([
+      prisma.customerPetPackage.findUnique({
+        where: { id: contractId },
+        select: { id: true, customerId: true, comandaId: true },
+      }),
+      prisma.petService.findUnique({
+        where: { id: newServiceId },
+        include: {
+          pricingRules: true,
+          comboItems: {
+            include: { componentService: { include: { pricingRules: true } } },
+            orderBy: { order: 'asc' },
+          },
+        },
+      }),
+    ]);
+
+    if (!preContract) throw new NotFoundException('Contrato de pacote não encontrado.');
+    if (!newService || !newService.active) throw new BadRequestException('Novo serviço inválido ou inativo.');
+
+    const nextProfessionalInput = body?.professionalId ? String(body.professionalId).trim() : null;
+    const commissionRecipientInput = body?.commissionRecipientId ? String(body.commissionRecipientId).trim() : null;
+
+    const result = await prisma.$transaction(async tx => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw`SELECT id FROM customers WHERE id = ${preContract.customerId} FOR UPDATE`;
+        if (preContract.comandaId) {
+          await tx.$queryRaw`SELECT id FROM comandas WHERE id = ${preContract.comandaId} FOR UPDATE`;
+        }
+        await tx.$queryRaw`SELECT id FROM customer_pet_packages WHERE id = ${contractId} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM customer_pet_package_items WHERE customerPackageId = ${contractId} ORDER BY id ASC FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM pet_appointments WHERE id = ${appointmentId} FOR UPDATE`;
+      }
+
+      const [contract, appointment] = await Promise.all([
+        tx.customerPetPackage.findUnique({
+          where: { id: contractId },
+          include: { items: true },
+        }),
+        tx.petAppointment.findUnique({
+          where: { id: appointmentId },
+          include: {
+            pet: true,
+            services: {
+              include: {
+                service: {
+                  include: {
+                    comboItems: { include: { componentService: true } },
+                  },
+                },
+              },
+            },
+          },
+        }),
+      ]);
+
+      if (!contract) throw new NotFoundException('Contrato de pacote não encontrado.');
+      if (contract.status !== 'active' || contract.paymentStatus === 'cancelled') {
+        throw new BadRequestException('Somente pacotes ativos permitem trocar serviços.');
+      }
+      if (!appointment) throw new NotFoundException('Agendamento não encontrado.');
+      if (!['requested', 'scheduled', 'checked_in', 'bathing', 'grooming', 'finishing'].includes(appointment.status)) {
+        throw new BadRequestException(
+          'Não é possível trocar o serviço após o atendimento ficar pronto ou concluído. Reabra ou estorne a sessão primeiro.',
+        );
+      }
+
+      const oldAppSvc = (appointment.services || []).find((s: any) =>
+        s.customerPackageId === contractId &&
+        s.coverageStatus === 'reserved' &&
+        !s.comboParentId &&
+        (!oldAppointmentServiceId || s.id === oldAppointmentServiceId) &&
+        (!oldServiceIdInput || s.serviceId === oldServiceIdInput),
+      );
+
+      if (!oldAppSvc) {
+        throw new NotFoundException('Serviço reservado deste pacote não encontrado no agendamento.');
+      }
+      if (oldAppSvc.serviceId === newService.id) {
+        throw new BadRequestException('Escolha um serviço diferente do atual.');
+      }
+      if (
+        (appointment.services || []).some(
+          (s: any) =>
+            s.id !== oldAppSvc.id &&
+            s.serviceId === newService.id &&
+            ['reserved', 'consumed'].includes(s.coverageStatus),
+        )
+      ) {
+        throw new ConflictException('O serviço escolhido já está coberto por pacote neste mesmo agendamento.');
+      }
+      if (new Date(contract.expiresAt) < new Date(appointment.startsAt)) {
+        throw new BadRequestException('A data da sessão está fora da validade atual do pacote.');
+      }
+
+      const oldChildIds = (appointment.services || [])
+        .filter((s: any) => s.comboParentId === oldAppSvc.id)
+        .map((s: any) => s.id);
+      const oldServiceRowIds = [oldAppSvc.id, ...oldChildIds];
+
+      const settledCommission = await tx.petCommission.findFirst({
+        where: { appointmentServiceId: { in: oldServiceRowIds }, state: { in: ['APPROVED', 'PAID', 'REVERSED'] } },
+        select: { id: true },
+      });
+      if (settledCommission) {
+        throw new ConflictException('Este serviço possui comissão aprovada, paga ou estornada. A troca foi bloqueada para preservar o histórico financeiro.');
+      }
+      await tx.petCommission.deleteMany({
+        where: { appointmentServiceId: { in: oldServiceRowIds }, state: { in: ['PENDING', 'AWAITING_PAYMENT'] } },
+      });
+
+      const oldItem =
+        contract.items.find((i: any) => i.id === oldAppSvc.customerPackageItemId) ||
+        contract.items.find((i: any) => i.serviceId === oldAppSvc.serviceId);
+      if (!oldItem || Number(oldItem.totalQuantity) < 1 || Number(oldItem.reservedQuantity) < 1) {
+        throw new ConflictException('Saldo reservado insuficiente para trocar este serviço no pacote.');
+      }
+
+      const operatorIdsToCheck = [...new Set([nextProfessionalInput, commissionRecipientInput].filter((x): x is string => Boolean(x) && x !== 'none'))].sort();
+      const operatorMap = new Map<string, { id: string; name: string; active: boolean }>();
+      for (const opId of operatorIdsToCheck) {
+        const opRows = typeof tx.$queryRaw === 'function'
+          ? await tx.$queryRaw<Array<{ id: string; name: string; active: any }>>(
+              Prisma.sql`SELECT id, name, active FROM operators WHERE id = ${opId} FOR UPDATE`,
+            )
+          : await tx.operator.findMany({ where: { id: opId }, select: { id: true, name: true, active: true } });
+        const foundOp = opRows?.[0];
+        if (!foundOp || !foundOp.active) {
+          throw new BadRequestException('Colaborador selecionado inválido ou inativo.');
+        }
+        operatorMap.set(foundOp.id, foundOp);
+      }
+
+      const swapId = randomUUID();
+      const nextOldTotal = Number(oldItem.totalQuantity) - 1;
+      const nextOldReserved = Number(oldItem.reservedQuantity) - 1;
+      const nextOldAvailable = Math.max(0, nextOldTotal - Number(oldItem.usedQuantity) - nextOldReserved);
+
+      const updatedOldItem = await tx.customerPetPackageItem.update({
+        where: { id: oldItem.id },
+        data: {
+          totalQuantity: nextOldTotal,
+          reservedQuantity: nextOldReserved,
+          availableQuantity: nextOldAvailable,
+        },
+      });
+
+      const existingNewItem = contract.items.find((i: any) => i.serviceId === newService.id);
+      let updatedNewItem: any;
+      if (existingNewItem) {
+        const nextNewTotal = Number(existingNewItem.totalQuantity) + 1;
+        const nextNewReserved = Number(existingNewItem.reservedQuantity) + 1;
+        const nextNewAvailable = Math.max(0, nextNewTotal - Number(existingNewItem.usedQuantity) - nextNewReserved);
+        updatedNewItem = await tx.customerPetPackageItem.update({
+          where: { id: existingNewItem.id },
+          data: {
+            totalQuantity: nextNewTotal,
+            reservedQuantity: nextNewReserved,
+            availableQuantity: nextNewAvailable,
+          },
+        });
+      } else {
+        updatedNewItem = await tx.customerPetPackageItem.create({
+          data: {
+            customerPackageId: contract.id,
+            serviceId: newService.id,
+            serviceNameSnapshot: newService.name,
+            unitValueSnapshot: oldItem.unitValueSnapshot,
+            totalQuantity: 1,
+            reservedQuantity: 1,
+            usedQuantity: 0,
+            availableQuantity: 0,
+          },
+        });
+      }
+
+      const swapReason = `${reason}: ${oldAppSvc.nameSnapshot} por ${newService.name}`;
+      await tx.customerPetPackageLedger.create({
+        data: {
+          idempotencyKey: `swap-out:${swapId}`,
+          customerPackageId: contract.id,
+          customerPackageItemId: updatedOldItem.id,
+          appointmentId,
+          petId: appointment.petId,
+          eventType: 'SERVICE_SWAP_OUT',
+          quantityDelta: -1,
+          balanceAfter: nextOldAvailable,
+          usedAfter: Number(oldItem.usedQuantity),
+          reservedAfter: nextOldReserved,
+          operatorId: actor?.operatorId || actor?.userId || null,
+          operatorName: actor?.name || null,
+          reason: swapReason,
+        },
+      });
+      await tx.customerPetPackageLedger.create({
+        data: {
+          idempotencyKey: `swap-in:${swapId}`,
+          customerPackageId: contract.id,
+          customerPackageItemId: updatedNewItem.id,
+          appointmentId,
+          petId: appointment.petId,
+          eventType: 'SERVICE_SWAP_IN',
+          quantityDelta: 1,
+          balanceAfter: Number(updatedNewItem.availableQuantity),
+          usedAfter: Number(updatedNewItem.usedQuantity),
+          reservedAfter: Number(updatedNewItem.reservedQuantity),
+          operatorId: actor?.operatorId || actor?.userId || null,
+          operatorName: actor?.name || null,
+          reason: swapReason,
+        },
+      });
+
+      const petChar = {
+        species: appointment.pet?.species,
+        size: appointment.pet?.size,
+        coatType: appointment.pet?.coatType,
+      };
+      const resolvedNew = this.resolveServicePriceAndDurationFallback(newService, petChar);
+      const effectiveNewPrice = new Prisma.Decimal(resolvedNew.price).toDecimalPlaces(2);
+
+      const unpaidUpgradeFees = shouldReplaceUnpaidFees
+        ? (appointment.services || []).filter(
+            (s: any) => s.serviceId === PACKAGE_UPGRADE_SERVICE_ID && !s.chargedSaleId && Number(s.coveredAmount || 0) <= 0,
+          )
+        : [];
+      const unpaidUpgradeFeeIds = unpaidUpgradeFees.map((s: any) => s.id);
+      const removedUpgradeTotal = Math.round(
+        unpaidUpgradeFees.reduce((sum: number, s: any) => sum + Math.max(0, Number(s.priceSnapshot || 0)), 0) * 100,
+      ) / 100;
+
+      if (unpaidUpgradeFeeIds.length > 0) {
+        const settledFeeCommission = await tx.petCommission.findFirst({
+          where: { appointmentServiceId: { in: unpaidUpgradeFeeIds }, state: { in: ['APPROVED', 'PAID', 'REVERSED'] } },
+          select: { id: true },
+        });
+        if (settledFeeCommission) {
+          throw new ConflictException('A diferença anterior possui comissão aprovada, paga ou estornada e não pode ser removida automaticamente.');
+        }
+        await tx.petCommission.deleteMany({
+          where: { appointmentServiceId: { in: unpaidUpgradeFeeIds }, state: { in: ['PENDING', 'AWAITING_PAYMENT'] } },
+        });
+        await tx.petAppointmentService.deleteMany({
+          where: { id: { in: unpaidUpgradeFeeIds }, appointmentId, chargedSaleId: null },
+        });
+      }
+
+      if (oldChildIds.length) {
+        await tx.petAppointmentService.deleteMany({ where: { id: { in: oldChildIds } } });
+      }
+      await tx.petAppointmentService.delete({ where: { id: oldAppSvc.id } });
+
+      const newAppSvc = await tx.petAppointmentService.create({
+        data: {
+          appointmentId,
+          serviceId: newService.id,
+          nameSnapshot: newService.name,
+          priceSnapshot: effectiveNewPrice,
+          commissionWeightSnapshot: effectiveNewPrice,
+          durationMinutes: resolvedNew.durationMinutes,
+          customerPackageId: contract.id,
+          customerPackageItemId: updatedNewItem.id,
+          coverageStatus: 'reserved',
+          coveredAmount: effectiveNewPrice,
+          isCombo: newService.serviceType === 'COMBO',
+        },
+      });
+
+      if (newService.serviceType === 'COMBO' && Array.isArray(newService.comboItems)) {
+        for (const ci of newService.comboItems) {
+          const comp = ci.componentService;
+          const qty = Math.max(1, Number(ci.quantity || 1));
+          const compResolved = this.resolveServicePriceAndDurationFallback(comp, petChar);
+          for (let q = 0; q < qty; q++) {
+            await tx.petAppointmentService.create({
+              data: {
+                appointmentId,
+                serviceId: comp.id,
+                nameSnapshot: `${comp.name} (Combo: ${newService.name})`,
+                priceSnapshot: new Prisma.Decimal(0),
+                commissionWeightSnapshot: new Prisma.Decimal(compResolved.price),
+                durationMinutes: compResolved.durationMinutes,
+                isCombo: false,
+                comboParentId: newAppSvc.id,
+              },
+            });
+          }
+        }
+      }
+
+      const recipientOp = commissionRecipientInput ? operatorMap.get(commissionRecipientInput) || null : null;
+      const professionalOp = nextProfessionalInput ? operatorMap.get(nextProfessionalInput) || null : null;
+      const nowIso = new Date().toISOString();
+      const history = Array.isArray(appointment.stageHistory) ? [...(appointment.stageHistory as any[])] : [];
+
+      if (differenceCents > 0) {
+        const diffLabel = `Diferença (${oldAppSvc.nameSnapshot} por ${newService.name})`;
+        await this.ensurePackageUpgradeBackingInTx(tx);
+        const diffSvcId = randomUUID();
+
+        if (effectiveChargeMode === 'add_to_package') {
+          const freshContract = { ...contract, items: [...contract.items.filter((i: any) => i.id !== oldItem.id && i.id !== updatedNewItem.id), updatedOldItem, updatedNewItem] };
+          await this.appendPendingContractValueInTx(tx, {
+            contract: freshContract,
+            amountCents: differenceCents,
+            description: `Dif. troca: ${oldAppSvc.nameSnapshot} por ${newService.name}`,
+            appointmentId,
+            petId: appointment.petId,
+            ledgerItemId: updatedNewItem.id,
+            actor,
+            idempotencySuffix: swapId,
+          });
+          await tx.petAppointmentService.create({
+            data: {
+              id: diffSvcId,
+              appointmentId,
+              serviceId: PACKAGE_UPGRADE_SERVICE_ID,
+              nameSnapshot: diffLabel,
+              priceSnapshot: new Prisma.Decimal(differenceAmount),
+              durationMinutes: 0,
+              customerPackageId: contract.id,
+              coverageStatus: 'none',
+              coveredAmount: new Prisma.Decimal(differenceAmount),
+            },
+          });
+        } else {
+          await tx.petAppointmentService.create({
+            data: {
+              id: diffSvcId,
+              appointmentId,
+              serviceId: PACKAGE_UPGRADE_SERVICE_ID,
+              nameSnapshot: diffLabel,
+              priceSnapshot: new Prisma.Decimal(differenceAmount),
+              durationMinutes: 0,
+              coverageStatus: 'none',
+              coveredAmount: new Prisma.Decimal(0),
+            },
+          });
+        }
+
+        history.push({
+          kind: 'service_added',
+          status: appointment.status,
+          label: `Diferença da troca: ${oldAppSvc.nameSnapshot} por ${newService.name}`,
+          appointmentServiceId: diffSvcId,
+          serviceId: PACKAGE_UPGRADE_SERVICE_ID,
+          at: nowIso,
+          userId: actor?.operatorId || actor?.userId || null,
+          userName: actor?.name || 'Administrador',
+          operatorId: recipientOp?.id || professionalOp?.id || null,
+          commissionRecipientName: recipientOp?.name || professionalOp?.name || null,
+          commissionState: null,
+          commissionAmount: 0,
+          addedToPackage: effectiveChargeMode === 'add_to_package',
+        });
+      }
+
+      const swapAuditNote = (() => {
+        const parts: string[] = [reason];
+        if (removedUpgradeTotal > 0) {
+          parts.push(`Diferença anterior não paga de R$ ${removedUpgradeTotal.toFixed(2).replace('.', ',')} removida`);
+        }
+        if (differenceCents > 0) {
+          parts.push(
+            `Diferença ${effectiveChargeMode === 'add_to_package' ? 'somada ao pacote' : effectiveChargeMode === 'charge_now' ? 'para cobrar agora' : 'a cobrar na saída'}: R$ ${differenceAmount.toFixed(2).replace('.', ',')}`,
+          );
+        } else if (body?.keepPackageValue === true) {
+          parts.push('Mantido valor atual do pacote (sem diferença)');
+        }
+        return parts.join(' · ');
+      })();
+
+      history.push({
+        kind: 'service_swapped',
+        status: appointment.status,
+        label: `Serviço trocado: ${oldAppSvc.nameSnapshot} por ${newService.name}`,
+        notes: swapAuditNote,
+        at: nowIso,
+        userId: actor?.operatorId || actor?.userId || null,
+        userName: actor?.name || 'Administrador',
+        operatorId: professionalOp?.id || recipientOp?.id || null,
+        operatorName: professionalOp?.name || recipientOp?.name || null,
+        skipped: false,
+      });
+
+      const remainingServicesForStages = (appointment.services || [])
+        .filter((s: any) => !oldServiceRowIds.includes(s.id) && !unpaidUpgradeFeeIds.includes(s.id) && !s.comboParentId && s.serviceId !== PACKAGE_UPGRADE_SERVICE_ID)
+        .map((s: any) => s.service || { name: s.nameSnapshot });
+      const resolvedStages = resolveChosenServicesStages([newService, ...remainingServicesForStages], this.pricing);
+
+      const remainingDuration = (appointment.services || [])
+        .filter((s: any) => !oldServiceRowIds.includes(s.id) && !unpaidUpgradeFeeIds.includes(s.id) && !s.comboParentId)
+        .reduce((acc: number, s: any) => acc + Math.max(0, Number(s.durationMinutes || 0)), 0);
+      const totalDuration = Math.max(15, remainingDuration + Math.max(15, Number(resolvedNew.durationMinutes || 60)));
+      const nextEndsAt = new Date(new Date(appointment.startsAt).getTime() + totalDuration * 60_000);
+
+      const nextProfessionalId = body?.professionalId === 'none'
+        ? null
+        : professionalOp?.id || appointment.professionalId;
+
+      if (nextProfessionalId) {
+        const conflict = await tx.petAppointment.findFirst({
+          where: {
+            id: { not: appointmentId },
+            professionalId: nextProfessionalId,
+            status: { notIn: ['cancelled', 'no_show'] },
+            startsAt: { lt: nextEndsAt },
+            endsAt: { gt: appointment.startsAt },
+          },
+        });
+        if (conflict) {
+          throw new ConflictException('O profissional selecionado já possui outro atendimento nesse novo intervalo de horário.');
+        }
+      }
+
+      const updatedAppointment = await tx.petAppointment.update({
+        where: { id: appointmentId },
+        data: {
+          customStages: resolvedStages,
+          endsAt: nextEndsAt,
+          professionalId: nextProfessionalId,
+          stageHistory: history,
+        },
+        include: {
+          pet: true,
+          customer: true,
+          professional: { select: { id: true, name: true } },
+          services: {
+            include: {
+              service: true,
+              customerPackage: {
+                select: { id: true, planNameSnapshot: true, expiresAt: true, status: true, paymentStatus: true },
+              },
+              customerPackageItem: {
+                select: {
+                  id: true,
+                  unitValueSnapshot: true,
+                  totalQuantity: true,
+                  usedQuantity: true,
+                  reservedQuantity: true,
+                  availableQuantity: true,
+                },
+              },
+            },
+          },
+        },
+      });
+
+      if (this.commissions?.recordExecution) {
+        const systemStageKeys = new Set(['requested', 'scheduled', 'checked_in', 'ready', 'delivered', 'cancelled', 'no_show']);
+        const nonStageKinds = new Set([
+          'service_added',
+          'service_swapped',
+          'taxi_added',
+          'prepayment',
+          'additional_charge',
+          'additional_charge_reversed',
+        ]);
+        const chosenOp = recipientOp || professionalOp || null;
+        let historyPatchedForActiveOp = false;
+        if (chosenOp && !systemStageKeys.has(appointment.status)) {
+          for (let i = history.length - 1; i >= 0; i--) {
+            const entry = history[i];
+            if (
+              entry &&
+              !entry.skipped &&
+              !entry.rescheduledFrom &&
+              !nonStageKinds.has(entry.kind || '') &&
+              entry.status === appointment.status &&
+              (!entry.operatorId || entry.operatorId !== chosenOp.id)
+            ) {
+              history[i] = { ...entry, operatorId: chosenOp.id, operatorName: chosenOp.name };
+              historyPatchedForActiveOp = true;
+              break;
+            }
+          }
+          if (historyPatchedForActiveOp && typeof tx.petAppointment.update === 'function') {
+            await tx.petAppointment.update({
+              where: { id: appointmentId },
+              data: { stageHistory: history },
+            });
+            updatedAppointment.stageHistory = history;
+          }
+        }
+
+        const stageSettingsRow = tx.tenantSettings?.findUnique
+          ? await tx.tenantSettings.findUnique({ where: { id: 'petshop_stages' }, select: { paymentMethodsConfig: true } })
+          : null;
+        const configuredStages = (stageSettingsRow?.paymentMethodsConfig as any)?.stages;
+        const trackedKeys = Array.isArray(configuredStages)
+          ? new Set<string>(configuredStages.filter((st: any) => st?.trackProfessional).map((st: any) => String(st.key)))
+          : new Set<string>(['bathing', 'grooming', 'finishing']);
+
+        const executedStages = new Map<string, { operatorId: string; at: string }>();
+        for (const entry of history) {
+          if (
+            !entry ||
+            entry.skipped ||
+            entry.rescheduledFrom ||
+            nonStageKinds.has(entry.kind || '') ||
+            systemStageKeys.has(entry.status) ||
+            !entry.operatorId
+          ) {
+            continue;
+          }
+          if (trackedKeys.has(entry.status)) {
+            executedStages.set(entry.status, {
+              operatorId: String(entry.operatorId),
+              at: entry.at || nowIso,
+            });
+          }
+        }
+
+        const execTarget = {
+          ...updatedAppointment,
+          services: updatedAppointment.services.map((s: any) => ({
+            ...s,
+            customerPackageItem: s.customerPackageItem || (s.id === newAppSvc.id ? updatedNewItem : null),
+          })),
+        };
+        for (const [stKey, execInfo] of executedStages.entries()) {
+          await this.commissions.recordExecution(tx, execTarget, stKey, execInfo.operatorId, new Date(execInfo.at));
+        }
+      }
+
+      return updatedAppointment;
+    });
+
+    const contract = await this.getContractById(contractId);
+    return {
+      appointment: {
+        ...result,
+        transport: parseAppointmentTransport(result.checkInNotes),
+        resolvedStages: result.customStages,
+      },
+      contract,
+    };
+  }
+
+  /**
+   * Wrapper por ID do agendamento para trocar o serviço reservado no pacote a partir da Agenda.
+   */
+  async exchangeAppointmentPackageService(
+    appointmentId: string,
+    body: {
+      contractId?: string;
+      oldAppointmentServiceId?: string;
+      oldServiceId?: string;
+      newServiceId: string;
+      differenceAmount?: number;
+      chargeMode?: 'none' | 'add_to_package' | 'charge_at_checkout' | 'charge_now';
+      replaceUnpaidUpgradeFees?: boolean;
+      keepPackageValue?: boolean;
+      reason?: string;
+      commissionRecipientId?: string;
+      professionalId?: string;
+    },
+    actor?: PackageActor,
+  ) {
+    const prisma = await this.prisma();
+    let contractId = body?.contractId ? String(body.contractId).trim() : '';
+    if (!contractId) {
+      const appService = await prisma.petAppointmentService.findFirst({
+        where: {
+          appointmentId,
+          coverageStatus: 'reserved',
+          customerPackageId: { not: null },
+          ...(body?.oldAppointmentServiceId ? { id: String(body.oldAppointmentServiceId) } : {}),
+          ...(body?.oldServiceId ? { serviceId: String(body.oldServiceId) } : {}),
+        },
+        select: { customerPackageId: true },
+      });
+      contractId = appService?.customerPackageId || '';
+    }
+    if (!contractId) {
+      throw new NotFoundException('Serviço de pacote reservado não encontrado para este agendamento.');
+    }
+    return this.exchangeSessionService(contractId, { ...body, appointmentId }, actor);
+  }
+
+  /**
+   * Converte créditos livres (availableQuantity > 0) de um serviço para outro dentro do contrato de pacote.
+   */
+  async exchangeAvailableCredit(
+    contractId: string,
+    body: {
+      oldServiceId: string;
+      newServiceId: string;
+      quantity?: number;
+      differenceAmount?: number;
+      chargeMode?: 'none' | 'add_to_package';
+      reason?: string;
+    },
+    rawActor?: PackageActor,
+  ) {
+    const prisma = await this.prisma();
+    const actor = await this.resolveActor(prisma, rawActor);
+
+    const oldServiceId = String(body?.oldServiceId ?? '').trim();
+    const newServiceId = String(body?.newServiceId ?? '').trim();
+    const quantity = Number(body?.quantity ?? 1);
+    if (!oldServiceId || !newServiceId) throw new BadRequestException('Informe o serviço atual e o novo serviço.');
+    if (oldServiceId === newServiceId) throw new BadRequestException('Escolha um serviço diferente do atual.');
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 50) {
+      throw new BadRequestException('Quantidade para conversão inválida.');
+    }
+
+    const differenceCents = moneyCents(body?.differenceAmount ?? 0, 'Diferença de valor');
+    const chargeMode = differenceCents === 0 ? 'none' : body?.chargeMode === 'add_to_package' ? 'add_to_package' : 'none';
+    if (differenceCents > 0 && chargeMode !== 'add_to_package') {
+      throw new BadRequestException('Para crédito ainda não agendado, a diferença só pode ser somada a um pacote pendente ou cobrada no agendamento da sessão.');
+    }
+    const reason = String(body?.reason ?? '').trim() || 'Conversão de saldo do pacote';
+
+    const [preContract, newService] = await Promise.all([
+      prisma.customerPetPackage.findUnique({ where: { id: contractId }, select: { id: true, customerId: true, comandaId: true } }),
+      prisma.petService.findUnique({ where: { id: newServiceId } }),
+    ]);
+    if (!preContract) throw new NotFoundException('Contrato de pacote não encontrado.');
+    if (!newService || !newService.active) throw new BadRequestException('Novo serviço inválido ou inativo.');
+
+    await prisma.$transaction(async tx => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw`SELECT id FROM customers WHERE id = ${preContract.customerId} FOR UPDATE`;
+        if (preContract.comandaId) {
+          await tx.$queryRaw`SELECT id FROM comandas WHERE id = ${preContract.comandaId} FOR UPDATE`;
+        }
+        await tx.$queryRaw`SELECT id FROM customer_pet_packages WHERE id = ${contractId} FOR UPDATE`;
+        await tx.$queryRaw`SELECT id FROM customer_pet_package_items WHERE customerPackageId = ${contractId} ORDER BY id ASC FOR UPDATE`;
+      }
+
+      const contract = await tx.customerPetPackage.findUnique({
+        where: { id: contractId },
+        include: { items: true },
+      });
+      if (!contract) throw new NotFoundException('Contrato de pacote não encontrado.');
+      if (contract.status !== 'active' || contract.paymentStatus === 'cancelled') {
+        throw new BadRequestException('Somente pacotes ativos permitem converter saldo.');
+      }
+
+      const oldItem = contract.items.find((i: any) => i.serviceId === oldServiceId);
+      if (!oldItem || Number(oldItem.availableQuantity) < quantity) {
+        throw new ConflictException('Saldo livre insuficiente neste serviço para converter.');
+      }
+
+      const swapId = randomUUID();
+      const nextOldTotal = Number(oldItem.totalQuantity) - quantity;
+      const nextOldAvail = Number(oldItem.availableQuantity) - quantity;
+      const updatedOldItem = await tx.customerPetPackageItem.update({
+        where: { id: oldItem.id },
+        data: { totalQuantity: nextOldTotal, availableQuantity: nextOldAvail },
+      });
+
+      const existingNew = contract.items.find((i: any) => i.serviceId === newService.id);
+      let updatedNewItem: any;
+      if (existingNew) {
+        updatedNewItem = await tx.customerPetPackageItem.update({
+          where: { id: existingNew.id },
+          data: {
+            totalQuantity: Number(existingNew.totalQuantity) + quantity,
+            availableQuantity: Number(existingNew.availableQuantity) + quantity,
+          },
+        });
+      } else {
+        updatedNewItem = await tx.customerPetPackageItem.create({
+          data: {
+            customerPackageId: contract.id,
+            serviceId: newService.id,
+            serviceNameSnapshot: newService.name,
+            unitValueSnapshot: oldItem.unitValueSnapshot,
+            totalQuantity: quantity,
+            reservedQuantity: 0,
+            usedQuantity: 0,
+            availableQuantity: quantity,
+          },
+        });
+      }
+
+      const fullReason = `${reason}: ${quantity}x ${oldItem.serviceNameSnapshot} por ${newService.name}`;
+      await tx.customerPetPackageLedger.create({
+        data: {
+          idempotencyKey: `swap-credit-out:${swapId}`,
+          customerPackageId: contract.id,
+          customerPackageItemId: updatedOldItem.id,
+          petId: contract.petId,
+          eventType: 'SERVICE_SWAP_OUT',
+          quantityDelta: -quantity,
+          balanceAfter: Number(updatedOldItem.availableQuantity),
+          usedAfter: Number(updatedOldItem.usedQuantity),
+          reservedAfter: Number(updatedOldItem.reservedQuantity),
+          operatorId: actor?.operatorId || actor?.userId || null,
+          operatorName: actor?.name || null,
+          reason: fullReason,
+        },
+      });
+      await tx.customerPetPackageLedger.create({
+        data: {
+          idempotencyKey: `swap-credit-in:${swapId}`,
+          customerPackageId: contract.id,
+          customerPackageItemId: updatedNewItem.id,
+          petId: contract.petId,
+          eventType: 'SERVICE_SWAP_IN',
+          quantityDelta: quantity,
+          balanceAfter: Number(updatedNewItem.availableQuantity),
+          usedAfter: Number(updatedNewItem.usedQuantity),
+          reservedAfter: Number(updatedNewItem.reservedQuantity),
+          operatorId: actor?.operatorId || actor?.userId || null,
+          operatorName: actor?.name || null,
+          reason: fullReason,
+        },
+      });
+
+      if (differenceCents > 0 && chargeMode === 'add_to_package') {
+        await this.appendPendingContractValueInTx(tx, {
+          contract: { ...contract, items: [updatedNewItem] },
+          amountCents: differenceCents,
+          description: `Conversão: ${quantity}x ${oldItem.serviceNameSnapshot} por ${newService.name}`,
+          petId: contract.petId,
+          ledgerItemId: updatedNewItem.id,
+          actor,
+          idempotencySuffix: swapId,
+        });
+      }
+    });
+
+    return this.getContractById(contractId);
   }
 
   // ===========================================================================

@@ -203,6 +203,9 @@ export class SalesService {
 
       let cashRegister: any = null;
       if (targetCashRegisterId) {
+        if (typeof tx.$queryRaw === 'function') {
+          await tx.$queryRaw`SELECT id FROM cash_registers WHERE id = ${targetCashRegisterId} FOR UPDATE`;
+        }
         cashRegister = await tx.cashRegister.findUnique({
           where: { id: targetCashRegisterId }
         });
@@ -335,7 +338,7 @@ export class SalesService {
           });
           if (!servicosCategory) {
             servicosCategory = await tx.category.create({
-              data: { name: 'Serviços', color: '#0d9488' },
+              data: { name: 'Serviços' },
             });
           }
 
@@ -384,27 +387,52 @@ export class SalesService {
       // Subtotal dos itens normais/extras
       for (const item of itemsForProcessing) {
         const qty = Number(item.quantity);
+        const priceUnitNum = Number(item.priceUnit);
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new BadRequestException('Quantidade inválida no item da venda.');
+        }
+        if (!Number.isFinite(priceUnitNum) || priceUnitNum < 0) {
+          throw new BadRequestException('Preço unitário inválido no item da venda.');
+        }
         const priceUnit = new Prisma.Decimal(item.priceUnit);
         const itemSubtotal = priceUnit.mul(new Prisma.Decimal(qty)).toDecimalPlaces(2);
         subtotal = subtotal.add(itemSubtotal);
       }
 
-
-      const discount = new Prisma.Decimal(data.discount || 0);
+      const discountNum = Number(data.discount || 0);
+      if (!Number.isFinite(discountNum) || discountNum < 0) {
+        throw new BadRequestException('Desconto inválido.');
+      }
+      const discount = new Prisma.Decimal(discountNum);
+      if (discount.gt(subtotal)) {
+        throw new BadRequestException('O desconto não pode ser maior que o subtotal da venda.');
+      }
       let total = subtotal.sub(discount);
 
       // Calcular total pago para detectar acréscimo (ex: iFood com valor maior que o carrinho)
+      const rawPayments = Array.isArray(data.payments) ? data.payments : [];
       let paymentsTotal = new Prisma.Decimal(0);
-      const paymentsData = data.payments.map((pay: any) => {
-        paymentsTotal = paymentsTotal.add(new Prisma.Decimal(pay.value));
+      const paymentsData = rawPayments.map((pay: any) => {
+        const val = Number(pay.value);
+        const troco = Number(pay.troco || 0);
+        if (!Number.isFinite(val) || val < 0 || !Number.isFinite(troco) || troco < 0) {
+          throw new BadRequestException('Valor de pagamento inválido.');
+        }
+        paymentsTotal = paymentsTotal.add(new Prisma.Decimal(val));
         return {
           tPag:   TPAG_MAP[pay.method] ?? '99',
           method: pay.method,
           label:  pay.label ?? null, // label customizado (ex: "iFood")
-          value:  Number(pay.value),
-          troco:  Number(pay.troco || 0),
+          value:  val,
+          troco,
         };
       });
+
+      if (total.gt(0) && !isConsumption && (paymentsData.length > 0 || !isAjusteFiscal)) {
+        if (paymentsTotal.add(new Prisma.Decimal('0.01')).lt(total)) {
+          throw new BadRequestException('O valor total pago é inferior ao total da venda.');
+        }
+      }
 
       let addition = new Prisma.Decimal(0);
       if (paymentsTotal.gt(total)) {
@@ -537,7 +565,7 @@ export class SalesService {
 
           await tx.product.update({
             where: { id: product.id },
-            data: { salesCount: { increment: qty } },
+            data: { salesCount: { increment: Math.max(1, Math.round(Math.abs(qty))) } },
           });
 
           const isServiceCi =
@@ -709,7 +737,7 @@ export class SalesService {
           }
           await tx.product.update({
             where: { id: item.productId },
-            data: { salesCount: { increment: qty } },
+            data: { salesCount: { increment: Math.max(1, Math.round(Math.abs(qty))) } },
           });
 
           const chosenModifiers = item.modifiers || [];
@@ -807,7 +835,7 @@ export class SalesService {
                 },
                 data: {
                   stock: { decrement: new Prisma.Decimal(qty) },
-                  salesCount: { increment: qty }
+                  salesCount: { increment: Math.max(1, Math.round(Math.abs(qty))) }
                 }
               });
               if (updateResult.count === 0) {
@@ -818,7 +846,7 @@ export class SalesService {
                 where: { id: item.productId },
                 data: { 
                   stock: { decrement: new Prisma.Decimal(qty) },
-                  salesCount: { increment: qty }
+                  salesCount: { increment: Math.max(1, Math.round(Math.abs(qty))) }
                 },
               });
             }
@@ -843,7 +871,7 @@ export class SalesService {
             // Sem movimentação de estoque (ou Serviço) — apenas incrementa contador de vendas
             await tx.product.update({
               where: { id: item.productId },
-              data: { salesCount: { increment: qty } },
+              data: { salesCount: { increment: Math.max(1, Math.round(Math.abs(qty))) } },
             });
           }
         }
@@ -1497,6 +1525,10 @@ export class SalesService {
     const prisma = await this.getPrisma();
 
     const sale = await prisma.$transaction(async (tx: any) => {
+      if (typeof tx.$queryRaw === 'function') {
+        await tx.$queryRaw`SELECT id FROM sales WHERE id = ${saleId} FOR UPDATE`;
+      }
+
       const existingSale = await tx.sale.findUnique({
         where: { id: saleId },
         include: {
@@ -1520,14 +1552,24 @@ export class SalesService {
         throw new BadRequestException('Esta venda já está cancelada.');
       }
 
+      if (typeof tx.$queryRaw === 'function') {
+        const productIdsToLock = [
+          ...existingSale.items.map((i: any) => i.productId),
+          ...existingSale.items.flatMap((i: any) =>
+            (i.lotConsumptions || []).map((c: any) => c.lot?.productId).filter(Boolean),
+          ),
+        ];
+        if (productIdsToLock.length > 0) {
+          await lockProducts(tx, productIdsToLock);
+        }
+      }
+
       // Estornar cada item consumido de volta aos lotes e produtos
       for (const item of existingSale.items) {
-        // Reduzir contagem de vendas do produto pai
-        // Nota: item.quantity vem como Prisma.Decimal; salesCount é Integer,
-        // por isso o cast explícito com Number() é necessário.
+        // Reduzir contagem de vendas do produto pai (salesCount é Int)
         await tx.product.update({
           where: { id: item.productId },
-          data: { salesCount: { decrement: Number(item.quantity) } }
+          data: { salesCount: { decrement: Math.max(1, Math.round(Math.abs(Number(item.quantity) || 1))) } }
         });
 
         for (const consumption of item.lotConsumptions) {
@@ -1563,7 +1605,7 @@ export class SalesService {
           status: 'cancelled',
           cancelReason: reason,
           cancelledAt: new Date(),
-          nfceStatus: 'cancelada'
+          nfceStatus: existingSale.nfceStatus ? 'cancelada' : existingSale.nfceStatus,
         },
         include: {
           items: true,
@@ -1573,10 +1615,19 @@ export class SalesService {
 
       const petComanda = await tx.comanda.findFirst({ where: { saleId }, include: { items: { where: { status: 'active' }, select: { notes: true } } } });
       const petLink = appointmentLinkFromComanda(petComanda?.notes);
-      if (petLink?.isAddon) {
+      if (petLink) {
+        if (!petLink.isAddon) {
+          const anotherPayment = await tx.comanda.findFirst({ where: {
+            notes: { contains: petLink.appointmentId }, status: 'closed',
+            sale: { is: { status: 'completed' } },
+          }, select: { id: true } });
+          if (anotherPayment) throw new ConflictException('Estorne primeiro as cobranças adicionais deste atendimento.');
+        }
         const serviceIds = chargedServiceIds(petComanda);
         if (serviceIds.length) {
-          const commissionRows = await tx.petCommission.findMany({ where: { appointmentServiceId: { in: serviceIds }, state: { not: 'REVERSED' } } });
+          const commissionRows = await tx.petCommission.findMany({ where: {
+            appointmentServiceId: { in: serviceIds }, stageKey: 'service_added', state: { not: 'REVERSED' },
+          } });
           for (const commission of commissionRows) {
             await tx.petCommission.update({ where: { id: commission.id }, data: {
               state: 'REVERSED', reversedAt: new Date(), reversedById: this.tenantContext.get().userId || 'system', reversalReason: reason,
@@ -1585,12 +1636,21 @@ export class SalesService {
               commissionId: commission.id, amount: commission.amount.negated(), reason, actorId: this.tenantContext.get().userId || 'system',
             } });
           }
-          await tx.petAppointmentService.updateMany({ where: { appointmentId: petLink.appointmentId, id: { in: serviceIds }, chargedSaleId: saleId }, data: { chargedSaleId: null } });
-          const appointment = await tx.petAppointment.findUnique({ where: { id: petLink.appointmentId }, select: { stageHistory: true, status: true } });
-          if (appointment) await tx.petAppointment.update({ where: { id: petLink.appointmentId }, data: { stageHistory: [
-            ...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []),
-            { kind: 'additional_charge_reversed', status: appointment.status, label: 'Cobrança adicional estornada', at: new Date().toISOString(), saleId, serviceIds, reason },
-          ] } });
+        }
+        await tx.petAppointmentService.updateMany({ where: { appointmentId: petLink.appointmentId, chargedSaleId: saleId }, data: { chargedSaleId: null } });
+        const appointment = await tx.petAppointment.findUnique({ where: { id: petLink.appointmentId }, select: { stageHistory: true, status: true } });
+        if (appointment) {
+          const reopen = !petLink.isAddon && appointment.status === 'delivered';
+          await tx.petAppointment.update({ where: { id: petLink.appointmentId }, data: {
+            ...(reopen ? { status: 'ready', completedAt: null } : {}),
+            stageHistory: [
+              ...(Array.isArray(appointment.stageHistory) ? appointment.stageHistory : []),
+              { kind: petLink.isAddon ? 'additional_charge_reversed' : 'payment_reversed',
+                status: reopen ? 'ready' : appointment.status,
+                label: petLink.isAddon ? 'Cobrança adicional estornada' : 'Pagamento estornado',
+                at: new Date().toISOString(), saleId, serviceIds, reason },
+            ],
+          } });
         }
       }
 

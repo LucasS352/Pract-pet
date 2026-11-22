@@ -102,8 +102,8 @@ function NameAutocomplete({
     }
     return () => {
       document.removeEventListener('mousedown', handleClick);
-      window.addEventListener('resize', handleScrollOrResize);
-      window.addEventListener('scroll', handleScrollOrResize, true);
+      window.removeEventListener('resize', handleScrollOrResize);
+      window.removeEventListener('scroll', handleScrollOrResize, true);
     };
   }, [open, updatePosition]);
 

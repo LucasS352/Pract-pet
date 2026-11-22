@@ -4,13 +4,15 @@ export async function withSaleOperationLock<T>(tenantId: string, localId: string
   if (typeof navigator === 'undefined' || !navigator.locks) {
     return work();
   }
+  let workStarted = false;
   try {
     return await navigator.locks.request(`7bar-sale:${tenantId}:${localId}`, { ifAvailable: true }, async lock => {
       if (!lock) throw new Error('Esta operação já está sendo enviada em outra aba. Aguarde a confirmação.');
-      return work();
+      workStarted = true;
+      return await work();
     });
   } catch (err: any) {
-    if (err?.message?.includes('outra aba')) throw err;
+    if (workStarted || err?.message?.includes('outra aba')) throw err;
     console.warn('[SaleLock] Fallback para execução direta:', err);
     return work();
   }

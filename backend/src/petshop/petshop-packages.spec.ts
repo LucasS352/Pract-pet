@@ -668,6 +668,511 @@ describe('PetshopPackagesService & PetshopWhatsappService', () => {
     });
   });
 
+  describe('PetshopPackagesService — Troca de Serviço & Cobrança de Diferença', () => {
+    const buildExchangeHarness = (overrides?: {
+      paymentStatus?: string;
+      contractComandaId?: string | null;
+      appointmentStatus?: string;
+      settledCommission?: boolean;
+    }) => {
+      const paymentStatus = overrides?.paymentStatus ?? 'paid';
+      const contractComandaId = overrides?.contractComandaId ?? 'cmd-pkg-1';
+      const appointmentStatus = overrides?.appointmentStatus ?? 'scheduled';
+      const { PetshopPricingService } = require('./petshop-pricing.service');
+      const pricingService = new PetshopPricingService();
+
+      const oldItemState = {
+        id: 'citem-banho',
+        customerPackageId: 'pkg-1',
+        serviceId: 'svc-banho',
+        serviceNameSnapshot: 'Banho',
+        unitValueSnapshot: 50,
+        totalQuantity: 4,
+        reservedQuantity: 1,
+        usedQuantity: 0,
+        availableQuantity: 3,
+      };
+      const existingNewItem = {
+        id: 'citem-tosa',
+        customerPackageId: 'pkg-1',
+        serviceId: 'svc-tosa',
+        serviceNameSnapshot: 'Tosa',
+        unitValueSnapshot: 80,
+        totalQuantity: 0,
+        reservedQuantity: 0,
+        usedQuantity: 0,
+        availableQuantity: 0,
+      };
+
+      const contractRow: any = {
+        id: 'pkg-1',
+        customerId: 'cust-1',
+        petId: 'pet-1',
+        comandaId: contractComandaId,
+        status: 'active',
+        paymentStatus,
+        planNameSnapshot: 'Pacote 4 Banhos',
+        basePriceSnapshot: 200,
+        discountAmount: 0,
+        finalPrice: 200,
+        expiresAt: new Date('2026-12-31T23:59:59Z'),
+        notes: JSON.stringify({
+          packageGroup: { id: 'grp-1', mode: 'per_pet', petIds: ['pet-1'], petNames: ['Thor'], totalGroupPrice: 200 },
+        }),
+        items: [oldItemState],
+      };
+
+      const oldServiceRow = {
+        id: 'asvc-banho-1',
+        appointmentId: 'apt-1',
+        serviceId: 'svc-banho',
+        nameSnapshot: 'Banho',
+        priceSnapshot: 50,
+        durationMinutes: 45,
+        customerPackageId: 'pkg-1',
+        customerPackageItemId: 'citem-banho',
+        coverageStatus: 'reserved',
+        chargedSaleId: null,
+        comboParentId: null,
+        service: { id: 'svc-banho', name: 'Banho', customStages: ['checked_in', 'bathing', 'finishing', 'ready'] },
+      };
+
+      const createdServices: any[] = [];
+      const createdLedgers: any[] = [];
+      const updatedAppointmentCalls: any[] = [];
+      const comandaItemCreates: any[] = [];
+      const comandaUpdates: any[] = [];
+      const contractUpdates: any[] = [];
+      const deletedCommissions: any[] = [];
+
+      const newServiceObj = {
+        id: 'svc-tosa',
+        name: 'Tosa Completa',
+        active: true,
+        price: 80,
+        durationMinutes: 75,
+        serviceType: 'INDIVIDUAL',
+        customStages: ['checked_in', 'bathing', 'grooming', 'finishing', 'ready'],
+        pricingRules: [],
+        comboItems: [],
+      };
+
+      const tx: any = {
+        $queryRaw: jest.fn().mockImplementation((query: any) => {
+          const sqlText = Array.isArray(query?.strings) ? query.strings.join('') : String(query || '');
+          if (sqlText.includes('FROM operators')) {
+            return Promise.resolve([{ id: 'op-tosa', name: 'Carla Tosadora', active: true }]);
+          }
+          return Promise.resolve([]);
+        }),
+        operator: {
+          findMany: jest.fn().mockResolvedValue([{ id: 'op-tosa', name: 'Carla Tosadora', active: true }]),
+        },
+        customerPetPackage: {
+          findUnique: jest.fn().mockResolvedValue(contractRow),
+          update: jest.fn().mockImplementation(args => {
+            contractUpdates.push(args);
+            return Promise.resolve({ ...contractRow, ...args.data });
+          }),
+        },
+        petAppointment: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'apt-1',
+            petId: 'pet-1',
+            customerId: 'cust-1',
+            professionalId: 'op-banho',
+            status: appointmentStatus,
+            startsAt: new Date('2026-11-25T14:00:00Z'),
+            endsAt: new Date('2026-11-25T14:45:00Z'),
+            checkInNotes: null,
+            stageHistory: [],
+            pet: { id: 'pet-1', name: 'Thor', species: 'dog', size: 'medium', coatType: 'short' },
+            services: [oldServiceRow],
+          }),
+          findFirst: jest.fn().mockResolvedValue(null),
+          update: jest.fn().mockImplementation(args => {
+            updatedAppointmentCalls.push(args.data);
+            return Promise.resolve({
+              id: 'apt-1',
+              startsAt: new Date('2026-11-25T14:00:00Z'),
+              ...args.data,
+              pet: { id: 'pet-1', name: 'Thor' },
+              customer: { id: 'cust-1', name: 'Lucas' },
+              professional: { id: 'op-tosa', name: 'Carla Tosadora' },
+              services: createdServices,
+            });
+          }),
+        },
+        petCommission: {
+          findFirst: jest.fn().mockResolvedValue(overrides?.settledCommission ? { id: 'comm-approved' } : null),
+          deleteMany: jest.fn().mockImplementation(args => {
+            deletedCommissions.push(args);
+            return Promise.resolve({ count: 1 });
+          }),
+        },
+        customerPetPackageItem: {
+          update: jest.fn().mockImplementation(args => {
+            const base = args.where.id === 'citem-banho' ? oldItemState : existingNewItem;
+            return Promise.resolve({ ...base, ...args.data });
+          }),
+          create: jest.fn().mockImplementation(args => Promise.resolve({ id: 'citem-tosa-new', ...args.data })),
+        },
+        customerPetPackageLedger: {
+          create: jest.fn().mockImplementation(args => {
+            createdLedgers.push(args.data);
+            return Promise.resolve(args.data);
+          }),
+        },
+        petAppointmentService: {
+          deleteMany: jest.fn().mockResolvedValue({ count: 0 }),
+          delete: jest.fn().mockResolvedValue(oldServiceRow),
+          create: jest.fn().mockImplementation(args => {
+            const row = { id: args.data.id || `asvc-${createdServices.length + 1}`, ...args.data };
+            createdServices.push(row);
+            return Promise.resolve(row);
+          }),
+        },
+        petService: { upsert: jest.fn().mockResolvedValue({ id: 'petshop-package-upgrade-fee' }) },
+        category: { findFirst: jest.fn().mockResolvedValue({ id: 'cat-svc' }), create: jest.fn() },
+        product: { upsert: jest.fn().mockResolvedValue({ id: 'petshop-package-upgrade-fee' }) },
+        comanda: {
+          findUnique: jest.fn().mockResolvedValue(
+            contractComandaId ? { id: contractComandaId, status: 'open', saleId: null, total: 200 } : null,
+          ),
+          update: jest.fn().mockImplementation(args => {
+            comandaUpdates.push(args);
+            return Promise.resolve({ id: contractComandaId, ...args.data });
+          }),
+        },
+        comandaItem: {
+          create: jest.fn().mockImplementation(args => {
+            comandaItemCreates.push(args.data);
+            return Promise.resolve(args.data);
+          }),
+        },
+      };
+
+      const prismaMock: any = {
+        customerPetPackage: {
+          findUnique: jest.fn().mockResolvedValue({
+            ...contractRow,
+            items: [oldItemState],
+            ledgerEvents: [],
+            customer: { id: 'cust-1', name: 'Lucas' },
+            pet: { id: 'pet-1', name: 'Thor' },
+          }),
+          updateMany: jest.fn(),
+        },
+        petService: { findUnique: jest.fn().mockResolvedValue(newServiceObj) },
+        petAppointment: { findMany: jest.fn().mockResolvedValue([]) },
+        $transaction: jest.fn(async cb => cb(tx)),
+      };
+
+      const pkgService = new PetshopPackagesService(
+        { getTenantClient: jest.fn().mockResolvedValue(prismaMock) } as any,
+        { get: jest.fn().mockReturnValue({ tenantId: 'tenant-1', databaseUrl: 'mysql://test' }) } as any,
+        undefined,
+        pricingService,
+      );
+
+      return {
+        pkgService,
+        tx,
+        prismaMock,
+        createdServices,
+        createdLedgers,
+        updatedAppointmentCalls,
+        comandaItemCreates,
+        comandaUpdates,
+        contractUpdates,
+        deletedCommissions,
+      };
+    };
+
+    it('troca serviço reservado sem diferença, recalcula etapas com tosa e preserva linha zerada no pacote', async () => {
+      const h = buildExchangeHarness();
+
+      const res = await h.pkgService.exchangeSessionService('pkg-1', {
+        appointmentId: 'apt-1',
+        oldAppointmentServiceId: 'asvc-banho-1',
+        newServiceId: 'svc-tosa',
+        differenceAmount: 0,
+        chargeMode: 'none',
+        professionalId: 'op-tosa',
+        reason: 'Tutor pediu tosa',
+      }, { userId: 'u-1', name: 'Admin Lucas' });
+
+      expect(h.tx.customerPetPackageItem.update).toHaveBeenCalledWith({
+        where: { id: 'citem-banho' },
+        data: { totalQuantity: 3, reservedQuantity: 0, availableQuantity: 3 },
+      });
+      expect(h.tx.customerPetPackageItem.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          serviceId: 'svc-tosa',
+          totalQuantity: 1,
+          reservedQuantity: 1,
+          availableQuantity: 0,
+        }),
+      });
+      expect(h.createdLedgers.map(l => l.eventType)).toEqual(['SERVICE_SWAP_OUT', 'SERVICE_SWAP_IN']);
+      expect(h.deletedCommissions).toHaveLength(1);
+      expect(h.updatedAppointmentCalls[0].customStages).toContain('grooming');
+      expect(h.updatedAppointmentCalls[0].professionalId).toBe('op-tosa');
+      expect(h.updatedAppointmentCalls[0].stageHistory).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'service_swapped',
+          label: 'Serviço trocado: Banho por Tosa Completa',
+          operatorName: 'Carla Tosadora',
+        }),
+      ]));
+      expect(h.createdLedgers[0].reason).toContain('Banho por Tosa Completa');
+      expect(h.createdLedgers[0].reason).not.toContain('→');
+      expect(res.appointment.resolvedStages).toContain('grooming');
+    });
+
+    it('bloqueia troca quando já existe comissão aprovada ou paga no serviço reservado', async () => {
+      const h = buildExchangeHarness({ settledCommission: true });
+
+      await expect(
+        h.pkgService.exchangeSessionService('pkg-1', {
+          appointmentId: 'apt-1',
+          newServiceId: 'svc-tosa',
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('soma diferença no contrato e na comanda PKG1 quando chargeMode=add_to_package', async () => {
+      const h = buildExchangeHarness({ paymentStatus: 'pending', contractComandaId: 'cmd-pkg-1' });
+
+      await h.pkgService.exchangeSessionService('pkg-1', {
+        appointmentId: 'apt-1',
+        newServiceId: 'svc-tosa',
+        differenceAmount: 30,
+        chargeMode: 'add_to_package',
+        commissionRecipientId: 'op-tosa',
+      }, { userId: 'u-1', name: 'Admin' });
+
+      expect(h.contractUpdates).toHaveLength(1);
+      expect(Number(h.contractUpdates[0].data.finalPrice)).toBe(230);
+      expect(JSON.parse(h.contractUpdates[0].data.notes).packageGroup.totalGroupPrice).toBe(230);
+      expect(h.comandaItemCreates).toHaveLength(1);
+      expect(Number(h.comandaItemCreates[0].totalPrice)).toBe(30);
+      expect(Number(h.comandaUpdates[0].data.total)).toBe(230);
+      expect(h.createdLedgers.some(l => l.eventType === 'VALUE_ADJUSTMENT')).toBe(true);
+      const diffSvc = h.createdServices.find(s => s.serviceId === 'petshop-package-upgrade-fee');
+      expect(Number(diffSvc.priceSnapshot)).toBe(30);
+      expect(Number(diffSvc.coveredAmount)).toBe(30);
+    });
+
+    it('cria linha cobrável avulsa de diferença quando chargeMode=charge_now', async () => {
+      const h = buildExchangeHarness({ paymentStatus: 'paid' });
+
+      await h.pkgService.exchangeSessionService('pkg-1', {
+        appointmentId: 'apt-1',
+        newServiceId: 'svc-tosa',
+        differenceAmount: 35,
+        chargeMode: 'charge_now',
+        commissionRecipientId: 'op-tosa',
+      }, { userId: 'u-1', name: 'Admin' });
+
+      const diffSvc = h.createdServices.find(s => s.serviceId === 'petshop-package-upgrade-fee');
+      expect(diffSvc).toBeDefined();
+      expect(Number(diffSvc.priceSnapshot)).toBe(35);
+      expect(Number(diffSvc.coveredAmount)).toBe(0);
+      expect(h.updatedAppointmentCalls[0].stageHistory).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'service_added',
+          operatorId: 'op-tosa',
+          addedToPackage: false,
+        }),
+      ]));
+    });
+
+    it('converte créditos livres do contrato preservando histórico no ledger', async () => {
+      const h = buildExchangeHarness();
+
+      await h.pkgService.exchangeAvailableCredit('pkg-1', {
+        oldServiceId: 'svc-banho',
+        newServiceId: 'svc-tosa',
+        quantity: 2,
+        differenceAmount: 0,
+        chargeMode: 'none',
+        reason: 'Conversão de saldo',
+      }, { userId: 'u-1', name: 'Admin' });
+
+      expect(h.tx.customerPetPackageItem.update).toHaveBeenCalledWith({
+        where: { id: 'citem-banho' },
+        data: { totalQuantity: 2, availableQuantity: 1 },
+      });
+      expect(h.tx.customerPetPackageItem.create).toHaveBeenCalledWith({
+        data: expect.objectContaining({
+          serviceId: 'svc-tosa',
+          totalQuantity: 2,
+          availableQuantity: 2,
+          reservedQuantity: 0,
+        }),
+      });
+      expect(h.createdLedgers.map(l => l.eventType)).toEqual(['SERVICE_SWAP_OUT', 'SERVICE_SWAP_IN']);
+    });
+
+    it('permite trocar o mesmo agendamento mais de uma vez mesmo se chargedSaleId foi gravado indevidamente no item reservado', async () => {
+      const h = buildExchangeHarness();
+      const firstApt = await h.tx.petAppointment.findUnique({ where: { id: 'apt-1' } });
+      firstApt.services[0].chargedSaleId = 'sale-addon-anterior';
+
+      await h.pkgService.exchangeSessionService('pkg-1', {
+        appointmentId: 'apt-1',
+        oldAppointmentServiceId: 'asvc-banho-1',
+        oldServiceId: 'svc-banho',
+        newServiceId: 'svc-tosa',
+        differenceAmount: 0,
+        chargeMode: 'none',
+        reason: 'Segunda troca consecutiva',
+      }, { userId: 'u-1', name: 'Lucas' });
+
+      expect(h.createdLedgers.map(l => l.eventType)).toEqual(['SERVICE_SWAP_OUT', 'SERVICE_SWAP_IN']);
+      expect(h.updatedAppointmentCalls[0].customStages).toContain('grooming');
+    });
+
+    it('recalcula comissões das etapas já executadas para o novo serviço ao trocar no meio do atendimento', async () => {
+      const h = buildExchangeHarness({ appointmentStatus: 'grooming' });
+      const { PetshopPricingService } = require('./petshop-pricing.service');
+      const mockCommissions = { recordExecution: jest.fn().mockResolvedValue(undefined) };
+      const svcWithCommissions = new PetshopPackagesService(
+        { getTenantClient: jest.fn().mockResolvedValue(h.prismaMock) } as any,
+        { get: jest.fn().mockReturnValue({ tenantId: 'tenant-1', databaseUrl: 'mysql://test' }) } as any,
+        mockCommissions as any,
+        new PetshopPricingService(),
+      );
+
+      h.tx.petAppointment.findUnique.mockResolvedValueOnce({
+        id: 'apt-1',
+        petId: 'pet-1',
+        customerId: 'cust-1',
+        professionalId: 'op-tosa',
+        status: 'grooming',
+        startsAt: new Date('2026-11-25T14:00:00Z'),
+        endsAt: new Date('2026-11-25T14:45:00Z'),
+        checkInNotes: null,
+        stageHistory: [
+          { status: 'checked_in', at: '2026-11-25T14:00:00Z', skipped: false },
+          { status: 'bathing', at: '2026-11-25T14:15:00Z', operatorId: 'op-banho', operatorName: 'Sara', skipped: false },
+          { status: 'grooming', at: '2026-11-25T14:30:00Z', operatorId: 'op-antigo', operatorName: 'Antigo responsável', skipped: false },
+        ],
+        pet: { id: 'pet-1', name: 'Thor', species: 'dog', size: 'medium', coatType: 'short' },
+        services: [
+          {
+            id: 'asvc-banho-1',
+            appointmentId: 'apt-1',
+            serviceId: 'svc-banho',
+            nameSnapshot: 'Banho',
+            priceSnapshot: 50,
+            durationMinutes: 45,
+            customerPackageId: 'pkg-1',
+            customerPackageItemId: 'citem-banho',
+            coverageStatus: 'reserved',
+            chargedSaleId: null,
+            comboParentId: null,
+            service: { id: 'svc-banho', name: 'Banho', customStages: ['checked_in', 'bathing', 'finishing', 'ready'] },
+          },
+        ],
+      });
+
+      await svcWithCommissions.exchangeSessionService('pkg-1', {
+        appointmentId: 'apt-1',
+        newServiceId: 'svc-tosa',
+        commissionRecipientId: 'op-tosa',
+      }, { userId: 'u-1', name: 'Lucas' });
+
+      expect(mockCommissions.recordExecution).toHaveBeenCalledTimes(2);
+      expect(mockCommissions.recordExecution).toHaveBeenCalledWith(
+        h.tx,
+        expect.any(Object),
+        'bathing',
+        'op-banho',
+        new Date('2026-11-25T14:15:00Z'),
+      );
+      expect(mockCommissions.recordExecution).toHaveBeenCalledWith(
+        h.tx,
+        expect.any(Object),
+        'grooming',
+        'op-tosa',
+        new Date('2026-11-25T14:30:00Z'),
+      );
+      expect(h.updatedAppointmentCalls[h.updatedAppointmentCalls.length - 1].stageHistory).toEqual(expect.arrayContaining([
+        expect.objectContaining({ status: 'grooming', operatorId: 'op-tosa', operatorName: 'Carla Tosadora' }),
+      ]));
+    });
+
+    it('deve remover diferenças anteriores não pagas ao trocar mantendo o valor atual do pacote (replaceUnpaidUpgradeFees)', async () => {
+      const h = buildExchangeHarness();
+
+      h.tx.petAppointment.findUnique.mockResolvedValueOnce({
+        id: 'apt-1',
+        petId: 'pet-1',
+        customerId: 'cust-1',
+        professionalId: 'op-banho',
+        status: 'scheduled',
+        startsAt: new Date('2026-11-25T14:00:00Z'),
+        endsAt: new Date('2026-11-25T14:45:00Z'),
+        checkInNotes: null,
+        stageHistory: [],
+        pet: { id: 'pet-1', name: 'Thor', species: 'dog', size: 'medium', coatType: 'short' },
+        services: [
+          {
+            id: 'asvc-banho-1',
+            appointmentId: 'apt-1',
+            serviceId: 'svc-banho',
+            nameSnapshot: 'Banho',
+            priceSnapshot: 50,
+            durationMinutes: 45,
+            customerPackageId: 'pkg-1',
+            customerPackageItemId: 'citem-banho',
+            coverageStatus: 'reserved',
+            chargedSaleId: null,
+            comboParentId: null,
+            service: { id: 'svc-banho', name: 'Banho', customStages: ['checked_in', 'bathing', 'ready'] },
+          },
+          {
+            id: 'asvc-upgrade-unpaid',
+            appointmentId: 'apt-1',
+            serviceId: 'petshop-package-upgrade-fee',
+            nameSnapshot: 'Diferença (Banho por Banho + Tosa)',
+            priceSnapshot: 50,
+            durationMinutes: 0,
+            customerPackageId: null,
+            coverageStatus: 'none',
+            coveredAmount: 0,
+            chargedSaleId: null,
+            comboParentId: null,
+          },
+        ],
+      });
+
+      await h.pkgService.exchangeSessionService('pkg-1', {
+        appointmentId: 'apt-1',
+        oldAppointmentServiceId: 'asvc-banho-1',
+        newServiceId: 'svc-tosa',
+        differenceAmount: 0,
+        chargeMode: 'none',
+        keepPackageValue: true,
+        replaceUnpaidUpgradeFees: true,
+        reason: 'Manter pacote sem custo adicional',
+      }, { userId: 'u-1', name: 'Lucas' });
+
+      expect(h.tx.petAppointmentService.deleteMany).toHaveBeenCalledWith({
+        where: { id: { in: ['asvc-upgrade-unpaid'] }, appointmentId: 'apt-1', chargedSaleId: null },
+      });
+      expect(h.createdServices.find(s => s.serviceId === 'petshop-package-upgrade-fee')).toBeUndefined();
+      expect(h.updatedAppointmentCalls[0].stageHistory).toEqual(expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'service_swapped',
+          notes: expect.stringContaining('Diferença anterior não paga de R$ 50,00 removida'),
+        }),
+      ]));
+    });
+  });
+
   describe('PetshopWhatsappService — Renderização Dinâmica de Templates', () => {
     let whatsappService: PetshopWhatsappService;
 

@@ -71,7 +71,7 @@ export function CancelAppointmentModal({ appointment, onClose, onSuccess }: Canc
             new CustomEvent('petshop-require-pin', {
               detail: {
                 onSuccess: () => {
-                  void handleConfirm();
+                  void handleConfirm(isNoShow);
                 },
               },
             }),
