@@ -847,6 +847,9 @@ export function getHistoryEntryBadge(entry: StageHistoryEntry): { label: string;
   if (entry.kind === 'additional_charge_reversed') {
     return { label: 'Estorno', cls: 'bg-rose-50 border-rose-200 text-rose-800' };
   }
+  if (entry.kind === 'completed_rescheduled') {
+    return { label: 'Ajuste de Data', cls: 'bg-amber-50 border-amber-200 text-amber-900' };
+  }
   if (entry.rescheduledFrom) {
     return { label: 'Reagendado', cls: 'bg-amber-50 border-amber-200 text-amber-900' };
   }

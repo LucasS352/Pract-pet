@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react';
-import { Calendar, Check, Clock, Loader2, Sparkles, User, AlertCircle } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Calendar, Clock, Loader2, ShieldAlert, Sparkles, User } from 'lucide-react';
 import { api } from '@/lib/api';
 import { toast } from 'sonner';
 import { Modal, PetAvatar } from './ui';
@@ -15,7 +15,7 @@ interface RescheduleAppointmentModalProps {
 const QUICK_TIME_SLOTS = [
   '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
   '11:00', '11:30', '12:00', '13:00', '13:30', '14:00',
-  '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00'
+  '14:30', '15:00', '15:30', '16:00', '16:30', '17:00', '17:30', '18:00',
 ];
 
 const COMMON_RESCHEDULE_REASONS = [
@@ -23,6 +23,12 @@ const COMMON_RESCHEDULE_REASONS = [
   'Tutor atrasou / pediu outro horário',
   'Imprevisto de transporte / Táxi Dog',
   'Reorganização da agenda interna',
+];
+
+const COMPLETED_ADJUST_REASONS = [
+  'Correção de data (feriado / lançamento errado)',
+  'Ajuste de data solicitado pela administração',
+  'Correção de horário retroativo',
 ];
 
 function formatDateForInput(date: Date): string {
@@ -38,32 +44,56 @@ export function RescheduleAppointmentModal({
   onSuccess,
   operators = [],
 }: RescheduleAppointmentModalProps) {
-  if (!appointment) return null;
-
-  const currentStartDate = useMemo(() => new Date(appointment.startsAt), [appointment.startsAt]);
-  const currentEndDate = useMemo(() => new Date(appointment.endsAt), [appointment.endsAt]);
+  const currentStartDate = useMemo(
+    () => (appointment?.startsAt ? new Date(appointment.startsAt) : new Date()),
+    [appointment?.startsAt],
+  );
+  const currentEndDate = useMemo(
+    () => (appointment?.endsAt ? new Date(appointment.endsAt) : new Date()),
+    [appointment?.endsAt],
+  );
 
   const defaultDurationMinutes = useMemo(() => {
-    const serviceTotal = appointment.services.reduce((acc, s) => acc + (s.durationMinutes || 0), 0);
+    if (!appointment) return 60;
+    const serviceTotal = (appointment.services || [])
+      .filter(s => !s.comboParentId)
+      .reduce((acc, s) => acc + (s.durationMinutes || 0), 0);
     if (serviceTotal > 0) return serviceTotal;
     const diffMs = currentEndDate.getTime() - currentStartDate.getTime();
     return diffMs > 0 ? Math.round(diffMs / 60_000) : 60;
-  }, [appointment.services, currentStartDate, currentEndDate]);
+  }, [appointment, currentStartDate, currentEndDate]);
 
-  // Data e hora selecionadas
+  const isCompleted = appointment?.status === 'delivered';
+
+  const [confirmedCompletedAlert, setConfirmedCompletedAlert] = useState(false);
+  const [syncCommissionDate, setSyncCommissionDate] = useState(false);
   const [selectedDate, setSelectedDate] = useState(() => formatDateForInput(currentStartDate));
   const [selectedTime, setSelectedTime] = useState(() => {
     const h = String(currentStartDate.getHours()).padStart(2, '0');
     const m = String(currentStartDate.getMinutes()).padStart(2, '0');
     return `${h}:${m}`;
   });
-  const [selectedProfId, setSelectedProfId] = useState(() => appointment.professionalId || '');
+  const [selectedProfId, setSelectedProfId] = useState(() => appointment?.professionalId || '');
   const [reason, setReason] = useState('');
   const [saving, setSaving] = useState(false);
 
-  // Atalhos de data
+  useEffect(() => {
+    if (!appointment) return;
+    const start = new Date(appointment.startsAt);
+    const h = String(start.getHours()).padStart(2, '0');
+    const m = String(start.getMinutes()).padStart(2, '0');
+    setConfirmedCompletedAlert(false);
+    setSyncCommissionDate(false);
+    setSelectedDate(formatDateForInput(start));
+    setSelectedTime(`${h}:${m}`);
+    setSelectedProfId(appointment.professionalId || '');
+    setReason(appointment.status === 'delivered' ? 'Correção de data (feriado / lançamento errado)' : '');
+  }, [appointment?.id, appointment?.startsAt, appointment?.status, appointment?.professionalId]);
+
   const dateShortcuts = useMemo(() => {
     const today = new Date();
+    const yesterday = new Date();
+    yesterday.setDate(today.getDate() - 1);
     const tomorrow = new Date();
     tomorrow.setDate(today.getDate() + 1);
     const dayAfter = new Date();
@@ -71,9 +101,26 @@ export function RescheduleAppointmentModal({
     const in3Days = new Date();
     in3Days.setDate(today.getDate() + 3);
 
+    if (isCompleted) {
+      return [
+        { label: 'Ontem', sub: yesterday.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), dateStr: formatDateForInput(yesterday) },
+        { label: 'Hoje', sub: today.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }), dateStr: formatDateForInput(today) },
+        {
+          label: dayAfter.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''),
+          sub: dayAfter.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+          dateStr: formatDateForInput(dayAfter),
+        },
+        {
+          label: tomorrow.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''),
+          sub: tomorrow.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
+          dateStr: formatDateForInput(tomorrow),
+        },
+      ];
+    }
+
     return [
-      { label: 'Hoje', dateStr: formatDateForInput(today) },
-      { label: 'Amanhã', dateStr: formatDateForInput(tomorrow) },
+      { label: 'Hoje', sub: '', dateStr: formatDateForInput(today) },
+      { label: 'Amanhã', sub: '', dateStr: formatDateForInput(tomorrow) },
       {
         label: dayAfter.toLocaleDateString('pt-BR', { weekday: 'short' }).replace('.', ''),
         sub: dayAfter.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }),
@@ -85,15 +132,15 @@ export function RescheduleAppointmentModal({
         dateStr: formatDateForInput(in3Days),
       },
     ];
-  }, []);
+  }, [isCompleted]);
 
-  // Previsão do novo horário
   const newSchedulePreview = useMemo(() => {
     if (!selectedDate || !selectedTime) return null;
     try {
       const [h, m] = selectedTime.split(':').map(Number);
       const [year, month, day] = selectedDate.split('-').map(Number);
       const start = new Date(year, month - 1, day, h, m, 0, 0);
+      if (Number.isNaN(start.getTime())) return null;
       const end = new Date(start.getTime() + defaultDurationMinutes * 60_000);
       return { start, end };
     } catch {
@@ -101,7 +148,9 @@ export function RescheduleAppointmentModal({
     }
   }, [selectedDate, selectedTime, defaultDurationMinutes]);
 
-  const handleConfirm = async () => {
+  if (!appointment) return null;
+
+  const submitReschedule = async () => {
     if (!newSchedulePreview) {
       toast.error('Selecione uma data e horário válidos.');
       return;
@@ -114,17 +163,40 @@ export function RescheduleAppointmentModal({
         endsAt: newSchedulePreview.end.toISOString(),
         professionalId: selectedProfId ? selectedProfId : null,
         rescheduleReason: reason.trim() || undefined,
+        ...(isCompleted
+          ? {
+              allowCompletedReschedule: true,
+              syncCommissionDate,
+            }
+          : {}),
       };
 
       const { data: updated } = await api.patch(`/petshop/appointments/${appointment.id}`, payload);
 
       toast.success(
-        `Atendimento de ${appointment.pet?.name} reagendado para ${newSchedulePreview.start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${selectedTime}!`,
+        isCompleted
+          ? `Data de ${appointment.pet?.name} ajustada para ${newSchedulePreview.start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${selectedTime}!`
+          : `Atendimento de ${appointment.pet?.name} reagendado para ${newSchedulePreview.start.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} às ${selectedTime}!`,
       );
       onSuccess(updated);
       onClose();
     } catch (error: any) {
-      toast.error(error.response?.data?.message || 'Erro ao reagendar atendimento.');
+      const msg = error.response?.data?.message || 'Erro ao reagendar atendimento.';
+      if (msg.includes('Identifique') || msg.includes('PIN') || error.response?.status === 403) {
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('petshop-require-pin', {
+              detail: {
+                onSuccess: () => {
+                  void submitReschedule();
+                },
+              },
+            }),
+          );
+        }
+        return;
+      }
+      toast.error(msg);
     } finally {
       setSaving(false);
     }
@@ -134,9 +206,80 @@ export function RescheduleAppointmentModal({
     selectedDate === formatDateForInput(currentStartDate) &&
     selectedTime === `${String(currentStartDate.getHours()).padStart(2, '0')}:${String(currentStartDate.getMinutes()).padStart(2, '0')}`;
 
+  if (isCompleted && !confirmedCompletedAlert) {
+    return (
+      <Modal title="Ajustar Data — Atendimento Concluído" onClose={onClose} maxWidth="sm:max-w-md">
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 space-y-2.5">
+            <div className="flex items-start gap-3">
+              <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-amber-100 text-amber-800">
+                <AlertTriangle size={20} />
+              </div>
+              <div className="min-w-0">
+                <h4 className="text-sm font-bold text-amber-950">
+                  Este atendimento já está concluído!
+                </h4>
+                <p className="mt-1 text-xs font-semibold text-amber-900">
+                  Deseja alterar o dia ou horário mesmo assim?
+                </p>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-amber-200/80 bg-white/80 px-3 py-2.5 text-xs text-zinc-700 space-y-1">
+              <p>
+                <strong>{appointment.pet?.name}</strong> · Tutor: <strong>{appointment.customer?.name}</strong>
+              </p>
+              <p className="text-zinc-600">
+                Data registrada atualmente:{' '}
+                <strong>
+                  {currentStartDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' })} às{' '}
+                  {currentStartDate.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                </strong>
+              </p>
+              <p className="text-[11px] text-amber-900 pt-1">
+                • O status continuará <strong>Concluído</strong>, sem alterar pagamentos recebidos nem duplicar sessões de pacote.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded-xl border border-zinc-200 bg-zinc-100 text-xs font-semibold text-zinc-700 hover:bg-zinc-200 transition cursor-pointer"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirmedCompletedAlert(true)}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-700 text-xs font-bold text-white hover:bg-amber-800 shadow-xs transition cursor-pointer"
+            >
+              <Calendar size={14} />
+              Sim, alterar dia mesmo assim
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
   return (
-    <Modal title="Reagendar Atendimento" onClose={onClose} maxWidth="sm:max-w-xl">
+    <Modal
+      title={isCompleted ? 'Ajustar Data do Atendimento Concluído' : 'Reagendar Atendimento'}
+      onClose={onClose}
+      maxWidth="sm:max-w-xl"
+    >
       <div className="space-y-4">
+        {isCompleted && (
+          <div className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+            <ShieldAlert size={15} className="mt-0.5 shrink-0 text-amber-700" />
+            <span>
+              Modo de correção de data: o atendimento permanecerá <strong>Concluído</strong> e os pagamentos e sessões do pacote continuam preservados.
+            </span>
+          </div>
+        )}
+
         {/* Card do Atendimento */}
         <div className="flex items-start gap-3 rounded-2xl border border-zinc-200 bg-zinc-50/70 p-3.5">
           <PetAvatar pet={appointment.pet} size="md" />
@@ -256,13 +399,27 @@ export function RescheduleAppointmentModal({
           </select>
         </div>
 
-        {/* 4. MOTIVO DO REAGENDAMENTO (OPCIONAL) */}
+        {isCompleted && (
+          <label className="flex items-start gap-2 rounded-xl border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={syncCommissionDate}
+              onChange={e => setSyncCommissionDate(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-teal-700 focus:ring-teal-500 cursor-pointer"
+            />
+            <span>
+              Atualizar também a data das <strong>comissões pendentes</strong> deste atendimento para o novo dia escolhido (comissões já aprovadas/pagas não são alteradas).
+            </span>
+          </label>
+        )}
+
+        {/* 4. MOTIVO */}
         <div>
           <label className="block text-xs font-semibold text-zinc-600 mb-1">
-            Motivo do reagendamento (opcional):
+            {isCompleted ? 'Motivo do ajuste:' : 'Motivo do reagendamento (opcional):'}
           </label>
           <div className="flex flex-wrap gap-1.5 mb-1.5">
-            {COMMON_RESCHEDULE_REASONS.map(r => (
+            {(isCompleted ? COMPLETED_ADJUST_REASONS : COMMON_RESCHEDULE_REASONS).map(r => (
               <button
                 key={r}
                 type="button"
@@ -277,7 +434,7 @@ export function RescheduleAppointmentModal({
             type="text"
             value={reason}
             onChange={e => setReason(e.target.value)}
-            placeholder="Ex: Tutor pediu para remarcar para depois do almoço..."
+            placeholder={isCompleted ? 'Ex: Lançado no feriado por engano...' : 'Ex: Tutor pediu para remarcar para depois do almoço...'}
             className="w-full rounded-xl border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-800 placeholder-zinc-400 outline-none focus:border-teal-500 focus:ring-2 focus:ring-teal-200"
           />
         </div>
@@ -288,7 +445,9 @@ export function RescheduleAppointmentModal({
             <div className="flex items-center gap-2">
               <Sparkles size={16} className="text-emerald-700" />
               <div>
-                <strong className="text-xs font-bold text-emerald-950 block">Novo horário agendado:</strong>
+                <strong className="text-xs font-bold text-emerald-950 block">
+                  {isCompleted ? 'Nova data do atendimento:' : 'Novo horário agendado:'}
+                </strong>
                 <span className="text-[11px] text-emerald-800 capitalize">
                   {newSchedulePreview.start.toLocaleDateString('pt-BR', {
                     weekday: 'long',
@@ -322,11 +481,11 @@ export function RescheduleAppointmentModal({
           <button
             type="button"
             disabled={saving || !newSchedulePreview || isCurrentSchedule}
-            onClick={handleConfirm}
+            onClick={() => void submitReschedule()}
             className="inline-flex items-center gap-1.5 px-5 py-2 rounded-xl bg-teal-700 text-xs font-bold text-white hover:bg-teal-800 shadow-xs transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Calendar size={14} />}
-            Confirmar Reagendamento
+            {isCompleted ? 'Salvar Ajuste de Data' : 'Confirmar Reagendamento'}
           </button>
         </div>
       </div>

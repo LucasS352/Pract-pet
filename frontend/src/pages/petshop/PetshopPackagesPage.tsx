@@ -1,6 +1,7 @@
 import { PackagePaymentFields, type PackagePaymentRow, packagePaymentLabels, paymentAmount, packagePaymentsValid } from './PackagePaymentFields';
 import { PaymentModal } from '@/components/PaymentModal';
 import { ExchangePackageServiceModal, type ExchangePackageServiceTarget } from './ExchangePackageServiceModal';
+import { RescheduleAppointmentModal } from './RescheduleAppointmentModal';
 import { usePetshopContext } from '@/layouts/PetshopLayout';
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -49,6 +50,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api';
 import { useShift } from '@/contexts/ShiftContext';
 import type {
+  Appointment,
   CustomerPetPackage,
   CustomerPetPackageItem,
   Pet,
@@ -290,6 +292,7 @@ export default function PetshopPackagesPage() {
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [submittingCancel, setSubmittingCancel] = useState(false);
   const [exchangeTarget, setExchangeTarget] = useState<ExchangePackageServiceTarget | null>(null);
+  const [rescheduleModalAppointment, setRescheduleModalAppointment] = useState<Appointment | null>(null);
   const [collapsedSessionHistories, setCollapsedSessionHistories] = useState<Record<string, boolean>>({});
   const [showAllLedgerEvents, setShowAllLedgerEvents] = useState(false);
   const [pendingPayment, setPendingPayment] = useState<{
@@ -3959,7 +3962,7 @@ export default function PetshopPackagesPage() {
          ===================================================================== */}
       {selectedContract && (
         <Modal
-          suspended={Boolean(receiptTarget || exchangeTarget || pendingPayment)}
+          suspended={Boolean(receiptTarget || exchangeTarget || pendingPayment || rescheduleModalAppointment)}
           maxWidth="sm:max-w-3xl"
           title={
             selectedGroupContracts.length > 1
@@ -3970,6 +3973,7 @@ export default function PetshopPackagesPage() {
             setSelectedContract(null);
             setSelectedGroupContracts([]);
             setEditingAppointmentId(null);
+            setRescheduleModalAppointment(null);
             setRescheduleStartsAt('');
             setRefundTargetItem(null);
             setShowCancelConfirm(false);
@@ -4422,6 +4426,56 @@ export default function PetshopPackagesPage() {
                                   aria-label={`Alterar data da sessão ${index + 1}`}
                                 >
                                   <Pencil size={12} aria-hidden="true" /> Alterar data
+                                </button>
+                              )}
+                              {!canReschedule && selectedContract.status === 'active' && !isEditing && !['cancelled', 'no_show'].includes(appointment.status) && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setRescheduleModalAppointment({
+                                      id: appointment.id,
+                                      startsAt: appointment.startsAt,
+                                      endsAt: appointment.endsAt,
+                                      status: appointment.status,
+                                      notes: appointment.notes,
+                                      customStages: appointment.customStages,
+                                      stageHistory: appointment.stageHistory,
+                                      professionalId: appointment.professional?.id || null,
+                                      professional: appointment.professional || null,
+                                      pet: {
+                                        id: appointment.pet.id,
+                                        name: appointment.pet.name,
+                                        species: appointment.pet.species || 'dog',
+                                        size: appointment.pet.size || null,
+                                        coatType: appointment.pet.coatType || null,
+                                        customerId: selectedContract.customerId,
+                                        customer: {
+                                          id: selectedContract.customer.id,
+                                          name: selectedContract.customer.name,
+                                          phone: selectedContract.customer.phone,
+                                        },
+                                      },
+                                      customer: {
+                                        id: selectedContract.customer.id,
+                                        name: selectedContract.customer.name,
+                                        phone: selectedContract.customer.phone,
+                                      },
+                                      services: appointment.services.map(s => ({
+                                        id: s.id,
+                                        serviceId: s.serviceId,
+                                        nameSnapshot: s.nameSnapshot,
+                                        priceSnapshot: s.priceSnapshot ?? 0,
+                                        durationMinutes: 0,
+                                        coverageStatus: s.coverageStatus,
+                                        customerPackageItemId: s.customerPackageItemId,
+                                        customerPackageId: s.customerPackageId,
+                                      })),
+                                    })
+                                  }
+                                  className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-teal-200 bg-teal-50 px-2.5 py-1 text-xs font-semibold text-teal-800 hover:bg-teal-100 cursor-pointer"
+                                  aria-label={`${isRealized ? 'Ajustar data' : 'Reagendar'} da sessão ${index + 1}`}
+                                >
+                                  <Calendar size={12} aria-hidden="true" /> {isRealized ? 'Ajustar data' : 'Reagendar'}
                                 </button>
                               )}
                               {selectedContract.status !== 'cancelled' && !isEditing && (() => {
@@ -4901,6 +4955,27 @@ export default function PetshopPackagesPage() {
               api
                 .get<CustomerPetPackage>(`/petshop/packages/contracts/${currentContractId}`)
                 .then(({ data }) => setSelectedContract(data))
+                .catch(() => {});
+            }
+            void loadAll(false);
+          }}
+        />
+      )}
+      {rescheduleModalAppointment && (
+        <RescheduleAppointmentModal
+          appointment={rescheduleModalAppointment}
+          operators={operators}
+          onClose={() => setRescheduleModalAppointment(null)}
+          onSuccess={() => {
+            const currentContractId = selectedContract?.id;
+            setRescheduleModalAppointment(null);
+            if (currentContractId) {
+              api
+                .get<CustomerPetPackage>(`/petshop/packages/contracts/${currentContractId}`)
+                .then(({ data }) => {
+                  setSelectedContract(data);
+                  setSelectedGroupContracts(curr => curr.map(c => (c.id === data.id ? data : c)));
+                })
                 .catch(() => {});
             }
             void loadAll(false);

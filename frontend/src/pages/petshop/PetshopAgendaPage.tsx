@@ -2349,15 +2349,15 @@ export default function PetshopAgendaPage() {
                                       <Camera size={11} />
                                     </span>
                                   )}
-                                  {item.status !== 'delivered' && item.status !== 'cancelled' && (
+                                  {!['cancelled', 'no_show'].includes(item.status) && (
                                     <button
                                       type="button"
                                       onClick={e => {
                                         e.stopPropagation();
                                         setAppointmentToReschedule(item);
                                       }}
-                                      title="Reagendar horário"
-                                      aria-label={`Reagendar ${item.pet?.name || 'atendimento'}`}
+                                      title={item.status === 'delivered' ? 'Ajustar data de atendimento concluído' : 'Reagendar horário'}
+                                      aria-label={`${item.status === 'delivered' ? 'Ajustar data de' : 'Reagendar'} ${item.pet?.name || 'atendimento'}`}
                                       className="grid h-6 w-6 place-items-center rounded text-zinc-400 hover:bg-teal-50 hover:text-teal-800 transition cursor-pointer"
                                     >
                                       <CalendarDays size={11} />
@@ -3804,15 +3804,21 @@ export default function PetshopAgendaPage() {
               <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 flex flex-col justify-between">
                 <div className="flex items-center justify-between gap-1 mb-1.5">
                   <span className="text-zinc-500 font-medium">Horário agendado</span>
-                  {!['ready', 'delivered', 'cancelled'].includes(selectedAppointment.status) && !editingReschedule && (
+                  {!['cancelled', 'no_show'].includes(selectedAppointment.status) && !editingReschedule && (
                     <button
                       type="button"
-                      onClick={() => setEditingReschedule(true)}
+                      onClick={() => {
+                        if (['ready', 'delivered'].includes(selectedAppointment.status)) {
+                          setAppointmentToReschedule(selectedAppointment);
+                        } else {
+                          setEditingReschedule(true);
+                        }
+                      }}
                       className="inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-semibold text-teal-700 bg-teal-50 hover:bg-teal-100 border border-teal-200 transition-colors shadow-xs cursor-pointer"
-                      title="Reagendar data e horário deste atendimento"
+                      title={selectedAppointment.status === 'delivered' ? 'Ajustar data/horário deste atendimento concluído' : 'Reagendar data e horário deste atendimento'}
                     >
                       <CalendarDays size={12} />
-                      Reagendar
+                      {selectedAppointment.status === 'delivered' ? 'Ajustar data' : 'Reagendar'}
                     </button>
                   )}
                 </div>
@@ -4274,16 +4280,16 @@ export default function PetshopAgendaPage() {
                       : 'Avisar Tutor'}
                 </button>}
 
-                {/* Botão de Reagendar Fácil */}
-                {!['ready', 'delivered'].includes(selectedAppointment.status) && (
+                {/* Botão de Reagendar / Ajustar Data Fácil */}
+                {!['cancelled', 'no_show'].includes(selectedAppointment.status) && (
                   <button
                     type="button"
                     onClick={() => setAppointmentToReschedule(selectedAppointment)}
                     className="flex items-center gap-1.5 rounded-xl border border-teal-300 bg-teal-50/70 px-3 py-2 text-xs font-bold text-teal-900 hover:bg-teal-100 transition cursor-pointer"
-                    title="Mudar data, horário ou profissional"
+                    title={selectedAppointment.status === 'delivered' ? 'Este atendimento está concluído — ajustar dia ou horário' : 'Mudar data, horário ou profissional'}
                   >
                     <CalendarDays size={14} className="text-teal-700" />
-                    Reagendar
+                    {selectedAppointment.status === 'delivered' ? 'Ajustar data' : 'Reagendar'}
                   </button>
                 )}
 
@@ -5184,9 +5190,10 @@ export default function PetshopAgendaPage() {
           operators={operators}
           onClose={() => setAppointmentToReschedule(null)}
           onSuccess={updated => {
-            setItems(curr => curr.map(row => (row.id === updated.id ? updated : row)));
-            if (selectedAppointment?.id === updated.id) {
-              setSelectedAppointment(updated);
+            const visibleUpdate = keepPaymentStatus(updated, selectedAppointment?.id === updated.id ? selectedAppointment : updated);
+            setItems(curr => curr.map(row => (row.id === visibleUpdate.id ? visibleUpdate : row)));
+            if (selectedAppointment?.id === visibleUpdate.id) {
+              setSelectedAppointment(visibleUpdate);
             }
             loadAppointments(false);
           }}

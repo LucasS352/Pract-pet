@@ -77,4 +77,60 @@ describe('edição de serviços do atendimento', () => {
     expect(tx.petAppointment.update.mock.calls[0][0].data.endsAt).toEqual(new Date('2026-11-25T15:30:00Z'));
     expect(tx.petAppointment.update.mock.calls[0][0].data.customStages).toContain('grooming');
   });
+
+  it('exige confirmação explícita para ajustar a data de atendimento já concluído (delivered)', async () => {
+    const { service, tx, current } = fixture();
+    current.status = 'delivered';
+    tx.petAppointment.findUnique.mockResolvedValue({ status: 'delivered', updatedAt: current.updatedAt });
+    await expect(service.updateAppointment('apt', {
+      startsAt: '2026-11-19T14:00:00Z',
+      endsAt: '2026-11-19T15:00:00Z',
+    })).rejects.toThrow('já está concluído');
+    expect(tx.petAppointment.update).not.toHaveBeenCalled();
+  });
+
+  it('ajusta data de atendimento concluído preservando status delivered e sincroniza comissões pendentes quando solicitado', async () => {
+    const { service, prisma, tx, current } = fixture();
+    current.status = 'delivered';
+    current.professionalId = 'op-1';
+    prisma.operator = { findFirst: jest.fn().mockResolvedValue({ id: 'op-1', name: 'Sara' }) };
+    tx.petAppointment.findUnique.mockResolvedValue({ status: 'delivered', updatedAt: current.updatedAt });
+    tx.petAppointment.findFirst = jest.fn();
+    tx.petCommission.updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    tx.$queryRaw.mockResolvedValue([{ id: 'op-1', active: 1 }]);
+
+    const nextStart = '2026-11-19T14:00:00.000Z';
+    const nextEnd = '2026-11-19T15:00:00.000Z';
+
+    await service.updateAppointment('apt', {
+      startsAt: nextStart,
+      endsAt: nextEnd,
+      professionalId: 'op-1',
+      rescheduleReason: 'Data lançada incorretamente (feriado)',
+      allowCompletedReschedule: true,
+      syncCommissionDate: true,
+    }, { user: { role: 'admin', tenantId: 'tenant' } });
+
+    expect(service.stationAccess.assertPetshopCommissionAdmin).toHaveBeenCalled();
+    expect(tx.petAppointment.findFirst).not.toHaveBeenCalled();
+    expect(tx.petAppointment.update.mock.calls[0][0].data).toEqual(expect.objectContaining({
+      status: 'delivered',
+      startsAt: new Date(nextStart),
+      endsAt: new Date(nextEnd),
+      stageHistory: expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'completed_rescheduled',
+          status: 'delivered',
+          rescheduledTo: nextStart,
+        }),
+      ]),
+    }));
+    expect(tx.petCommission.updateMany).toHaveBeenCalledWith({
+      where: {
+        appointmentId: 'apt',
+        state: { in: ['PENDING', 'AWAITING_PAYMENT'] },
+      },
+      data: { executedAt: new Date(nextStart) },
+    });
+  });
 });

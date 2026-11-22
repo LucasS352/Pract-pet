@@ -2404,7 +2404,9 @@ export class PetshopService {
         nextEndsAt = new Date(data.endsAt);
         if (isNaN(nextEndsAt.getTime())) throw new BadRequestException('Data e horário de término inválidos.');
       } else {
-        const totalDurationMinutes = current.services.reduce((acc, s) => acc + (s.durationMinutes || 0), 0);
+        const totalDurationMinutes = current.services
+          .filter(s => !s.comboParentId)
+          .reduce((acc, s) => acc + (s.durationMinutes || 0), 0);
         const originalDurationMs = current.endsAt.getTime() - current.startsAt.getTime();
         const durationMs = totalDurationMinutes > 0 ? totalDurationMinutes * 60_000 : (originalDurationMs > 0 ? originalDurationMs : 60 * 60_000);
         nextEndsAt = new Date(nextStartsAt.getTime() + durationMs);
@@ -2419,6 +2421,13 @@ export class PetshopService {
         startsAt = nextStartsAt;
         endsAt = nextEndsAt;
       }
+    }
+
+    if (rescheduled && current.status === 'delivered') {
+      if (data.allowCompletedReschedule !== true) {
+        throw new BadRequestException('Este atendimento já está concluído. Confirme que deseja alterar a data mesmo assim.');
+      }
+      await this.stationAccess?.assertPetshopCommissionAdmin(req);
     }
 
     if (rescheduled) {
@@ -2568,11 +2577,17 @@ export class PetshopService {
 
       const prevStr = current.startsAt.toLocaleDateString('pt-BR') + ' às ' + current.startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
       const nextStr = startsAt.toLocaleDateString('pt-BR') + ' às ' + startsAt.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      const reasonNotes = data.rescheduleReason || data.notes || `Reagendado de ${prevStr} para ${nextStr}`;
+      const isCompletedAdjust = current.status === 'delivered';
+      const reasonNotes = data.rescheduleReason || data.notes || (
+        isCompletedAdjust
+          ? `Data de atendimento concluído ajustada de ${prevStr} para ${nextStr}`
+          : `Reagendado de ${prevStr} para ${nextStr}`
+      );
 
       updatedHistory.push({
+        ...(isCompletedAdjust ? { kind: 'completed_rescheduled' } : {}),
         status: newStatus,
-        label: `Reagendado para ${nextStr}`,
+        label: isCompletedAdjust ? `Data ajustada para ${nextStr}` : `Reagendado para ${nextStr}`,
         at: new Date().toISOString(),
         notes: reasonNotes,
         userId: userId || null,
@@ -2631,7 +2646,7 @@ export class PetshopService {
       if (!latest || latest.updatedAt.getTime() !== current.updatedAt.getTime()) {
         throw new ConflictException('O atendimento foi alterado por outra pessoa. Recarregue antes de editar.');
       }
-      if (professionalId && !['cancelled', 'no_show'].includes(newStatus)) {
+      if (professionalId && !['delivered', 'cancelled', 'no_show'].includes(newStatus)) {
         const conflict = await tx.petAppointment.findFirst({ where: {
           id: { not: id }, professionalId,
           status: { notIn: ['cancelled', 'no_show'] },
@@ -2707,6 +2722,15 @@ export class PetshopService {
         ruleKind: entry.rule.kind, ruleValue: entry.rule.value, amount: entry.rule.value,
         state: entry.base > 0 && !additions.find(a => a.id === entry.appointmentServiceId)?.customerPackageId ? 'AWAITING_PAYMENT' : 'PENDING',
       } });
+      if (rescheduled && current.status === 'delivered' && data.syncCommissionDate === true && tx.petCommission?.updateMany) {
+        await tx.petCommission.updateMany({
+          where: {
+            appointmentId: id,
+            state: { in: ['PENDING', 'AWAITING_PAYMENT'] },
+          },
+          data: { executedAt: startsAt },
+        });
+      }
       return tx.petAppointment.update({
       where: { id },
       data: {
@@ -2954,7 +2978,7 @@ export class PetshopService {
           previousOperatorName: prevOperatorName,
           skipped: false,
         });
-        return tx.petAppointment.update({
+      return tx.petAppointment.update({
           where: { id },
           data: { stageHistory: nextHistory },
           include: {
