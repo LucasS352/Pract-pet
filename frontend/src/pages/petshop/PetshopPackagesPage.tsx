@@ -4218,109 +4218,7 @@ export default function PetshopPackagesPage() {
               </section>
             )}
 
-            {/* Itens de Saldo com Botão de Estorno de Sessão */}
-            <div>
-              <h4 className="mb-2.5 flex items-center gap-2 text-sm font-bold text-zinc-900">
-                <Layers size={16} className="text-teal-700" aria-hidden="true" />
-                <span>Saldo por serviço e ações de estorno</span>
-              </h4>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {selectedContract.items.map(item => (
-                  <div
-                    key={item.id}
-                    className="flex flex-col justify-between gap-3 rounded-2xl border border-zinc-200/90 bg-white p-3.5 shadow-2xs"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex min-w-0 items-center gap-2.5">
-                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-teal-50 text-teal-700">
-                          <Scissors size={15} aria-hidden="true" />
-                        </span>
-                        <div className="min-w-0">
-                          <p className="text-sm font-bold text-zinc-900 leading-snug break-words">
-                            {item.serviceNameSnapshot}
-                          </p>
-                          {item.totalQuantity === 0 && (
-                            <span className="mt-0.5 inline-block rounded-md border border-zinc-200 bg-zinc-100 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600">
-                              Substituído
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      {(item.availableQuantity > 0 && selectedContract.status === 'active') ||
-                      (item.usedQuantity > 0 && selectedContract.status !== 'cancelled') ? (
-                        <div className="flex flex-wrap items-center justify-end gap-1.5 shrink-0">
-                          {item.availableQuantity > 0 && selectedContract.status === 'active' && (
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setExchangeTarget({
-                                  mode: 'credit',
-                                  contractId: selectedContract.id,
-                                  contractName: selectedContract.planNameSnapshot,
-                                  contractPaymentStatus: selectedContract.paymentStatus,
-                                  pet: selectedContract.pet,
-                                  oldServiceId: item.serviceId,
-                                  oldServiceName: item.serviceNameSnapshot,
-                                  availableQuantity: item.availableQuantity,
-                                  oldServicePrice: Number(item.unitValueSnapshot || 0),
-                                  packageUnitValue: Number(item.unitValueSnapshot || 0),
-                                })
-                              }
-                              className="inline-flex items-center gap-1 rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-semibold text-sky-800 hover:bg-sky-100 cursor-pointer"
-                            >
-                              <RefreshCw size={12} aria-hidden="true" />
-                              Converter saldo
-                            </button>
-                          )}
-                          {item.usedQuantity > 0 && selectedContract.status !== 'cancelled' && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setRefundTargetItem(item);
-                                setRefundReason('');
-                                setRefundAppointmentId('');
-                              }}
-                              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
-                            >
-                              <RotateCcw size={12} aria-hidden="true" />
-                              Estornar 1
-                            </button>
-                          )}
-                        </div>
-                      ) : null}
-                    </div>
-                    <div className="grid grid-cols-4 divide-x divide-zinc-100 border-t border-zinc-100 pt-2.5 text-center">
-                      <div>
-                        <span className="block text-[11px] text-zinc-500">Contratadas</span>
-                        <strong className="mt-0.5 block text-sm font-extrabold text-zinc-900 tabular-nums">
-                          {item.totalQuantity}
-                        </strong>
-                      </div>
-                      <div>
-                        <span className="block text-[11px] text-zinc-500">Realizadas</span>
-                        <strong className="mt-0.5 block text-sm font-extrabold text-zinc-900 tabular-nums">
-                          {item.usedQuantity}
-                        </strong>
-                      </div>
-                      <div>
-                        <span className="block text-[11px] text-zinc-500">Reservadas</span>
-                        <strong className="mt-0.5 block text-sm font-extrabold text-zinc-900 tabular-nums">
-                          {item.reservedQuantity}
-                        </strong>
-                      </div>
-                      <div>
-                        <span className="block text-[11px] text-zinc-500">Livres</span>
-                        <strong className="mt-0.5 block text-sm font-extrabold text-emerald-700 tabular-nums">
-                          {item.availableQuantity}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Formulário de Estorno Auditável */}
+            {/* Formulário de Estorno Auditável (acionado diretamente na sessão concluída abaixo) */}
             {refundTargetItem && (
               <form
                 onSubmit={handleSubmitRefund}
@@ -4526,6 +4424,29 @@ export default function PetshopPackagesPage() {
                                   <Pencil size={12} aria-hidden="true" /> Alterar data
                                 </button>
                               )}
+                              {selectedContract.status !== 'cancelled' && !isEditing && (() => {
+                                const consumedSvc = appointment.services.find(
+                                  s => s.coverageStatus === 'consumed' && Boolean(s.customerPackageItemId),
+                                );
+                                const consumedItem = consumedSvc
+                                  ? selectedContract.items.find(i => i.id === consumedSvc.customerPackageItemId)
+                                  : null;
+                                if (!consumedItem || consumedItem.usedQuantity <= 0) return null;
+                                return (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setRefundTargetItem(consumedItem);
+                                      setRefundReason('');
+                                      setRefundAppointmentId(appointment.id);
+                                    }}
+                                    className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-900 hover:bg-amber-100 cursor-pointer"
+                                    aria-label={`Estornar sessão ${index + 1}`}
+                                  >
+                                    <RotateCcw size={12} aria-hidden="true" /> Estornar sessão
+                                  </button>
+                                );
+                              })()}
                             </div>
                           </div>
 
