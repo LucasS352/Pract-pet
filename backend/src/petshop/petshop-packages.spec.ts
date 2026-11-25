@@ -1173,6 +1173,172 @@ describe('PetshopPackagesService & PetshopWhatsappService', () => {
     });
   });
 
+  describe('PetshopPackagesService — Cancelamento de Contrato com/sem Cancelamento de Agendamentos', () => {
+    const buildHarness = () => {
+      const updatedAppointments: any[] = [];
+      const cancelledComandas: any[] = [];
+      const reversedAppointments: string[] = [];
+
+      const candidateAppointments = [
+        {
+          id: 'apt-scheduled-1',
+          status: 'scheduled',
+          stageHistory: [{ status: 'scheduled', label: 'Agendado', at: '2026-11-20T10:00:00Z' }],
+          services: [{ id: 'asvc-1', customerPackageId: 'pkg-cancel-1', coverageStatus: 'reserved', chargedSaleId: null }],
+        },
+        {
+          id: 'apt-requested-2',
+          status: 'requested',
+          stageHistory: [],
+          services: [{ id: 'asvc-2', customerPackageId: 'pkg-cancel-1', coverageStatus: 'reserved', chargedSaleId: null }],
+        },
+        {
+          id: 'apt-paid-3',
+          status: 'scheduled',
+          stageHistory: [],
+          services: [{ id: 'asvc-3', customerPackageId: 'pkg-cancel-1', coverageStatus: 'reserved', chargedSaleId: 'sale-99' }],
+        },
+      ];
+
+      const tx: any = {
+        $queryRaw: jest.fn().mockResolvedValue([]),
+        customerPetPackage: {
+          findUnique: jest.fn().mockResolvedValue({
+            id: 'pkg-cancel-1',
+            status: 'active',
+            paymentStatus: 'paid',
+            comandaId: 'cmd-pkg-1',
+            items: [{ id: 'item-1', availableQuantity: 2, usedQuantity: 1 }],
+          }),
+          update: jest.fn().mockImplementation(async ({ data }) => ({
+            id: 'pkg-cancel-1',
+            ...data,
+            items: [],
+            ledgerEvents: [],
+          })),
+        },
+        customerPetPackageItem: {
+          update: jest.fn().mockResolvedValue({}),
+        },
+        customerPetPackageLedger: {
+          create: jest.fn().mockResolvedValue({}),
+        },
+        comanda: {
+          updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+          findFirst: jest.fn().mockResolvedValue(null),
+          findMany: jest.fn().mockImplementation(async ({ where }: any) =>
+            where?.notes?.contains === 'apt-scheduled-1' ? [{ id: 'cmd-apt-1', notes: 'apt-scheduled-1' }] : [],
+          ),
+          update: jest.fn().mockImplementation(async args => {
+            cancelledComandas.push(args);
+            return args;
+          }),
+        },
+        petAppointment: {
+          findMany: jest.fn().mockResolvedValue(candidateAppointments),
+          update: jest.fn().mockImplementation(async args => {
+            updatedAppointments.push(args);
+            return args;
+          }),
+        },
+        petAppointmentService: {
+          updateMany: jest.fn().mockResolvedValue({ count: 3 }),
+        },
+      };
+
+      const prisma: any = {
+        $transaction: jest.fn(cb => cb(tx)),
+        customerPetPackage: {
+          updateMany: jest.fn(),
+          findUnique: jest.fn().mockResolvedValue({ id: 'pkg-cancel-1', status: 'cancelled', notes: null }),
+        },
+        petAppointment: {
+          findMany: jest.fn().mockResolvedValue([]),
+        },
+      };
+
+      const pkgService = new PetshopPackagesService(
+        { getTenantClient: jest.fn().mockResolvedValue(prisma) } as any,
+        { get: jest.fn().mockReturnValue({ tenantId: 't-1', databaseUrl: 'mysql://test' }) } as any,
+        {
+          reverseAppointmentInTx: jest.fn().mockImplementation(async (_tx: any, aptId: string) => {
+            reversedAppointments.push(aptId);
+          }),
+        } as any,
+      );
+
+      return { pkgService, prisma, tx, updatedAppointments, cancelledComandas, reversedAppointments };
+    };
+
+    it('cancela os agendamentos em aberto junto ao pacote por padrão e ignora agendamentos já pagos', async () => {
+      const h = buildHarness();
+
+      const res: any = await h.pkgService.cancelContract(
+        'pkg-cancel-1',
+        { reason: 'Desistência do cliente' },
+        { userId: 'u-1', name: 'Juliana' },
+      );
+
+      expect(res.status).toBe('cancelled');
+      expect(res.cancelledAppointmentsCount).toBe(2);
+      expect(res.skippedAppointmentsCount).toBe(1);
+      expect(res.keptScheduledAppointments).toBe(false);
+      expect(h.updatedAppointments.map(u => u.where.id)).toEqual(['apt-scheduled-1', 'apt-requested-2']);
+      expect(h.updatedAppointments[0].data).toEqual(expect.objectContaining({
+        status: 'cancelled',
+        stageHistory: expect.arrayContaining([
+          expect.objectContaining({
+            status: 'cancelled',
+            kind: 'package_cancelled',
+            notes: expect.stringContaining('Desistência do cliente'),
+          }),
+        ]),
+      }));
+      expect(h.reversedAppointments).toEqual(['apt-scheduled-1', 'apt-requested-2']);
+      expect(h.cancelledComandas).toHaveLength(1);
+      expect(h.tx.petAppointmentService.updateMany).toHaveBeenCalledWith({
+        where: { customerPackageId: 'pkg-cancel-1', coverageStatus: 'reserved' },
+        data: { coverageStatus: 'released', coveredAmount: expect.anything() },
+      });
+    });
+
+    it('mantém os agendamentos ativos na agenda quando keepScheduledAppointments=true', async () => {
+      const h = buildHarness();
+
+      const res: any = await h.pkgService.cancelContract(
+        'pkg-cancel-1',
+        { reason: 'Vai pagar avulso', keepScheduledAppointments: true },
+        { userId: 'u-1', name: 'Juliana' },
+      );
+
+      expect(res.status).toBe('cancelled');
+      expect(res.cancelledAppointmentsCount).toBe(0);
+      expect(res.keptScheduledAppointments).toBe(true);
+      expect(h.tx.petAppointment.findMany).not.toHaveBeenCalled();
+      expect(h.updatedAppointments).toHaveLength(0);
+      expect(h.tx.petAppointmentService.updateMany).toHaveBeenCalledWith({
+        where: { customerPackageId: 'pkg-cancel-1', coverageStatus: 'reserved' },
+        data: { coverageStatus: 'released', coveredAmount: expect.anything() },
+      });
+    });
+
+    it('getContractById inclui sessões liberadas após o cancelamento do contrato', async () => {
+      const h = buildHarness();
+      await h.pkgService.getContractById('pkg-cancel-1');
+
+      expect(h.prisma.petAppointment.findMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: {
+          services: {
+            some: {
+              customerPackageId: 'pkg-cancel-1',
+              coverageStatus: { in: ['reserved', 'consumed', 'released'] },
+            },
+          },
+        },
+      }));
+    });
+  });
+
   describe('PetshopWhatsappService — Renderização Dinâmica de Templates', () => {
     let whatsappService: PetshopWhatsappService;
 

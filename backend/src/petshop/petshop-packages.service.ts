@@ -677,12 +677,15 @@ export class PetshopPackagesService {
       },
     });
     if (!contract) throw new NotFoundException('Contrato de pacote não encontrado.');
+    const visibleCoverageStatuses = contract.status === 'cancelled'
+      ? ['reserved', 'consumed', 'released']
+      : ['reserved', 'consumed'];
     const rawScheduledAppointments = await prisma.petAppointment.findMany({
       where: {
         services: {
           some: {
             customerPackageId: id,
-            coverageStatus: { in: ['reserved', 'consumed'] },
+            coverageStatus: { in: visibleCoverageStatuses },
           },
         },
       },
@@ -705,7 +708,7 @@ export class PetshopPackagesService {
         services: {
           where: {
             customerPackageId: id,
-            coverageStatus: { in: ['reserved', 'consumed'] },
+            coverageStatus: { in: visibleCoverageStatuses },
           },
           select: {
             id: true,
@@ -2191,11 +2194,16 @@ export class PetshopPackagesService {
     return this.getContractById(contractId);
   }
 
-  async cancelContract(contractId: string, body: { reason: string }, actor?: PackageActor) {
+  async cancelContract(
+    contractId: string,
+    body: { reason: string; keepScheduledAppointments?: boolean },
+    actor?: PackageActor,
+  ) {
     const reason = String(body?.reason ?? '').trim();
     if (reason.length < 3) {
       throw new BadRequestException('Informe o motivo do cancelamento (mínimo 3 caracteres).');
     }
+    const keepScheduledAppointments = body?.keepScheduledAppointments === true;
     const prisma = await this.prisma();
     const resolvedActor = await this.resolveActor(prisma, actor);
     actor = resolvedActor;
@@ -2212,6 +2220,8 @@ export class PetshopPackagesService {
       if (contract.status === 'cancelled') {
         throw new BadRequestException('Este contrato já está cancelado.');
       }
+
+      const cancelledAt = new Date();
 
       if (contract.comandaId && tx.comanda?.updateMany) {
         await tx.comanda.updateMany({
@@ -2246,6 +2256,113 @@ export class PetshopPackagesService {
         });
       }
 
+      let cancelledAppointmentsCount = 0;
+      let skippedAppointmentsCount = 0;
+      if (!keepScheduledAppointments && typeof tx.petAppointment?.findMany === 'function') {
+        const candidateAppointments = await tx.petAppointment.findMany({
+          where: {
+            status: { in: ['requested', 'scheduled', 'confirmed'] },
+            services: {
+              some: {
+                customerPackageId: contractId,
+                coverageStatus: 'reserved',
+              },
+            },
+          },
+          include: {
+            services: {
+              select: {
+                id: true,
+                customerPackageId: true,
+                coverageStatus: true,
+                chargedSaleId: true,
+              },
+            },
+          },
+        });
+
+        const cancelNote = `Cancelado automaticamente junto ao pacote: ${reason}`;
+        for (const apt of candidateAppointments) {
+          const hasOtherActivePackage = Array.isArray(apt.services) && apt.services.some(
+            (svc: any) =>
+              svc.customerPackageId &&
+              svc.customerPackageId !== contractId &&
+              svc.coverageStatus === 'reserved',
+          );
+          const hasChargedService = Array.isArray(apt.services) && apt.services.some(
+            (svc: any) => Boolean(svc.chargedSaleId),
+          );
+          const hasPaidComanda = typeof tx.comanda?.findFirst === 'function'
+            ? Boolean(
+                await tx.comanda.findFirst({
+                  where: {
+                    notes: { contains: apt.id },
+                    status: 'closed',
+                    sale: { is: { status: 'completed' } },
+                  },
+                  select: { id: true },
+                }),
+              )
+            : false;
+
+          if (hasOtherActivePackage || hasChargedService || hasPaidComanda) {
+            skippedAppointmentsCount += 1;
+            continue;
+          }
+
+          if (this.commissions?.reverseAppointmentInTx) {
+            await this.commissions.reverseAppointmentInTx(
+              tx,
+              apt.id,
+              actor?.operatorId || actor?.userId || 'system',
+              cancelNote,
+            );
+          }
+
+          if (typeof tx.comanda?.findMany === 'function' && typeof tx.comanda?.update === 'function') {
+            const openAptComandas = await tx.comanda.findMany({
+              where: {
+                status: { in: ['open', 'waiting_payment'] },
+                notes: { contains: apt.id },
+              },
+            });
+            for (const cmd of openAptComandas) {
+              await tx.comanda.update({
+                where: { id: cmd.id },
+                data: {
+                  status: 'cancelled',
+                  notes: `${cmd.notes || ''} [Comanda cancelada junto ao pacote ${contractId}]`.trim(),
+                },
+              });
+            }
+          }
+
+          const existingHistory = Array.isArray(apt.stageHistory) ? (apt.stageHistory as any[]) : [];
+          await tx.petAppointment.update({
+            where: { id: apt.id },
+            data: {
+              status: 'cancelled',
+              stageHistory: [
+                ...existingHistory,
+                {
+                  status: 'cancelled',
+                  kind: 'package_cancelled',
+                  label: 'Cancelado junto ao pacote',
+                  at: cancelledAt.toISOString(),
+                  notes: cancelNote,
+                  userId: actor?.userId || null,
+                  userName: actor?.name || 'Operador',
+                  operatorId: actor?.operatorId || null,
+                  operatorName: actor?.name || null,
+                  skipped: false,
+                },
+              ],
+            },
+          });
+          cancelledAppointmentsCount += 1;
+        }
+      }
+
       await tx.petAppointmentService.updateMany({
         where: {
           customerPackageId: contractId,
@@ -2257,12 +2374,12 @@ export class PetshopPackagesService {
         },
       });
 
-      return tx.customerPetPackage.update({
+      const updatedContract = await tx.customerPetPackage.update({
         where: { id: contractId },
         data: {
           status: 'cancelled',
           paymentStatus: contract.paymentStatus === 'pending' ? 'cancelled' : contract.paymentStatus,
-          cancelledAt: new Date(),
+          cancelledAt,
           cancelReason: reason,
           cancelledByName: actor?.name || 'Operador',
         },
@@ -2273,6 +2390,13 @@ export class PetshopPackagesService {
           ledgerEvents: { orderBy: { createdAt: 'desc' }, take: 20 },
         },
       });
+
+      return {
+        ...updatedContract,
+        cancelledAppointmentsCount,
+        skippedAppointmentsCount,
+        keptScheduledAppointments: keepScheduledAppointments,
+      };
     });
   }
 

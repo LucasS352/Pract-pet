@@ -289,6 +289,7 @@ export default function PetshopPackagesPage() {
   const [refundAppointmentId, setRefundAppointmentId] = useState('');
   const [submittingRefund, setSubmittingRefund] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
+  const [keepScheduledAppointments, setKeepScheduledAppointments] = useState(false);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const [submittingCancel, setSubmittingCancel] = useState(false);
   const [exchangeTarget, setExchangeTarget] = useState<ExchangePackageServiceTarget | null>(null);
@@ -1317,16 +1318,31 @@ export default function PetshopPackagesPage() {
         `/petshop/packages/contracts/${selectedContract.id}/cancel`,
         {
           reason: cancelReason,
+          keepScheduledAppointments,
           operatorId: operator?.id,
           operatorName: operator?.name,
         },
       );
-      toast.success('Contrato de pacote cancelado.');
+      const cancelledCount = Number(data?.cancelledAppointmentsCount || 0);
+      const skippedCount = Number(data?.skippedAppointmentsCount || 0);
+      if (keepScheduledAppointments) {
+        toast.success('Contrato de pacote cancelado (agendamentos mantidos na agenda).');
+      } else if (cancelledCount > 0) {
+        toast.success(`Contrato cancelado junto com ${cancelledCount} agendamento(s) da agenda.`);
+      } else {
+        toast.success('Contrato de pacote cancelado.');
+      }
+      if (skippedCount > 0) {
+        toast.info(
+          `${skippedCount} agendamento(s) permaneceram ativos na agenda por já possuírem pagamento, outro pacote ativo ou atendimento em andamento.`,
+        );
+      }
       setSelectedContract(prev => ({ ...data, scheduledAppointments: prev?.scheduledAppointments }));
       api.get<CustomerPetPackage>(`/petshop/packages/contracts/${selectedContract.id}`)
         .then(({ data: details }) => setSelectedContract(prev => prev?.id === details.id ? details : prev))
         .catch(() => {});
       setShowCancelConfirm(false);
+      setKeepScheduledAppointments(false);
       setCancelReason('');
       loadAll(false);
     } catch (err: any) {
@@ -3977,6 +3993,7 @@ export default function PetshopPackagesPage() {
             setRescheduleStartsAt('');
             setRefundTargetItem(null);
             setShowCancelConfirm(false);
+            setKeepScheduledAppointments(false);
           }}
         >
           <div className="space-y-4">
@@ -4049,6 +4066,8 @@ export default function PetshopPackagesPage() {
                                 setSelectedContract(member);
                                 setEditingAppointmentId(null);
                                 setRefundTargetItem(null);
+                                setShowCancelConfirm(false);
+                                setKeepScheduledAppointments(false);
                               }}
                               className={`inline-flex cursor-pointer items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition ${
                                 active
@@ -4317,7 +4336,13 @@ export default function PetshopPackagesPage() {
                       historyList,
                     );
                     const historyOpen = !collapsedSessionHistories[appointment.id];
-                    const sessionAccentCls = isRealized
+                    const isCancelledSession = appointment.status === 'cancelled';
+                    const isNoShowSession = appointment.status === 'no_show';
+                    const sessionAccentCls = isCancelledSession
+                      ? 'border-l-rose-400'
+                      : isNoShowSession
+                      ? 'border-l-amber-400'
+                      : isRealized
                       ? 'border-l-emerald-500'
                       : !canReschedule
                       ? 'border-l-teal-600'
@@ -4343,7 +4368,15 @@ export default function PetshopPackagesPage() {
                                 {diffTotal > 0 ? `Trocado · +${money(diffTotal)}` : 'Trocado'}
                               </span>
                             )}
-                            {isRealized ? (
+                            {isCancelledSession ? (
+                              <span className="rounded-full border border-rose-200 bg-rose-50 px-2.5 py-0.5 text-[10px] font-bold text-rose-700">
+                                Cancelada
+                              </span>
+                            ) : isNoShowSession ? (
+                              <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-0.5 text-[10px] font-bold text-amber-800">
+                                Falta
+                              </span>
+                            ) : isRealized ? (
                               <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[10px] font-bold text-emerald-700">
                                 Concluída
                               </span>
@@ -4562,7 +4595,9 @@ export default function PetshopPackagesPage() {
                                       h.label || getStageLabel(h.status, appointment.customStages) || h.status,
                                     );
                                     const badge = getHistoryEntryBadge(h);
-                                    const dotCls = h.skipped
+                                    const dotCls = h.status === 'cancelled' || h.status === 'no_show'
+                                      ? 'bg-rose-500'
+                                      : h.skipped
                                       ? 'bg-amber-500'
                                       : h.kind === 'service_swapped'
                                       ? 'bg-indigo-600'
@@ -4751,53 +4786,94 @@ export default function PetshopPackagesPage() {
             </div>
 
             {/* Cancelamento de Contrato */}
-            {selectedContract.status === 'active' && (
-              <div className="border-t border-zinc-200/80 pt-3">
-                {!showCancelConfirm ? (
-                  <button
-                    type="button"
-                    onClick={() => setShowCancelConfirm(true)}
-                    className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
-                  >
-                    <Trash2 size={14} aria-hidden="true" />
-                    Cancelar este contrato de pacote
-                  </button>
-                ) : (
-                  <form
-                    onSubmit={handleSubmitCancelContract}
-                    className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 space-y-2"
-                  >
-                    <label className="block text-xs font-semibold text-rose-900">
-                      Informe o motivo do cancelamento do contrato *
-                    </label>
-                    <input
-                      required
-                      minLength={3}
-                      value={cancelReason}
-                      onChange={e => setCancelReason(e.target.value)}
-                      placeholder="Ex: Solicitação de cancelamento pelo tutor"
-                      className={inputClass}
-                    />
-                    <div className="flex justify-end gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setShowCancelConfirm(false)}
-                        className="text-xs text-slate-600 px-2 py-1"
+            {selectedContract.status === 'active' && (() => {
+              const openLinkedAppointmentsCount = (selectedContract.scheduledAppointments || []).filter(
+                apt =>
+                  ['requested', 'scheduled', 'confirmed'].includes(apt.status) &&
+                  apt.services.some(svc => svc.coverageStatus === 'reserved'),
+              ).length;
+
+              return (
+                <div className="border-t border-zinc-200/80 pt-3">
+                  {!showCancelConfirm ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setKeepScheduledAppointments(false);
+                        setShowCancelConfirm(true);
+                      }}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
+                    >
+                      <Trash2 size={14} aria-hidden="true" />
+                      Cancelar este contrato de pacote
+                    </button>
+                  ) : (
+                    <form
+                      onSubmit={handleSubmitCancelContract}
+                      className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 space-y-2.5"
+                    >
+                      <label htmlFor="cancel-contract-reason" className="block text-xs font-semibold text-rose-900">
+                        Informe o motivo do cancelamento do contrato *
+                      </label>
+                      <input
+                        id="cancel-contract-reason"
+                        required
+                        minLength={3}
+                        value={cancelReason}
+                        onChange={e => setCancelReason(e.target.value)}
+                        placeholder="Ex: Solicitação de cancelamento pelo tutor"
+                        className={inputClass}
+                      />
+                      <label
+                        htmlFor="cancel-keep-scheduled-appointments"
+                        className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-rose-200 bg-white/90 p-2.5 text-xs text-zinc-800"
                       >
-                        Voltar
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={submittingCancel}
-                        className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700"
-                      >
-                        {submittingCancel ? 'Cancelando...' : 'Confirmar Cancelamento'}
-                      </button>
-                    </div>
-                  </form>
-                )}
-              </div>
-            )}
+                        <input
+                          id="cancel-keep-scheduled-appointments"
+                          type="checkbox"
+                          checked={keepScheduledAppointments}
+                          onChange={e => setKeepScheduledAppointments(e.target.checked)}
+                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 text-rose-600 focus:ring-rose-500"
+                        />
+                        <span className="space-y-0.5">
+                          <span className="block font-semibold text-zinc-900">
+                            Não cancelar os agendamentos na agenda
+                          </span>
+                          <span className="block text-[11px] leading-4 text-zinc-600">
+                            {keepScheduledAppointments
+                              ? openLinkedAppointmentsCount > 0
+                                ? `Flag marcada: os ${openLinkedAppointmentsCount} agendamento(s) em aberto permanecerão ativos na agenda (sem vínculo com o pacote, como avulsos).`
+                                : 'Flag marcada: eventuais agendamentos futuros permanecerão ativos na agenda como avulsos.'
+                              : openLinkedAppointmentsCount > 0
+                                ? `Por padrão, os ${openLinkedAppointmentsCount} agendamento(s) em aberto deste pacote serão cancelados juntos na agenda (sessões já concluídas permanecem registradas).`
+                                : 'Por padrão, os agendamentos em aberto vinculados a este pacote também são cancelados juntos na agenda.'}
+                          </span>
+                        </span>
+                      </label>
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowCancelConfirm(false);
+                            setKeepScheduledAppointments(false);
+                          }}
+                          className="text-xs text-slate-600 px-2 py-1"
+                        >
+                          Voltar
+                        </button>
+                        <button
+                          type="submit"
+                          disabled={submittingCancel}
+                          className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                        >
+                          {submittingCancel ? 'Cancelando...' : 'Confirmar Cancelamento'}
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         </Modal>
       )}
