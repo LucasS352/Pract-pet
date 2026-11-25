@@ -3978,7 +3978,13 @@ export default function PetshopPackagesPage() {
          ===================================================================== */}
       {selectedContract && (
         <Modal
-          suspended={Boolean(receiptTarget || exchangeTarget || pendingPayment || rescheduleModalAppointment)}
+          suspended={Boolean(
+            receiptTarget ||
+            exchangeTarget ||
+            pendingPayment ||
+            rescheduleModalAppointment ||
+            showCancelConfirm,
+          )}
           maxWidth="sm:max-w-3xl"
           title={
             selectedGroupContracts.length > 1
@@ -4786,97 +4792,122 @@ export default function PetshopPackagesPage() {
             </div>
 
             {/* Cancelamento de Contrato */}
-            {selectedContract.status === 'active' && (() => {
-              const openLinkedAppointmentsCount = (selectedContract.scheduledAppointments || []).filter(
-                apt =>
-                  ['requested', 'scheduled', 'confirmed'].includes(apt.status) &&
-                  apt.services.some(svc => svc.coverageStatus === 'reserved'),
-              ).length;
-
-              return (
-                <div className="border-t border-zinc-200/80 pt-3">
-                  {!showCancelConfirm ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setKeepScheduledAppointments(false);
-                        setShowCancelConfirm(true);
-                      }}
-                      className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
-                    >
-                      <Trash2 size={14} aria-hidden="true" />
-                      Cancelar este contrato de pacote
-                    </button>
-                  ) : (
-                    <form
-                      onSubmit={handleSubmitCancelContract}
-                      className="rounded-xl border border-rose-200 bg-rose-50/60 p-3 space-y-2.5"
-                    >
-                      <label htmlFor="cancel-contract-reason" className="block text-xs font-semibold text-rose-900">
-                        Informe o motivo do cancelamento do contrato *
-                      </label>
-                      <input
-                        id="cancel-contract-reason"
-                        required
-                        minLength={3}
-                        value={cancelReason}
-                        onChange={e => setCancelReason(e.target.value)}
-                        placeholder="Ex: Solicitação de cancelamento pelo tutor"
-                        className={inputClass}
-                      />
-                      <label
-                        htmlFor="cancel-keep-scheduled-appointments"
-                        className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-rose-200 bg-white/90 p-2.5 text-xs text-zinc-800"
-                      >
-                        <input
-                          id="cancel-keep-scheduled-appointments"
-                          type="checkbox"
-                          checked={keepScheduledAppointments}
-                          onChange={e => setKeepScheduledAppointments(e.target.checked)}
-                          className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 text-rose-600 focus:ring-rose-500"
-                        />
-                        <span className="space-y-0.5">
-                          <span className="block font-semibold text-zinc-900">
-                            Não cancelar os agendamentos na agenda
-                          </span>
-                          <span className="block text-[11px] leading-4 text-zinc-600">
-                            {keepScheduledAppointments
-                              ? openLinkedAppointmentsCount > 0
-                                ? `Flag marcada: os ${openLinkedAppointmentsCount} agendamento(s) em aberto permanecerão ativos na agenda (sem vínculo com o pacote, como avulsos).`
-                                : 'Flag marcada: eventuais agendamentos futuros permanecerão ativos na agenda como avulsos.'
-                              : openLinkedAppointmentsCount > 0
-                                ? `Por padrão, os ${openLinkedAppointmentsCount} agendamento(s) em aberto deste pacote serão cancelados juntos na agenda (sessões já concluídas permanecem registradas).`
-                                : 'Por padrão, os agendamentos em aberto vinculados a este pacote também são cancelados juntos na agenda.'}
-                          </span>
-                        </span>
-                      </label>
-                      <div className="flex justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setShowCancelConfirm(false);
-                            setKeepScheduledAppointments(false);
-                          }}
-                          className="text-xs text-slate-600 px-2 py-1"
-                        >
-                          Voltar
-                        </button>
-                        <button
-                          type="submit"
-                          disabled={submittingCancel}
-                          className="rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
-                        >
-                          {submittingCancel ? 'Cancelando...' : 'Confirmar Cancelamento'}
-                        </button>
-                      </div>
-                    </form>
-                  )}
-                </div>
-              );
-            })()}
+            {selectedContract.status === 'active' && (
+              <div className="border-t border-zinc-200/80 pt-3">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCancelReason('');
+                    setKeepScheduledAppointments(false);
+                    setShowCancelConfirm(true);
+                  }}
+                  className="inline-flex items-center gap-1.5 text-xs font-semibold text-rose-600 hover:underline cursor-pointer"
+                >
+                  <Trash2 size={14} aria-hidden="true" />
+                  Cancelar este contrato de pacote
+                </button>
+              </div>
+            )}
           </div>
         </Modal>
       )}
+      {selectedContract && showCancelConfirm && selectedContract.status === 'active' && (() => {
+        const openLinkedAppointmentsCount = (selectedContract.scheduledAppointments || []).filter(
+          apt =>
+            ['requested', 'scheduled', 'confirmed'].includes(apt.status) &&
+            apt.services.some(svc => svc.coverageStatus === 'reserved'),
+        ).length;
+
+        return (
+          <Modal
+            title="Cancelar contrato de pacote"
+            subtitle={`${selectedContract.customer?.name || 'Cliente'} · ${selectedContract.planNameSnapshot}${selectedContract.pet?.name ? ` · ${selectedContract.pet.name}` : ''}`}
+            onClose={() => {
+              if (!submittingCancel) {
+                setShowCancelConfirm(false);
+                setKeepScheduledAppointments(false);
+              }
+            }}
+            maxWidth="sm:max-w-lg"
+          >
+            <form onSubmit={handleSubmitCancelContract} className="space-y-4">
+              <div className="rounded-xl border border-rose-200 bg-rose-50/80 p-3.5 text-xs leading-5 text-rose-950">
+                <p className="font-bold text-rose-900">Confirmação de cancelamento</p>
+                <p className="mt-1 text-rose-800">
+                  {keepScheduledAppointments
+                    ? openLinkedAppointmentsCount > 0
+                      ? `O contrato será cancelado, mas os ${openLinkedAppointmentsCount} agendamento(s) em aberto continuarão ativos na agenda como atendimentos avulsos.`
+                      : 'O contrato será cancelado e eventuais agendamentos futuros serão mantidos na agenda como avulsos.'
+                    : openLinkedAppointmentsCount > 0
+                      ? `Ao confirmar, este contrato e os ${openLinkedAppointmentsCount} agendamento(s) em aberto vinculados na agenda serão cancelados juntos (sessões já concluídas permanecem registradas).`
+                      : 'Ao confirmar, este contrato e quaisquer agendamentos em aberto vinculados serão cancelados juntos (sessões já concluídas permanecem registradas).'}
+                </p>
+              </div>
+
+              <div>
+                <label htmlFor="cancel-contract-reason" className={labelClass}>
+                  Motivo do cancelamento do contrato *
+                </label>
+                <input
+                  id="cancel-contract-reason"
+                  required
+                  autoFocus
+                  minLength={3}
+                  disabled={submittingCancel}
+                  value={cancelReason}
+                  onChange={e => setCancelReason(e.target.value)}
+                  placeholder="Ex: Solicitação de cancelamento pelo tutor"
+                  className={inputClass}
+                />
+              </div>
+
+              <label
+                htmlFor="cancel-keep-scheduled-appointments"
+                className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-zinc-200 bg-zinc-50/80 p-3 text-xs text-zinc-800 transition hover:border-rose-200 hover:bg-rose-50/40"
+              >
+                <input
+                  id="cancel-keep-scheduled-appointments"
+                  type="checkbox"
+                  disabled={submittingCancel}
+                  checked={keepScheduledAppointments}
+                  onChange={e => setKeepScheduledAppointments(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 shrink-0 rounded border-zinc-300 text-rose-600 focus:ring-rose-500"
+                />
+                <span className="space-y-0.5">
+                  <span className="block font-semibold text-zinc-900">
+                    Não cancelar os agendamentos na agenda
+                  </span>
+                  <span className="block text-[11px] leading-4 text-zinc-600">
+                    Marque esta opção se quiser manter os horários futuros na agenda como atendimentos avulsos.
+                  </span>
+                </span>
+              </label>
+
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t border-slate-100 pt-3">
+                <button
+                  type="button"
+                  disabled={submittingCancel}
+                  onClick={() => {
+                    setShowCancelConfirm(false);
+                    setKeepScheduledAppointments(false);
+                  }}
+                  className={secondaryButton}
+                >
+                  Voltar
+                </button>
+                <button
+                  type="submit"
+                  disabled={submittingCancel}
+                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-rose-700 disabled:opacity-50 cursor-pointer"
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                  {submittingCancel ? 'Cancelando...' : 'Confirmar Cancelamento'}
+                </button>
+              </div>
+            </form>
+          </Modal>
+        );
+      })()}
       {receiptTarget && (
         <Modal
           title={receiptTarget.isGroup ? 'Confirmar recebimento do grupo' : 'Confirmar recebimento do pacote'}
