@@ -1,4 +1,51 @@
-import type { Appointment } from './types';
+import type { Appointment, Pet, Tutor } from './types';
+
+export const parseTaxiAddressParts = (addr?: string | null) => {
+  if (!addr) return { street: '', neighborhood: '' };
+  if (addr.includes(' - ')) {
+    const parts = addr.split(' - ');
+    return { street: parts[0].trim(), neighborhood: parts.slice(1).join(' - ').trim() };
+  }
+  return { street: addr.trim(), neighborhood: '' };
+};
+
+export const extractCustomerTaxiAddress = (customer?: Pick<Tutor, 'address' | 'reference'> | null) => {
+  const parsedAddr = parseTaxiAddressParts(customer?.address);
+  const hasAddr = Boolean(customer?.address && customer.address.trim().length > 0);
+  return {
+    customerStreet: parsedAddr.street,
+    customerNeighborhood: parsedAddr.neighborhood,
+    customerReference: customer?.reference || '',
+    saveAddressToCustomer: !hasAddr,
+  };
+};
+
+export const resolveReceptionBookingSelection = (
+  result: { tutor: Pick<Tutor, 'id' | 'name' | 'phone' | 'address' | 'reference'>; pet: Pet | null },
+  currentTutorId?: string | null,
+  currentPets: Pet[] = [],
+) => {
+  const resolvedTutor = result.pet?.customer || result.tutor;
+  const addressFields = extractCustomerTaxiAddress(resolvedTutor);
+  const nextTutor: Pick<Tutor, 'id' | 'name' | 'phone' | 'address' | 'reference'> = {
+    id: resolvedTutor.id,
+    name: resolvedTutor.name,
+    phone: resolvedTutor.phone,
+    address: resolvedTutor.address ?? null,
+    reference: resolvedTutor.reference ?? null,
+  };
+  const nextPets = result.pet
+    ? currentTutorId === resolvedTutor.id
+      ? [result.pet, ...currentPets.filter(existingPet => existingPet.id !== result.pet!.id)]
+      : [result.pet]
+    : currentPets;
+  return {
+    selectedTutor: nextTutor,
+    pets: nextPets,
+    petId: result.pet?.id || '',
+    addressFields,
+  };
+};
 
 export const isPickupMode = (mode?: string | null) =>
   mode === 'pickup_only' || mode === 'pickup' || mode === 'round_trip' || mode === 'both';

@@ -1072,7 +1072,16 @@ export class PetshopService {
         const tutor = customerId ? await tx.customer.findUnique({ where: { id: customerId } }) : await tx.customer.create({ data: tutorData! });
         if (!tutor) throw new BadRequestException('Tutor não encontrado.');
         const pet = petData ? await tx.pet.create({ data: { ...petData, customerId: tutor.id }, include: { customer: true } }) : null;
-        return { tutor: { id: tutor.id, name: tutor.name, phone: tutor.phone }, pet };
+        return {
+          tutor: {
+            id: tutor.id,
+            name: tutor.name,
+            phone: tutor.phone,
+            address: tutor.address ?? null,
+            reference: tutor.reference ?? null,
+          },
+          pet,
+        };
       });
     } catch (error: any) {
       if (error?.code === 'P2002') throw new ConflictException('Já existe um tutor com este telefone ou documento. Use Buscar por telefone para aproveitar o cadastro.');
@@ -2133,6 +2142,15 @@ export class PetshopService {
       ? { ...data.transport, fee: await readTaxiDefaultFee(prisma) }
       : data.transport;
     const transport = normalizeTransport(transportInput);
+    const customerAddressInput = data?.customerAddress !== undefined ? String(data.customerAddress || '').trim() : undefined;
+    const customerReferenceInput = data?.customerReference !== undefined ? String(data.customerReference || '').trim() : undefined;
+    const effectiveAddress = customerAddressInput || transport?.address || pet.customer?.address || '';
+    const customerHadNoAddress = !pet.customer?.address || pet.customer.address.trim().length === 0;
+    const shouldSaveToCustomer =
+      data?.saveAddressToCustomer === true ||
+      (customerHadNoAddress && data?.saveAddressToCustomer !== false && Boolean(effectiveAddress));
+    const nextCustomerAddress = customerAddressInput || transport?.address || undefined;
+    const nextCustomerReference = customerReferenceInput || transport?.reference || undefined;
     const professionalId = optionalText(data.professionalId) ?? null;
 
     const packageSelections: Record<string, string> =
@@ -2222,6 +2240,20 @@ export class PetshopService {
         } });
         if (conflict) throw new ConflictException('Este profissional já possui um atendimento nesse horário.');
       }
+      if (
+        shouldSaveToCustomer &&
+        (nextCustomerAddress || nextCustomerReference) &&
+        typeof tx?.customer?.update === 'function'
+      ) {
+        await tx.customer.update({
+          where: { id: pet.customerId },
+          data: {
+            ...(nextCustomerAddress ? { address: nextCustomerAddress } : {}),
+            ...(nextCustomerReference ? { reference: nextCustomerReference } : {}),
+          },
+        });
+      }
+
       const app = await tx.petAppointment.create({
         data: {
           customerId: pet.customerId,

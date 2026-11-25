@@ -7,7 +7,16 @@ import { Modal, inputClass, labelClass, primaryButton, secondaryButton } from '.
 import { PhotoUploadField } from './PhotoUploadField';
 
 type ReceptionTutor = { id: string; name: string; phone: string; address?: string | null; reference?: string | null; notes?: string | null; photoUrl?: string | null; whatsappOptIn?: boolean };
-export type ReceptionResult = { tutor: { id: string; name: string; phone: string }; pet: Pet | null };
+export type ReceptionResult = {
+  tutor: {
+    id: string;
+    name: string;
+    phone: string;
+    address?: string | null;
+    reference?: string | null;
+  };
+  pet: Pet | null;
+};
 
 export function ReceptionRegistrationModal({ includePet = false, onClose, onSaved }: {
   includePet?: boolean;

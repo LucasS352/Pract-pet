@@ -1,6 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { needsTaxiStop, packageTransportCovers, packageTransportUiMode, summarizeTaxiAppointments } from '../src/pages/petshop/taxi-operations.ts';
+import {
+  extractCustomerTaxiAddress,
+  needsTaxiStop,
+  packageTransportCovers,
+  packageTransportUiMode,
+  parseTaxiAddressParts,
+  resolveReceptionBookingSelection,
+  summarizeTaxiAppointments,
+} from '../src/pages/petshop/taxi-operations.ts';
 
 const appointment = (id, status, mode, startsAt = '2026-11-09T17:00:00.000Z') => ({
   id, status, startsAt, transport: { enabled: true, mode },
@@ -61,4 +69,61 @@ test('transporte de pacote exige modalidade compatível e mantém o valor do sel
   assert.equal(packageTransportCovers('pickup', 'pickup_only'), true);
   assert.equal(packageTransportCovers('both', 'round_trip'), true);
   assert.equal(packageTransportCovers('pickup', null), false);
+});
+
+test('pré-preenche endereço do Táxi Dog imediatamente após cadastrar tutor e pet no modal de recepção', () => {
+  const newTutor = {
+    id: 'tutor-novo',
+    name: 'Juliana Moriga',
+    phone: '14991146769',
+    address: 'Nagib Sahad, 576 - Cohab - Campo do Tiro',
+    reference: 'Próximo ao Campo Orlandão, Ap 12',
+  };
+  const newPet = {
+    id: 'pet-novo',
+    customerId: 'tutor-novo',
+    name: 'Belinha',
+    species: 'dog',
+    customer: newTutor,
+  };
+
+  const selection = resolveReceptionBookingSelection({ tutor: newTutor, pet: newPet });
+  assert.equal(selection.selectedTutor.id, 'tutor-novo');
+  assert.equal(selection.petId, 'pet-novo');
+  assert.equal(selection.pets.length, 1);
+  assert.deepEqual(selection.addressFields, {
+    customerStreet: 'Nagib Sahad, 576',
+    customerNeighborhood: 'Cohab - Campo do Tiro',
+    customerReference: 'Próximo ao Campo Orlandão, Ap 12',
+    saveAddressToCustomer: false,
+  });
+});
+
+test('preserva pets existentes ao cadastrar segundo pet do mesmo tutor e extrai endereço ao cadastrar só o tutor', () => {
+  const existingTutor = {
+    id: 'tutor-1',
+    name: 'Adriana',
+    phone: '11999990000',
+    address: 'Rua das Flores, 45 - Centro',
+    reference: 'Portão verde',
+  };
+  const firstPet = { id: 'pet-1', customerId: 'tutor-1', name: 'Mel', species: 'dog', customer: existingTutor };
+  const secondPet = { id: 'pet-2', customerId: 'tutor-1', name: 'Thor', species: 'dog', customer: existingTutor };
+
+  const secondPetSelection = resolveReceptionBookingSelection(
+    { tutor: existingTutor, pet: secondPet },
+    'tutor-1',
+    [firstPet],
+  );
+  assert.deepEqual(secondPetSelection.pets.map(p => p.id), ['pet-2', 'pet-1']);
+  assert.equal(secondPetSelection.addressFields.customerStreet, 'Rua das Flores, 45');
+  assert.equal(secondPetSelection.addressFields.customerNeighborhood, 'Centro');
+
+  const tutorOnlySelection = resolveReceptionBookingSelection(
+    { tutor: { id: 'tutor-2', name: 'Carlos', phone: '11988887777', address: null, reference: null }, pet: null },
+  );
+  assert.equal(tutorOnlySelection.petId, '');
+  assert.equal(tutorOnlySelection.addressFields.saveAddressToCustomer, true);
+  assert.deepEqual(parseTaxiAddressParts('Rua Sem Bairro, 10'), { street: 'Rua Sem Bairro, 10', neighborhood: '' });
+  assert.equal(extractCustomerTaxiAddress(null).saveAddressToCustomer, true);
 });

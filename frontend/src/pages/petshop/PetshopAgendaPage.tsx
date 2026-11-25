@@ -82,7 +82,13 @@ import {
 } from './ui';
 import { PhotoUploadField } from './PhotoUploadField';
 import { TaxiDogWidget } from './TaxiDogWidget';
-import { packageTransportCovers, packageTransportUiMode } from './taxi-operations';
+import {
+  extractCustomerTaxiAddress,
+  packageTransportCovers,
+  packageTransportUiMode,
+  parseTaxiAddressParts as parseAddressParts,
+  resolveReceptionBookingSelection,
+} from './taxi-operations';
 
 type ViewMode = 'day' | 'week' | 'timeline' | 'professionals';
 type FrequentBookingTutor = Pick<Tutor, 'id' | 'name' | 'phone'> & {
@@ -317,7 +323,7 @@ export default function PetshopAgendaPage() {
 
   const [items, setItems] = useState<Appointment[]>([]);
   const [pets, setPets] = useState<Pet[]>([]);
-  const [selectedTutor, setSelectedTutor] = useState<Pick<Tutor, 'id' | 'name' | 'phone'> | null>(null);
+  const [selectedTutor, setSelectedTutor] = useState<Pick<Tutor, 'id' | 'name' | 'phone' | 'address' | 'reference'> | null>(null);
   const [tutorQuery, setTutorQuery] = useState('');
   const [tutorResults, setTutorResults] = useState<Array<Pick<Tutor, 'id' | 'name' | 'phone'>>>([]);
   const [searchingTutors, setSearchingTutors] = useState(false);
@@ -556,15 +562,6 @@ export default function PetshopAgendaPage() {
     pkg.transport?.enabled && form.serviceIds.some(serviceId => packageSelections[serviceId] === pkg.id),
   ), [availablePackages, form.serviceIds, packageSelections]);
 
-  const parseAddressParts = (addr?: string | null) => {
-    if (!addr) return { street: '', neighborhood: '' };
-    if (addr.includes(' - ')) {
-      const parts = addr.split(' - ');
-      return { street: parts[0].trim(), neighborhood: parts.slice(1).join(' - ').trim() };
-    }
-    return { street: addr.trim(), neighborhood: '' };
-  };
-
   // A troca de pet/data invalida a consulta anterior e sua cobertura.
   useEffect(() => {
     setAvailablePackages([]);
@@ -699,11 +696,12 @@ export default function PetshopAgendaPage() {
     return () => { window.clearTimeout(timer); controller.abort(); };
   }, [openNew, selectedTutor, tutorQuery]);
 
-  const chooseTutor = async (tutor: Pick<Tutor, 'id' | 'name' | 'phone'>) => {
+  const chooseTutor = async (tutor: Pick<Tutor, 'id' | 'name' | 'phone' | 'address' | 'reference'>) => {
     const request = ++petsRequest.current;
     bookingPetsController.current?.abort();
     const controller = new AbortController();
     bookingPetsController.current = controller;
+    const tutorAddressFields = extractCustomerTaxiAddress(tutor);
     transportEdited.current = false;
     setSelectedTutor(tutor);
     setShowTutorDirectory(false);
@@ -713,7 +711,17 @@ export default function PetshopAgendaPage() {
     setBookingPetsError(false);
     setAvailablePackages([]);
     setPackageSelections({});
-    setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: taxiDefaultFee, transportCoveredByPackage: false, transportNotes: '' }));
+    setForm(current => ({
+      ...current,
+      petId: '',
+      serviceIds: [],
+      transportEnabled: false,
+      transportMode: 'both',
+      transportFee: taxiDefaultFee,
+      transportCoveredByPackage: false,
+      ...tutorAddressFields,
+      transportNotes: '',
+    }));
     try {
       const { data } = await api.get<Pet[]>('/petshop/pets', { params: { customerId: tutor.id }, signal: controller.signal });
       if (request === petsRequest.current && !controller.signal.aborted) setPets(Array.isArray(data) ? data.filter(pet => pet.customerId === tutor.id) : []);
@@ -727,8 +735,7 @@ export default function PetshopAgendaPage() {
   const selectBookingPet = (pet: Pet) => {
     if (pet.customerId !== selectedTutor?.id) return;
     transportEdited.current = false;
-    const parsedAddr = parseAddressParts(pet.customer?.address);
-    const hasAddr = Boolean(pet.customer?.address?.trim());
+    const addressFields = extractCustomerTaxiAddress(pet.customer);
     setAvailablePackages([]);
     setPackageSelections({});
     setForm(current => ({
@@ -739,11 +746,8 @@ export default function PetshopAgendaPage() {
       transportMode: 'both',
       transportFee: taxiDefaultFee,
       transportCoveredByPackage: false,
-      customerStreet: parsedAddr.street,
-      customerNeighborhood: parsedAddr.neighborhood,
-      customerReference: pet.customer?.reference || '',
+      ...addressFields,
       transportNotes: '',
-      saveAddressToCustomer: !hasAddr,
     }));
   };
 
@@ -804,14 +808,17 @@ export default function PetshopAgendaPage() {
         api.get<Pet>(`/petshop/pets/${pid}`).then(({ data: pet }) => {
           if (request !== petsRequest.current) return;
           setPets([pet]);
-          setSelectedTutor({ id: pet.customer.id, name: pet.customer.name, phone: pet.customer.phone });
-          const address = parseAddressParts(pet.customer.address);
+          setSelectedTutor({
+            id: pet.customer.id,
+            name: pet.customer.name,
+            phone: pet.customer.phone,
+            address: pet.customer.address ?? null,
+            reference: pet.customer.reference ?? null,
+          });
+          const addressFields = extractCustomerTaxiAddress(pet.customer);
           setForm(current => current.petId === pid ? {
             ...current,
-            customerStreet: address.street,
-            customerNeighborhood: address.neighborhood,
-            customerReference: pet.customer.reference || '',
-            saveAddressToCustomer: !pet.customer.address?.trim(),
+            ...addressFields,
           } : current);
         }).catch(() => { if (request === petsRequest.current) toast.error('Não foi possível carregar o pet do agendamento.'); });
       }
@@ -4576,15 +4583,28 @@ export default function PetshopAgendaPage() {
       )}
 
       {/* 10. MODAL DE NOVO AGENDAMENTO */}
-      {openReception && <ReceptionRegistrationModal includePet onClose={() => setOpenReception(false)} onSaved={({ pet }) => {
-        if (pet) {
+      {openReception && <ReceptionRegistrationModal includePet onClose={() => setOpenReception(false)} onSaved={result => {
+        if (result.pet) {
+          const selection = resolveReceptionBookingSelection(result, selectedTutor?.id, pets);
           ++petsRequest.current;
           transportEdited.current = false;
-          setPets([pet]);
-          setSelectedTutor({ id: pet.customer.id, name: pet.customer.name, phone: pet.customer.phone });
+          setPets(selection.pets);
+          setSelectedTutor(selection.selectedTutor);
           setAvailablePackages([]);
           setPackageSelections({});
-          setForm(current => ({ ...current, petId: pet.id, serviceIds: [], transportEnabled: false, transportMode: 'both', transportFee: taxiDefaultFee, transportCoveredByPackage: false, transportNotes: '' }));
+          setForm(current => ({
+            ...current,
+            petId: selection.petId,
+            serviceIds: [],
+            transportEnabled: false,
+            transportMode: 'both',
+            transportFee: taxiDefaultFee,
+            transportCoveredByPackage: false,
+            ...selection.addressFields,
+            transportNotes: '',
+          }));
+        } else if (result.tutor?.id) {
+          void chooseTutor(result.tutor);
         }
         setOpenReception(false);
       }} />}
@@ -4634,7 +4654,19 @@ export default function PetshopAgendaPage() {
                     setBookingPetsError(false);
                     setAvailablePackages([]);
                     setPackageSelections({});
-                    setForm(current => ({ ...current, petId: '', serviceIds: [], transportEnabled: false, transportCoveredByPackage: false }));
+                    setForm(current => ({
+                      ...current,
+                      petId: '',
+                      serviceIds: [],
+                      transportEnabled: false,
+                      transportCoveredByPackage: false,
+                      transportFee: taxiDefaultFee,
+                      customerStreet: '',
+                      customerNeighborhood: '',
+                      customerReference: '',
+                      transportNotes: '',
+                      saveAddressToCustomer: true,
+                    }));
                   }}>Trocar</button>
                 </div>
               ) : (
@@ -4992,11 +5024,29 @@ export default function PetshopAgendaPage() {
                       type="checkbox"
                       checked={form.transportEnabled}
                       onChange={e => {
+                        const enabled = e.target.checked;
                         transportEdited.current = true;
-                        setForm(prev => ({
-                          ...prev,
-                          transportEnabled: e.target.checked,
-                        }));
+                        setForm(prev => {
+                          if (enabled && !prev.customerStreet.trim() && !prev.customerNeighborhood.trim()) {
+                            const selectedPetObj = pets.find(p => p.id === prev.petId);
+                            const customerAddressFields = extractCustomerTaxiAddress(selectedPetObj?.customer || selectedTutor);
+                            if (
+                              customerAddressFields.customerStreet ||
+                              customerAddressFields.customerNeighborhood ||
+                              customerAddressFields.customerReference
+                            ) {
+                              return {
+                                ...prev,
+                                transportEnabled: true,
+                                ...customerAddressFields,
+                              };
+                            }
+                          }
+                          return {
+                            ...prev,
+                            transportEnabled: enabled,
+                          };
+                        });
                       }}
                       className="h-4 w-4 rounded accent-[#0d6e5a]"
                     />
